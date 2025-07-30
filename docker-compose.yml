@@ -4,8 +4,8 @@ services:
   memory-mcp:
     build: .
     volumes:
-      - ./config:/app/config
-      - ./data:/app/data
+      - ${HOME}/.claude-memory-mcp/config:/app/config
+      - ${HOME}/.claude-memory-mcp/data:/app/data
     environment:
       - MEMORY_FILE_PATH=/app/data/memory.json
       - MCP_CONFIG_DIR=/app/config
