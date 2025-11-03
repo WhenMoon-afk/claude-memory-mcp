@@ -42,7 +42,18 @@ Works with **Claude Desktop**, **Cursor**, **Windsurf**, or any MCP client.
 - Node.js ≥ 18
 - An **MCP-compatible client**
 
-### Setup
+### Quick Install (NPM)
+```bash
+npx @whenmoon-afk/memory-mcp
+```
+
+Or install globally:
+```bash
+npm install -g @whenmoon-afk/memory-mcp
+memory-mcp
+```
+
+### From Source
 ```bash
 git clone https://github.com/WhenMoon-afk/claude-memory-mcp.git
 cd claude-memory-mcp
@@ -56,8 +67,38 @@ npm run build
 
 ## Integrate with Your MCP Client
 
-Add to your client’s MCP config:
+Add to your client's MCP config:
 
+### Using NPM Package (Recommended)
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["@whenmoon-afk/memory-mcp"],
+      "env": {
+        "MEMORY_DB_PATH": "./memory.db"
+      }
+    }
+  }
+}
+```
+
+### Using Global Install
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "memory-mcp",
+      "env": {
+        "MEMORY_DB_PATH": "./memory.db"
+      }
+    }
+  }
+}
+```
+
+### From Source
 ```json
 {
   "mcpServers": {

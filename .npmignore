@@ -1,0 +1,53 @@
+# Source files (only dist/ should be published)
+src/
+tsconfig.json
+
+# Tests
+**/*.test.ts
+**/*.spec.ts
+**/*.test.js
+**/*.spec.js
+test/
+tests/
+__tests__/
+coverage/
+.nyc_output/
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git files
+.git/
+.gitignore
+.gitattributes
+
+# CI/CD
+.github/
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Database files (users will create their own)
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Build artifacts
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation (keep README, LICENSE)
+# But exclude internal planning docs (already in .gitignore)

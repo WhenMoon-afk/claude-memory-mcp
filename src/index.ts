@@ -33,7 +33,7 @@ const config = {
  */
 const server = new Server(
   {
-    name: '@memory-mcp/server',
+    name: '@whenmoon-afk/memory-mcp',
     version: '2.0.0',
   },
   {

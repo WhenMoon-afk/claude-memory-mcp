@@ -1,12 +1,17 @@
 {
-  "name": "@memory-mcp/server",
+  "name": "@whenmoon-afk/memory-mcp",
   "version": "2.0.0",
   "description": "Brain-inspired memory for AI agents - MCP server",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "memory-mcp": "./dist/index.js"
+    "memory-mcp": "dist/index.js"
   },
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -19,7 +24,8 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "release": "npm run test && npm run build",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
     "mcp",
@@ -34,7 +40,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/whenmoon-afk/claude-memory-mcp.git"
+    "url": "git+https://github.com/whenmoon-afk/claude-memory-mcp.git"
   },
   "bugs": {
     "url": "https://github.com/whenmoon-afk/claude-memory-mcp/issues"
@@ -58,5 +64,8 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
