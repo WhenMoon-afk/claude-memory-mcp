@@ -1,7 +1,7 @@
 # claude-memory-mcp
 
 **Local, Persistent Memory for Any MCP-Compatible AI**  
-A lightweight, **zero-cloud**, **token-efficient** Memory Control Protocol (MCP) server that gives your AI **durable, searchable, and context-aware memory** - entirely under your control.
+A lightweight, **zero-cloud**, **token-efficient** Model Context Protocol (MCP) server that gives your AI **durable, searchable, and context-aware memory** - entirely under your control.
 
 Built with **TypeScript**, **SQLite + FTS5**, and **no external dependencies**, it runs locally and stores everything in a single, portable `.db` file.
 
