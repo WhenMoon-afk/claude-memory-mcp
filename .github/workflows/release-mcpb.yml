@@ -82,9 +82,3 @@ jobs:
           - [Developer Guide](CLAUDE.md)
           - [Release Notes](RELEASE_NOTES.md)" \
             ${MCPB_FILE:+$MCPB_FILE}
-
-      - name: Publish to npm
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
