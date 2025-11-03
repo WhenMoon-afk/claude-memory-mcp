@@ -4,6 +4,7 @@ ECOSYSTEM_ARCHITECTURE.md
 *.design.md
 PLANNING.md
 NOTES.md
+claude.md
 
 # Local Claude Code configuration
 .claude/
