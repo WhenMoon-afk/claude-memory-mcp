@@ -1,11 +1,17 @@
 # claude-memory-mcp
 
-**Local, Persistent Memory for Any MCP-Compatible AI**  
+[![npm version](https://badge.fury.io/js/@whenmoon-afk%2Fmemory-mcp.svg)](https://www.npmjs.com/package/@whenmoon-afk/memory-mcp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org/)
+
+**Local, Persistent Memory for Any MCP-Compatible AI**
 A lightweight, **zero-cloud**, **token-efficient** Model Context Protocol (MCP) server that gives your AI **durable, searchable, and context-aware memory** - entirely under your control.
 
 Built with **TypeScript**, **SQLite + FTS5**, and **no external dependencies**, it runs locally and stores everything in a single, portable `.db` file.
 
 Works with **Claude Desktop**, **Cursor**, **Windsurf**, or any MCP client.
+
+📦 **Now available on npm**: Install with `npx @whenmoon-afk/memory-mcp`
 
 ---
 
@@ -40,20 +46,28 @@ Works with **Claude Desktop**, **Cursor**, **Windsurf**, or any MCP client.
 
 ### Prerequisites
 - Node.js ≥ 18
-- An **MCP-compatible client**
+- An **MCP-compatible client** (Claude Desktop, Cursor, Windsurf, etc.)
 
-### Quick Install (NPM)
+### Option 1: NPM Package (Recommended)
+
+**Quick start with npx** (no installation needed):
 ```bash
 npx @whenmoon-afk/memory-mcp
 ```
 
-Or install globally:
+**Or install globally**:
 ```bash
 npm install -g @whenmoon-afk/memory-mcp
+```
+
+Then run:
+```bash
 memory-mcp
 ```
 
-### From Source
+### Option 2: From Source
+
+For development or customization:
 ```bash
 git clone https://github.com/WhenMoon-afk/claude-memory-mcp.git
 cd claude-memory-mcp
@@ -67,7 +81,13 @@ npm run build
 
 ## Integrate with Your MCP Client
 
-Add to your client's MCP config:
+Add to your client's MCP config file:
+
+**Claude Desktop**:
+- macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+- Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+
+**Cursor/Windsurf**: Check your editor's MCP settings
 
 ### Using NPM Package (Recommended)
 ```json
@@ -259,5 +279,32 @@ For sensitive data, use OS-level encryption (FileVault, BitLocker).
 4. **Reference provenance**: Track source and context for audit trails.
 5. **Backup `memory.db`** regularly — it's just a file!
 
+---
 
+## Quick Links
 
+- 📦 **NPM Package**: https://www.npmjs.com/package/@whenmoon-afk/memory-mcp
+- 🐙 **GitHub Repository**: https://github.com/WhenMoon-afk/claude-memory-mcp
+- 🐛 **Report Issues**: https://github.com/WhenMoon-afk/claude-memory-mcp/issues
+- 📖 **MCP Documentation**: https://modelcontextprotocol.io
+
+---
+
+## Contributing
+
+Contributions are welcome! Feel free to:
+- Report bugs or request features via [GitHub Issues](https://github.com/WhenMoon-afk/claude-memory-mcp/issues)
+- Submit pull requests for improvements
+- Share your use cases and feedback
+
+---
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+**Copyright (c) 2025 WhenMoon-afk**
+
+---
+
+**Built with ❤️ for the MCP community**
