@@ -180,6 +180,14 @@ Your AI **knows what it knows** — and can ask for more.
 
 ---
 
+### Security
+
+This is a **local-only** MCP server.  
+Data is stored in a plain SQLite file (`memory.db`).  
+For sensitive data, use OS-level encryption (FileVault, BitLocker).
+
+---
+
 ## Best Practices
 
 1. **Start with `max_tokens: 1000`** — adjust per model.
@@ -188,7 +196,5 @@ Your AI **knows what it knows** — and can ask for more.
 4. **Reference provenance**: _“From our chat on Nov 3…”_
 5. **Backup `memory.db`** regularly.
 
----
 
-Persistent memory. Local control. Token smart.
 
