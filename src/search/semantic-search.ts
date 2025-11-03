@@ -10,18 +10,44 @@ import type {
   SearchOptionsInternal,
   SearchFilters,
   MemoryRow,
+  Entity,
+  Provenance,
 } from '../types/index.js';
 import { deserializeMetadata } from '../database/connection.js';
 import { calculateHotScore } from '../scoring/importance.js';
+
+// Database row types (before deserialization)
+interface EntityRow {
+  id: string;
+  name: string;
+  type: string;
+  metadata: string;
+  created_at: number;
+}
+
+interface ProvenanceRow {
+  id: string;
+  memory_id: string;
+  operation: string;
+  timestamp: number;
+  source: string;
+  context: string | null;
+  user_id: string | null;
+  changes: string | null;
+}
+
+interface EntityJoinRow extends EntityRow {
+  memory_id: string;
+}
 
 /**
  * Perform full-text search on memories using FTS5
  * Returns: { results: MemorySearchResult[], totalCount: number }
  */
-export async function semanticSearch(
+export function semanticSearch(
   db: Database.Database,
   options: SearchOptionsInternal
-): Promise<{ results: MemorySearchResult[]; totalCount: number }> {
+): { results: MemorySearchResult[]; totalCount: number } {
   const {
     query,
     type,
@@ -42,7 +68,7 @@ export async function semanticSearch(
   if (entities !== undefined) filters.entities = entities;
   if (minImportance !== undefined) filters.minImportance = minImportance;
 
-  const candidates = await getFilteredCandidates(db, ftsQuery, filters);
+  const candidates = getFilteredCandidates(db, ftsQuery, filters);
 
   // Calculate hybrid scores (FTS rank + importance + recency)
   const scoredResults = candidates.map((memory) => {
@@ -66,7 +92,7 @@ export async function semanticSearch(
   const paginatedResults = scoredResults.slice(offset, offset + limit);
 
   // Enrich with entities and provenance
-  const enrichedResults = await enrichResults(db, paginatedResults);
+  const enrichedResults = enrichResults(db, paginatedResults);
 
   return {
     results: enrichedResults,
@@ -77,11 +103,11 @@ export async function semanticSearch(
 /**
  * Get filtered candidate memories using FTS5
  */
-async function getFilteredCandidates(
+function getFilteredCandidates(
   db: Database.Database,
   ftsQuery: string,
   filters: SearchFilters
-): Promise<Memory[]> {
+): Memory[] {
   const { type, entities, minImportance, includeExpired } = filters;
 
   // Use FTS5 for keyword search
@@ -177,20 +203,20 @@ function calculateRecencyScore(lastAccessed: number, now: number): number {
 /**
  * Enrich results with entities and provenance
  */
-async function enrichResults(
+function enrichResults(
   db: Database.Database,
   results: MemorySearchResult[]
-): Promise<MemorySearchResult[]> {
+): MemorySearchResult[] {
   if (results.length === 0) {
     return results;
   }
 
   // Batch fetch entities
   const memoryIds = results.map((r) => r.id);
-  const entitiesMap = await batchFetchEntities(db, memoryIds);
+  const entitiesMap = batchFetchEntities(db, memoryIds);
 
   // Batch fetch provenance (last 3 records per memory)
-  const provenanceMap = await batchFetchProvenance(db, memoryIds);
+  const provenanceMap = batchFetchProvenance(db, memoryIds);
 
   return results.map((result) => ({
     ...result,
@@ -202,11 +228,11 @@ async function enrichResults(
 /**
  * Batch fetch entities for memories
  */
-async function batchFetchEntities(
+function batchFetchEntities(
   db: Database.Database,
   memoryIds: string[]
-): Promise<Map<string, any[]>> {
-  const entitiesMap = new Map<string, any[]>();
+): Map<string, Entity[]> {
+  const entitiesMap = new Map<string, Entity[]>();
 
   if (memoryIds.length === 0) {
     return entitiesMap;
@@ -221,7 +247,7 @@ async function batchFetchEntities(
     ORDER BY e.name
   `;
 
-  const rows = db.prepare(query).all(...memoryIds) as any[];
+  const rows = db.prepare(query).all(...memoryIds) as unknown as EntityJoinRow[];
 
   for (const row of rows) {
     const memoryId = row.memory_id;
@@ -231,7 +257,7 @@ async function batchFetchEntities(
     entitiesMap.get(memoryId)?.push({
       id: row.id,
       name: row.name,
-      type: row.type,
+      type: row.type as Entity['type'],
       metadata: deserializeMetadata(row.metadata),
       created_at: row.created_at,
     });
@@ -243,11 +269,11 @@ async function batchFetchEntities(
 /**
  * Batch fetch provenance for memories
  */
-async function batchFetchProvenance(
+function batchFetchProvenance(
   db: Database.Database,
   memoryIds: string[]
-): Promise<Map<string, any[]>> {
-  const provenanceMap = new Map<string, any[]>();
+): Map<string, Provenance[]> {
+  const provenanceMap = new Map<string, Provenance[]>();
 
   if (memoryIds.length === 0) {
     return provenanceMap;
@@ -261,7 +287,7 @@ async function batchFetchProvenance(
     ORDER BY memory_id, timestamp DESC
   `;
 
-  const rows = db.prepare(query).all(...memoryIds) as any[];
+  const rows = db.prepare(query).all(...memoryIds) as unknown as ProvenanceRow[];
 
   for (const row of rows) {
     const memoryId = row.memory_id;
@@ -275,7 +301,7 @@ async function batchFetchProvenance(
       provenance.push({
         id: row.id,
         memory_id: row.memory_id,
-        operation: row.operation,
+        operation: row.operation as Provenance['operation'],
         timestamp: row.timestamp,
         source: row.source,
         context: row.context,

@@ -58,18 +58,18 @@ export class ContextManager {
       } catch {
         return false;
       }
-    }) || possiblePaths[0]!;
+    }) || join(__dirname, '..', 'contexts');
   }
 
   /**
    * Load contexts for an operation
    */
-  async loadContextsForOperation(operation: string): Promise<string> {
+  loadContextsForOperation(operation: string): string {
     const contextTypes = OPERATION_CONTEXTS[operation] || ['minimal'];
     const contexts: string[] = [];
 
     for (const type of contextTypes) {
-      const context = await this.loadContext(type);
+      const context = this.loadContext(type);
       contexts.push(`## ${type.toUpperCase()} CONTEXT\n\n${context.content}`);
     }
 
@@ -82,7 +82,8 @@ export class ContextManager {
   getOperationInfo(operation: string): OperationContext {
     const contextTypes = OPERATION_CONTEXTS[operation] || ['minimal'];
     const estimatedTokens = contextTypes.reduce((sum, type) => {
-      return sum + CONTEXT_INFO[type]!.estimatedTokens;
+      const info = CONTEXT_INFO[type];
+      return sum + (info?.estimatedTokens ?? 0);
     }, 0);
 
     return {
@@ -95,7 +96,7 @@ export class ContextManager {
   /**
    * Load a single context (with caching)
    */
-  private async loadContext(type: ContextType): Promise<LoadedContext> {
+  private loadContext(type: ContextType): LoadedContext {
     const now = Date.now();
 
     // Check cache
@@ -136,7 +137,7 @@ export class ContextManager {
   /**
    * Preload contexts for multiple operations
    */
-  async preloadContexts(operations: string[]): Promise<void> {
+  preloadContexts(operations: string[]): void {
     const uniqueContexts = new Set<ContextType>();
 
     for (const operation of operations) {
@@ -144,9 +145,7 @@ export class ContextManager {
       contextTypes.forEach((type) => uniqueContexts.add(type));
     }
 
-    await Promise.all(
-      Array.from(uniqueContexts).map((type) => this.loadContext(type))
-    );
+    Array.from(uniqueContexts).forEach((type) => this.loadContext(type));
   }
 
   /**
@@ -201,7 +200,8 @@ export class ContextManager {
   estimateTokens(operation: string): number {
     const contextTypes = OPERATION_CONTEXTS[operation] || ['minimal'];
     return contextTypes.reduce((sum, type) => {
-      return sum + CONTEXT_INFO[type]!.estimatedTokens;
+      const info = CONTEXT_INFO[type];
+      return sum + (info?.estimatedTokens ?? 0);
     }, 0);
   }
 }

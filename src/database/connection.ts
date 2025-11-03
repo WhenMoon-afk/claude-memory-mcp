@@ -33,7 +33,7 @@ export function getDatabase(path: string): Database.Database {
 
     // Open database
     dbInstance = new Database(path, {
-      verbose: process.env['NODE_ENV'] === 'development' ? console.log : undefined,
+      verbose: process.env['NODE_ENV'] === 'development' ? () => {} : undefined,
     });
 
     // Initialize schema
@@ -261,7 +261,7 @@ export function backupDatabase(db: Database.Database, backupPath: string): void 
       mkdirSync(dir, { recursive: true });
     }
 
-    db.backup(backupPath);
+    void db.backup(backupPath);
   } catch (error) {
     throw new DatabaseError('Failed to backup database', {
       backupPath,
@@ -282,7 +282,7 @@ export function restoreDatabase(sourcePath: string, targetPath: string): void {
     const sourceDb = new Database(sourcePath, { readonly: true });
     const targetDb = new Database(targetPath);
 
-    sourceDb.backup(targetPath);
+    void sourceDb.backup(targetPath);
 
     sourceDb.close();
     targetDb.close();

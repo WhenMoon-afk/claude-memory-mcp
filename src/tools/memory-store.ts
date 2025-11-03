@@ -28,6 +28,29 @@ import { getPluginManager } from '../core/plugin-manager.js';
 import { generateSummary } from '../extractors/summary-generator.js';
 import { formatMemory } from './response-formatter.js';
 
+// Database row types (raw, before deserialization)
+interface EntityRow {
+  id: string;
+  name: string;
+  type: string;
+  metadata: string;
+  created_at: number;
+}
+
+interface MemoryRowDB {
+  id: string;
+  content: string;
+  summary: string;
+  type: string;
+  importance: number;
+  created_at: number;
+  last_accessed: number;
+  access_count: number;
+  expires_at: number | null;
+  metadata: string;
+  is_deleted: number;
+}
+
 /**
  * Store or update a memory
  * If input.id is provided, updates existing memory
@@ -56,7 +79,7 @@ async function createMemory(
 ): Promise<StandardMemory> {
   // Execute before_store hooks
   const pluginManager = getPluginManager();
-  const processedInput = (await pluginManager.executeHooks('before_store', input)) as MemoryInput;
+  const processedInput = (await pluginManager.executeHooks('before_store', input));
 
   // Validate content
   const validation = validateContent(processedInput.content, processedInput.type);
@@ -137,18 +160,18 @@ async function createMemory(
   // Create or link entities
   const entityObjects: Entity[] = [];
   for (const entityName of entities) {
-    const entityId = await createOrGetEntity(db, entityName, normalizedContent);
+    const entityId = createOrGetEntity(db, entityName, normalizedContent);
 
     // Fetch entity details
     const entityRow = db
       .prepare('SELECT * FROM entities WHERE id = ?')
-      .get(entityId) as any;
+      .get(entityId) as EntityRow | undefined;
 
     if (entityRow) {
       entityObjects.push({
         id: entityRow.id,
         name: entityRow.name,
-        type: entityRow.type,
+        type: entityRow.type as Entity['type'],
         metadata: deserializeMetadata(entityRow.metadata),
         created_at: entityRow.created_at,
       });
@@ -216,12 +239,12 @@ async function updateMemory(
   input: MemoryInput
 ): Promise<StandardMemory> {
   const pluginManager = getPluginManager();
-  const processedInput = (await pluginManager.executeHooks('before_update', input)) as MemoryInput;
+  const processedInput = (await pluginManager.executeHooks('before_update', input));
 
   // Check if memory exists
   const existing = db
     .prepare('SELECT * FROM memories WHERE id = ? AND is_deleted = 0')
-    .get(processedInput.id!) as any;
+    .get(processedInput.id ?? '') as MemoryRowDB | undefined;
 
   if (!existing) {
     throw new ValidationError(`Memory ${processedInput.id} not found or is deleted`);
@@ -293,7 +316,8 @@ async function updateMemory(
       newExpiresAt = new Date(processedInput.expires_at).getTime();
     } else {
       const newImportance = processedInput.importance ?? existing.importance;
-      newExpiresAt = calculateExpiresAt(processedInput.ttl_days!, newImportance, currentTime);
+      const ttlDays = processedInput.ttl_days ?? calculateTTLDays(newImportance);
+      newExpiresAt = calculateExpiresAt(ttlDays, newImportance, currentTime);
     }
 
     db.prepare('UPDATE memories SET expires_at = ? WHERE id = ?').run(
@@ -315,18 +339,18 @@ async function updateMemory(
 
     // Create new entity links
     for (const entityName of processedInput.entities) {
-      const entityId = await createOrGetEntity(db, entityName, newContent);
+      const entityId = createOrGetEntity(db, entityName, newContent);
 
       // Fetch entity details
       const entityRow = db
         .prepare('SELECT * FROM entities WHERE id = ?')
-        .get(entityId) as any;
+        .get(entityId) as EntityRow | undefined;
 
       if (entityRow) {
         entityObjects.push({
           id: entityRow.id,
           name: entityRow.name,
-          type: entityRow.type,
+          type: entityRow.type as Entity['type'],
           metadata: deserializeMetadata(entityRow.metadata),
           created_at: entityRow.created_at,
         });
@@ -348,12 +372,12 @@ async function updateMemory(
       WHERE me.memory_id = ?
     `
       )
-      .all(processedInput.id) as any[];
+      .all(processedInput.id) as EntityRow[];
 
     entityObjects = entityRows.map((row) => ({
       id: row.id,
       name: row.name,
-      type: row.type,
+      type: row.type as Entity['type'],
       metadata: deserializeMetadata(row.metadata),
       created_at: row.created_at,
     }));
@@ -384,10 +408,10 @@ async function updateMemory(
 
   // Build Memory object for formatting
   const memory: Memory = {
-    id: processedInput.id!,
+    id: processedInput.id ?? existing.id,
     content: newContent,
     summary: newSummary,
-    type: existing.type,
+    type: existing.type as Memory['type'],
     importance: processedInput.importance ?? existing.importance,
     created_at: existing.created_at,
     last_accessed: existing.last_accessed,
@@ -409,11 +433,11 @@ async function updateMemory(
 /**
  * Create or get existing entity
  */
-async function createOrGetEntity(
+function createOrGetEntity(
   db: Database.Database,
   name: string,
   context: string
-): Promise<string> {
+): string {
   // Check if entity exists
   const existing = db
     .prepare('SELECT id FROM entities WHERE name = ?')

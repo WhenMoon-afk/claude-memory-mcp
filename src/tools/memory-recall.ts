@@ -36,7 +36,7 @@ export async function memoryRecall(
     const processedOptions = (await pluginManager.executeHooks(
       'before_recall',
       options
-    )) as SearchOptions;
+    ));
 
     // Set defaults
     const limit = Math.min(processedOptions.limit || 20, 50); // Max 50
@@ -55,7 +55,7 @@ export async function memoryRecall(
     if (processedOptions.entities) searchOptions.entities = processedOptions.entities;
 
     console.error('[memoryRecall] Calling semanticSearch...');
-    const { results, totalCount } = await semanticSearch(db, searchOptions);
+    const { results, totalCount } = semanticSearch(db, searchOptions);
     console.error(`[memoryRecall] Search returned ${results.length} results, total count: ${totalCount}`);
 
     // Track access for hot context scoring

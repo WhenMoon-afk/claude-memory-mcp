@@ -18,7 +18,7 @@ import { getDatabase, closeDatabase } from './database/connection.js';
 import { memoryStore } from './tools/memory-store.js';
 import { memoryRecall } from './tools/memory-recall.js';
 import { memoryForget } from './tools/memory-forget.js';
-import type { MemoryConfig } from './types/index.js';
+import type { MemoryConfig, MemoryInput, SearchOptions } from './types/index.js';
 
 /**
  * Configuration from environment or defaults
@@ -53,7 +53,7 @@ let db: Database.Database;
 /**
  * Tool definitions
  */
-server.setRequestHandler(ListToolsRequestSchema, async () => {
+server.setRequestHandler(ListToolsRequestSchema, () => {
   return {
     tools: [
       {
@@ -182,14 +182,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     switch (name) {
       case 'memory_store': {
-        const result = await memoryStore(db, args as any);
+        const result = await memoryStore(db, args as unknown as MemoryInput);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
       }
 
       case 'memory_recall': {
-        const result = await memoryRecall(db, args as any);
+        const result = await memoryRecall(db, args as unknown as SearchOptions);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
