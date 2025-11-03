@@ -1,8 +1,6 @@
 # Memory MCP v2.0
  
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue)](https://www.typescriptlang.org/)
-~~[![MCPB Ready](https://img.shields.io/badge/MCPB-Ready-green)](https://github.com/anthropics/mcpb)~~ (Work in Progress)
 
 ## Overview
 
