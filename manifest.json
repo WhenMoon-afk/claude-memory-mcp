@@ -1,0 +1,81 @@
+{
+  "manifest_version": "0.3",
+  "name": "memory-mcp",
+  "version": "2.0.0",
+  "display_name": "Memory MCP",
+  "description": "Brain-inspired memory system with smart context loading and semantic search",
+  "long_description": "Memory MCP v2.0 is a complete TypeScript rewrite delivering 50% token savings through dual-response architecture and SQLite FTS5 search. Features intelligent token budgeting with max_tokens parameter, auto-generated 20-word summaries, hybrid scoring, and lightweight ~3MB bundle. Includes 3 streamlined MCP tools with automatic entity extraction, importance scoring, and full provenance tracking.",
+  "author": {
+    "name": "Memory MCP Contributors",
+    "url": "https://github.com/whenmoon-afk/claude-memory-mcp"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/whenmoon-afk/claude-memory-mcp",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/whenmoon-afk/claude-memory-mcp.git"
+  },
+  "documentation": "https://github.com/whenmoon-afk/claude-memory-mcp#readme",
+  "support": "https://github.com/whenmoon-afk/claude-memory-mcp/issues",
+  "keywords": ["memory", "context", "semantic-search", "fts5", "sqlite", "ai", "brain-inspired", "mcp"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "MEMORY_DB_PATH": "${user_config.databasePath}",
+        "DEFAULT_TTL_DAYS": "${user_config.defaultTTLDays}",
+        "ENABLE_AUTO_CAPTURE": "${user_config.enableAutoCapture}"
+      }
+    }
+  },
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  },
+  "user_config": {
+    "databasePath": {
+      "type": "string",
+      "title": "Database Path",
+      "description": "Path to SQLite database file for storing memories",
+      "default": "${HOME}/.memory-mcp/memory.db",
+      "required": false
+    },
+    "defaultTTLDays": {
+      "type": "number",
+      "title": "Default TTL (Days)",
+      "description": "Default time-to-live for memories in days",
+      "default": 90,
+      "required": false,
+      "min": 1,
+      "max": 3650
+    },
+    "enableAutoCapture": {
+      "type": "boolean",
+      "title": "Enable Auto-Capture",
+      "description": "Automatically extract and store facts from conversations",
+      "default": true,
+      "required": false
+    }
+  },
+  "tools_generated": false,
+  "tools": [
+    {
+      "name": "memory_store",
+      "description": "Store or update memories with automatic entity extraction, 20-word summary generation, and importance scoring. Provide 'id' to update existing memory, omit to create new. Supports fact, entity, relationship, and self memory types."
+    },
+    {
+      "name": "memory_recall",
+      "description": "Semantic search with dual-response pattern: returns 'index' (all matches as summaries) + 'details' (top matches with full content within token budget). Use max_tokens parameter to control response size (default: 1000). Supports filtering by type, entities, tags, and importance."
+    },
+    {
+      "name": "memory_forget",
+      "description": "Delete or archive memories by ID. Supports soft delete (preserves provenance) or hard delete (permanent removal). Can batch delete multiple IDs. Optional reason parameter for audit trail."
+    }
+  ]
+}

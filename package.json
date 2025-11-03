@@ -1,0 +1,68 @@
+{
+  "name": "@memory-mcp/server",
+  "version": "2.0.0",
+  "description": "Brain-inspired memory with smart context loading - MCPB bundle",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "memory-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc && npm run build:skill && npm run build:contexts",
+    "build:skill": "node -e \"const fs=require('fs'); fs.mkdirSync('dist/skill',{recursive:true}); fs.copyFileSync('skill/SKILL.md','dist/skill/SKILL.md');\"",
+    "build:contexts": "node -e \"const fs=require('fs'); const path=require('path'); fs.mkdirSync('dist/contexts',{recursive:true}); fs.readdirSync('src/contexts').filter(f=>f.endsWith('.md')).forEach(f=>fs.copyFileSync(path.join('src/contexts',f),path.join('dist/contexts',f)));\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "release": "npm run test && npm run build",
+    "clean": "rm -rf dist .mcpb-build *.mcpb"
+  },
+  "keywords": [
+    "mcp",
+    "memory",
+    "context",
+    "ai",
+    "semantic-search",
+    "fts5",
+    "sqlite",
+    "mcpb"
+  ],
+  "author": "Memory MCP Contributors",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/whenmoon-afk/claude-memory-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/whenmoon-afk/claude-memory-mcp/issues"
+  },
+  "homepage": "https://github.com/whenmoon-afk/claude-memory-mcp#readme",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "better-sqlite3": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "@vitest/coverage-v8": "^1.3.0",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.3.0"
+  },
+  "mcpb": {
+    "manifest": "mcpb/manifest.json"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

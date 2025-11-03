@@ -1,0 +1,68 @@
+# Development planning documents
+CLAUDE.md
+PROJECT_DESIGN_DOCUMENT.md
+ECOSYSTEM_ARCHITECTURE.md
+*.design.md
+PLANNING.md
+NOTES.md
+
+# Local Claude Code configuration
+.claude/
+
+# Node modules
+node_modules/
+dist/
+build/
+coverage/
+package-lock.json
+
+# MCPB bundle artifacts
+*.mcpb
+.mcpb-build/
+
+# Database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.cert
+secrets/
+.npmrc
+
+# OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+.project
+.settings/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test coverage
+.nyc_output/
+coverage/
+*.lcov
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.mcpb
