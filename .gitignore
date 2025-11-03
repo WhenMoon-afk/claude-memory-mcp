@@ -1,5 +1,4 @@
 # Development planning documents
-CLAUDE.md
 PROJECT_DESIGN_DOCUMENT.md
 ECOSYSTEM_ARCHITECTURE.md
 *.design.md
@@ -14,7 +13,6 @@ node_modules/
 dist/
 build/
 coverage/
-package-lock.json
 
 # MCPB bundle artifacts
 *.mcpb
