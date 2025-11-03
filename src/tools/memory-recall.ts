@@ -15,7 +15,6 @@ import type {
   Provenance,
 } from '../types/index.js';
 import { semanticSearch } from '../search/semantic-search.js';
-import { getPluginManager } from '../core/plugin-manager.js';
 import { formatMemory, formatMemoryList, getMemoryTokenCount } from './response-formatter.js';
 import { now } from '../database/connection.js';
 import { estimateTokens } from '../utils/token-estimator.js';
@@ -31,28 +30,21 @@ export async function memoryRecall(
   try {
     console.error('[memoryRecall] Starting recall with options:', JSON.stringify(options));
 
-    // Execute before_recall hooks
-    const pluginManager = getPluginManager();
-    const processedOptions = (await pluginManager.executeHooks(
-      'before_recall',
-      options
-    ));
-
     // Set defaults
-    const limit = Math.min(processedOptions.limit || 20, 50); // Max 50
-    const maxTokens = processedOptions.max_tokens || 1000; // Default 1k token budget
+    const limit = Math.min(options.limit || 20, 50); // Max 50
+    const maxTokens = options.max_tokens || 1000; // Default 1k token budget
 
     console.error(`[memoryRecall] Processed options - limit: ${limit}, maxTokens: ${maxTokens}`);
 
     // Perform semantic search (get all matches up to limit)
     const searchOptions: SearchOptionsInternal = {
-      query: processedOptions.query,
+      query: options.query,
       limit,
       offset: 0,
       includeExpired: false,
     };
-    if (processedOptions.type) searchOptions.type = processedOptions.type;
-    if (processedOptions.entities) searchOptions.entities = processedOptions.entities;
+    if (options.type) searchOptions.type = options.type;
+    if (options.entities) searchOptions.entities = options.entities;
 
     console.error('[memoryRecall] Calling semanticSearch...');
     const { results, totalCount } = semanticSearch(db, searchOptions);
@@ -124,13 +116,10 @@ export async function memoryRecall(
       total_count: totalCount,
       has_more: totalCount > limit,
       tokens_used: tokensUsed,
-      query: processedOptions.query,
+      query: options.query,
     };
 
     console.error(`[memoryRecall] Built response - index: ${index.length} items, details: ${details.length} items, tokens: ${tokensUsed}`);
-
-    // Execute after_recall hooks
-    await pluginManager.executeHooks('after_recall', response);
 
     console.error('[memoryRecall] Recall completed successfully');
     return response;

@@ -322,13 +322,6 @@ export function optimizeDatabase(db: Database.Database): void {
 }
 
 /**
- * Vacuum database to reclaim space
- */
-export function vacuumDatabase(db: Database.Database): void {
-  db.exec('VACUUM;');
-}
-
-/**
  * Get database statistics
  */
 export interface DatabaseStats {

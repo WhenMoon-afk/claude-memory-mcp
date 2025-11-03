@@ -166,61 +166,6 @@ export interface HotScore {
 }
 
 // ============================================================================
-// Context Loading Types
-// ============================================================================
-
-export type ContextType = 'minimal' | 'extraction' | 'scoring' | 'search';
-
-export interface ContextInfo {
-  type: ContextType;
-  path: string;
-  estimatedTokens: number;
-  required: boolean;
-}
-
-export interface OperationContext {
-  operation: string;
-  contexts: ContextType[];
-  estimatedTokens: number;
-}
-
-export interface LoadedContext {
-  type: ContextType;
-  content: string;
-  loadedAt: number;
-  expiresAt: number;
-}
-
-// ============================================================================
-// Plugin Types
-// ============================================================================
-
-export type PluginHookType =
-  | 'before_store'
-  | 'after_store'
-  | 'before_recall'
-  | 'after_recall'
-  | 'before_update'
-  | 'after_update'
-  | 'before_forget'
-  | 'after_forget';
-
-export interface PluginHook {
-  type: PluginHookType;
-  priority: number; // 0-100, higher = earlier execution
-  handler: (data: unknown) => Promise<unknown>;
-}
-
-export interface Plugin {
-  name: string;
-  version: string;
-  description: string;
-  hooks: PluginHook[];
-  initialize?: () => Promise<void>;
-  cleanup?: () => Promise<void>;
-}
-
-// ============================================================================
 // Configuration Types
 // ============================================================================
 

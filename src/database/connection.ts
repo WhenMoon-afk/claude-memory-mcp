@@ -107,57 +107,6 @@ export function now(): number {
 }
 
 /**
- * Calculate expiration timestamp
- */
-export function calculateExpiresAt(ttlDays: number | null, importance: number): number | null {
-  if (ttlDays === null) {
-    return null; // Permanent
-  }
-
-  const baseTTL = ttlDays * 24 * 60 * 60 * 1000;
-  const importanceBonus = (importance / 10) * 7 * 24 * 60 * 60 * 1000; // Up to 7 extra days
-
-  return now() + baseTTL + importanceBonus;
-}
-
-/**
- * Check if memory is expired
- */
-export function isExpired(expiresAt: number | null): boolean {
-  if (expiresAt === null) {
-    return false;
-  }
-  return expiresAt <= now();
-}
-
-/**
- * Refresh TTL on access
- */
-export function refreshTTL(
-  lastAccessed: number,
-  importance: number,
-  originalTTL: number | null
-): number | null {
-  if (originalTTL === null) {
-    return null; // Permanent, no refresh
-  }
-
-  const daysSinceAccess = (now() - lastAccessed) / (1000 * 60 * 60 * 24);
-  const accessBonus = (importance / 10) * 30 * 24 * 60 * 60 * 1000; // Up to 30 days
-
-  if (importance >= 6 && daysSinceAccess > 7) {
-    // Important memories: refresh TTL
-    return now() + originalTTL + accessBonus;
-  } else if (importance >= 4 && daysSinceAccess > 30) {
-    // Moderately important: refresh after longer gap
-    return now() + originalTTL + accessBonus / 2;
-  }
-
-  // Low importance: no refresh, let it expire
-  return null;
-}
-
-/**
  * Prune expired and deleted memories
  */
 export interface PruneResult {
@@ -249,60 +198,4 @@ export function pruneMemories(
  */
 export function getStats(db: Database.Database): DatabaseStats {
   return getDatabaseStats(db);
-}
-
-/**
- * Backup database to file
- */
-export function backupDatabase(db: Database.Database, backupPath: string): void {
-  try {
-    const dir = dirname(backupPath);
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true });
-    }
-
-    void db.backup(backupPath);
-  } catch (error) {
-    throw new DatabaseError('Failed to backup database', {
-      backupPath,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-/**
- * Restore database from backup
- */
-export function restoreDatabase(sourcePath: string, targetPath: string): void {
-  try {
-    if (!existsSync(sourcePath)) {
-      throw new Error('Backup file does not exist');
-    }
-
-    const sourceDb = new Database(sourcePath, { readonly: true });
-    const targetDb = new Database(targetPath);
-
-    void sourceDb.backup(targetPath);
-
-    sourceDb.close();
-    targetDb.close();
-  } catch (error) {
-    throw new DatabaseError('Failed to restore database', {
-      sourcePath,
-      targetPath,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
-}
-
-/**
- * Test database connection
- */
-export function testConnection(db: Database.Database): boolean {
-  try {
-    db.prepare('SELECT 1').get();
-    return true;
-  } catch {
-    return false;
-  }
 }

@@ -24,7 +24,6 @@ import {
   deserializeMetadata,
 } from '../database/connection.js';
 import { ValidationError } from '../types/index.js';
-import { getPluginManager } from '../core/plugin-manager.js';
 import { generateSummary } from '../extractors/summary-generator.js';
 import { formatMemory } from './response-formatter.js';
 
@@ -77,51 +76,47 @@ async function createMemory(
   db: Database.Database,
   input: MemoryInput
 ): Promise<StandardMemory> {
-  // Execute before_store hooks
-  const pluginManager = getPluginManager();
-  const processedInput = (await pluginManager.executeHooks('before_store', input));
-
   // Validate content
-  const validation = validateContent(processedInput.content, processedInput.type);
+  const validation = validateContent(input.content, input.type);
   if (!validation.valid) {
     throw new ValidationError(validation.errors.join(', '));
   }
 
   // Normalize content
-  const normalizedContent = normalizeContent(processedInput.content);
+  const normalizedContent = normalizeContent(input.content);
 
   // Generate summary
   const summary = generateSummary(normalizedContent);
 
   // Extract entities if not provided
-  let entities = processedInput.entities || [];
+  let entities = input.entities || [];
   if (entities.length === 0) {
     entities = extractEntities(normalizedContent);
     entities = deduplicateEntities(entities);
   }
 
   // Auto-classify type if needed
-  const finalType = processedInput.type || classifyMemoryType(normalizedContent, entities);
+  const finalType = input.type || classifyMemoryType(normalizedContent, entities);
 
   // Calculate importance
   const importance =
-    processedInput.importance ??
+    input.importance ??
     calculateImportance(
       normalizedContent,
       finalType,
       entities,
-      processedInput.metadata || {},
-      processedInput.provenance !== undefined
+      input.metadata || {},
+      input.provenance !== undefined
     );
 
   // Calculate TTL
   let expiresAt: number | null = null;
-  if (processedInput.expires_at) {
-    expiresAt = new Date(processedInput.expires_at).getTime();
+  if (input.expires_at) {
+    expiresAt = new Date(input.expires_at).getTime();
   } else {
     const ttlDays =
-      processedInput.ttl_days !== undefined
-        ? processedInput.ttl_days
+      input.ttl_days !== undefined
+        ? input.ttl_days
         : calculateTTLDays(importance);
     expiresAt = calculateExpiresAt(ttlDays, importance, now());
   }
@@ -129,11 +124,11 @@ async function createMemory(
   // Create memory
   const memoryId = generateId('mem');
   const createdAt = now();
-  const metadata = processedInput.metadata || {};
+  const metadata = input.metadata || {};
 
   // Merge tags into metadata if provided
-  if (processedInput.tags && processedInput.tags.length > 0) {
-    metadata.tags = processedInput.tags;
+  if (input.tags && input.tags.length > 0) {
+    metadata.tags = input.tags;
   }
 
   db.prepare(
@@ -185,7 +180,7 @@ async function createMemory(
 
   // Create provenance record
   const provenanceId = generateId('prov');
-  const provenance = processedInput.provenance || {
+  const provenance = input.provenance || {
     source: 'user',
     timestamp: new Date().toISOString(),
   };
@@ -225,9 +220,6 @@ async function createMemory(
   // Format response using standard detail level (NO embeddings)
   const formattedResponse = formatMemory(memory, 'standard', { entities: entityObjects }) as StandardMemory;
 
-  // Execute after_store hooks
-  await pluginManager.executeHooks('after_store', formattedResponse);
-
   return formattedResponse;
 }
 
@@ -238,16 +230,13 @@ async function updateMemory(
   db: Database.Database,
   input: MemoryInput
 ): Promise<StandardMemory> {
-  const pluginManager = getPluginManager();
-  const processedInput = (await pluginManager.executeHooks('before_update', input));
-
   // Check if memory exists
   const existing = db
     .prepare('SELECT * FROM memories WHERE id = ? AND is_deleted = 0')
-    .get(processedInput.id ?? '') as MemoryRowDB | undefined;
+    .get(input.id ?? '') as MemoryRowDB | undefined;
 
   if (!existing) {
-    throw new ValidationError(`Memory ${processedInput.id} not found or is deleted`);
+    throw new ValidationError(`Memory ${input.id} not found or is deleted`);
   }
 
   const changes: Record<string, unknown> = {};
@@ -257,14 +246,14 @@ async function updateMemory(
   let newSummary = existing.summary;
 
   // Update content if provided
-  if (processedInput.content !== undefined) {
-    newContent = normalizeContent(processedInput.content);
+  if (input.content !== undefined) {
+    newContent = normalizeContent(input.content);
     newSummary = generateSummary(newContent);
 
     db.prepare('UPDATE memories SET content = ?, summary = ? WHERE id = ?').run(
       newContent,
       newSummary,
-      processedInput.id
+      input.id
     );
 
     changes['content'] = { from: existing.content, to: newContent };
@@ -272,57 +261,57 @@ async function updateMemory(
   }
 
   // Update importance if provided
-  if (processedInput.importance !== undefined) {
+  if (input.importance !== undefined) {
     db.prepare('UPDATE memories SET importance = ? WHERE id = ?').run(
-      processedInput.importance,
-      processedInput.id
+      input.importance,
+      input.id
     );
 
     changes['importance'] = {
       from: existing.importance,
-      to: processedInput.importance,
+      to: input.importance,
     };
   }
 
   // Update metadata if provided
   let updatedMetadata = deserializeMetadata(existing.metadata);
-  if (processedInput.metadata !== undefined) {
-    updatedMetadata = { ...updatedMetadata, ...processedInput.metadata };
+  if (input.metadata !== undefined) {
+    updatedMetadata = { ...updatedMetadata, ...input.metadata };
 
     db.prepare('UPDATE memories SET metadata = ? WHERE id = ?').run(
       serializeMetadata(updatedMetadata),
-      processedInput.id
+      input.id
     );
 
-    changes['metadata'] = { merged: processedInput.metadata };
+    changes['metadata'] = { merged: input.metadata };
   }
 
   // Update tags in metadata if provided
-  if (processedInput.tags !== undefined) {
-    updatedMetadata.tags = processedInput.tags;
+  if (input.tags !== undefined) {
+    updatedMetadata.tags = input.tags;
 
     db.prepare('UPDATE memories SET metadata = ? WHERE id = ?').run(
       serializeMetadata(updatedMetadata),
-      processedInput.id
+      input.id
     );
 
-    changes['tags'] = { to: processedInput.tags };
+    changes['tags'] = { to: input.tags };
   }
 
   // Update TTL if provided
   let newExpiresAt = existing.expires_at;
-  if (processedInput.ttl_days !== undefined || processedInput.expires_at !== undefined) {
-    if (processedInput.expires_at) {
-      newExpiresAt = new Date(processedInput.expires_at).getTime();
+  if (input.ttl_days !== undefined || input.expires_at !== undefined) {
+    if (input.expires_at) {
+      newExpiresAt = new Date(input.expires_at).getTime();
     } else {
-      const newImportance = processedInput.importance ?? existing.importance;
-      const ttlDays = processedInput.ttl_days ?? calculateTTLDays(newImportance);
+      const newImportance = input.importance ?? existing.importance;
+      const ttlDays = input.ttl_days ?? calculateTTLDays(newImportance);
       newExpiresAt = calculateExpiresAt(ttlDays, newImportance, currentTime);
     }
 
     db.prepare('UPDATE memories SET expires_at = ? WHERE id = ?').run(
       newExpiresAt,
-      processedInput.id
+      input.id
     );
 
     changes['expires_at'] = {
@@ -333,12 +322,12 @@ async function updateMemory(
 
   // Update entities if provided
   let entityObjects: Entity[] = [];
-  if (processedInput.entities !== undefined) {
+  if (input.entities !== undefined) {
     // Remove existing entity links
-    db.prepare('DELETE FROM memory_entities WHERE memory_id = ?').run(processedInput.id);
+    db.prepare('DELETE FROM memory_entities WHERE memory_id = ?').run(input.id);
 
     // Create new entity links
-    for (const entityName of processedInput.entities) {
+    for (const entityName of input.entities) {
       const entityId = createOrGetEntity(db, entityName, newContent);
 
       // Fetch entity details
@@ -358,10 +347,10 @@ async function updateMemory(
 
       db.prepare(
         `INSERT INTO memory_entities (memory_id, entity_id, created_at) VALUES (?, ?, ?)`
-      ).run(processedInput.id, entityId, currentTime);
+      ).run(input.id, entityId, currentTime);
     }
 
-    changes['entities'] = { to: processedInput.entities };
+    changes['entities'] = { to: input.entities };
   } else {
     // Fetch existing entities
     const entityRows = db
@@ -372,7 +361,7 @@ async function updateMemory(
       WHERE me.memory_id = ?
     `
       )
-      .all(processedInput.id) as EntityRow[];
+      .all(input.id) as EntityRow[];
 
     entityObjects = entityRows.map((row) => ({
       id: row.id,
@@ -385,7 +374,7 @@ async function updateMemory(
 
   // Create provenance record
   const provenanceId = generateId('prov');
-  const provenance = processedInput.provenance || {
+  const provenance = input.provenance || {
     source: 'user',
   };
 
@@ -397,7 +386,7 @@ async function updateMemory(
   `
   ).run(
     provenanceId,
-    processedInput.id,
+    input.id,
     'update',
     currentTime,
     provenance.source,
@@ -408,11 +397,11 @@ async function updateMemory(
 
   // Build Memory object for formatting
   const memory: Memory = {
-    id: processedInput.id ?? existing.id,
+    id: input.id ?? existing.id,
     content: newContent,
     summary: newSummary,
     type: existing.type as Memory['type'],
-    importance: processedInput.importance ?? existing.importance,
+    importance: input.importance ?? existing.importance,
     created_at: existing.created_at,
     last_accessed: existing.last_accessed,
     access_count: existing.access_count,
@@ -423,9 +412,6 @@ async function updateMemory(
 
   // Format response using standard detail level (NO embeddings)
   const formattedResponse = formatMemory(memory, 'standard', { entities: entityObjects }) as StandardMemory;
-
-  // Execute after_update hooks
-  await pluginManager.executeHooks('after_update', formattedResponse);
 
   return formattedResponse;
 }

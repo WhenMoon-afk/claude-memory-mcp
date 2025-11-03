@@ -78,30 +78,6 @@ export function classifyMemoryType(content: string, entities: string[]): MemoryT
 }
 
 /**
- * Extract atomic facts from compound content
- */
-export function extractAtomicFacts(content: string): string[] {
-  const facts: string[] = [];
-
-  // Split on common conjunctions
-  const parts = content.split(/\s+(?:and|but|however|though|also|furthermore)\s+/i);
-
-  for (const part of parts) {
-    const trimmed = part.trim();
-    if (trimmed.length > 5 && isFact(trimmed)) {
-      facts.push(trimmed);
-    }
-  }
-
-  // If no splits found, return original if it's a fact
-  if (facts.length === 0 && isFact(content)) {
-    facts.push(content.trim());
-  }
-
-  return facts;
-}
-
-/**
  * Detect user preferences in content
  */
 export function isUserPreference(content: string): boolean {

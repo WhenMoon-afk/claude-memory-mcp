@@ -140,18 +140,6 @@ export function adjustImportanceForContext(
 }
 
 /**
- * Calculate importance tier label
- */
-export function getImportanceTier(
-  importance: number
-): 'critical' | 'important' | 'useful' | 'ephemeral' {
-  if (importance >= 8) return 'critical';
-  if (importance >= 5) return 'important';
-  if (importance >= 3) return 'useful';
-  return 'ephemeral';
-}
-
-/**
  * Get recommended TTL for importance level
  */
 export function getRecommendedTTL(importance: number): number | null {
@@ -210,43 +198,6 @@ export function boostImportanceOnAccess(
 }
 
 /**
- * Re-evaluate importance based on usage patterns
- */
-export function reevaluateImportance(memory: {
-  importance: number;
-  created_at: number;
-  last_accessed: number;
-  access_count?: number;
-}): number {
-  const now = Date.now();
-  const daysSinceCreated = (now - memory.created_at) / (1000 * 60 * 60 * 24);
-  const daysSinceAccess = (now - memory.last_accessed) / (1000 * 60 * 60 * 24);
-
-  let newImportance = memory.importance;
-
-  // Never accessed: reduce importance
-  if (memory.access_count === 0 && daysSinceCreated > 30) {
-    newImportance *= 0.7;
-  }
-
-  // Not accessed in long time: reduce importance
-  if (daysSinceAccess > 90 && memory.importance < 8) {
-    newImportance *= 0.8;
-  }
-
-  // Frequently accessed: boost importance
-  if (memory.access_count && memory.access_count > 5) {
-    newImportance = boostImportanceOnAccess(
-      newImportance,
-      memory.access_count,
-      daysSinceCreated
-    );
-  }
-
-  return Math.max(0, Math.min(10, newImportance));
-}
-
-/**
  * Calculate hot score (for hot context)
  */
 export function calculateHotScore(
@@ -276,57 +227,4 @@ function calculateRecencyScore(lastAccessed: number, now: number): number {
   if (hoursAgo < 168) return 2; // This week
   if (hoursAgo < 720) return 1; // This month
   return 0; // Older
-}
-
-/**
- * Suggest importance adjustments based on patterns
- */
-export interface ImportanceSuggestion {
-  suggested: number;
-  reason: string;
-  confidence: number; // 0-1
-}
-
-export function suggestImportanceAdjustment(memory: {
-  content: string;
-  importance: number;
-  access_count: number;
-  created_at: number;
-  last_accessed: number;
-  metadata: Record<string, unknown>;
-}): ImportanceSuggestion | null {
-  const now = Date.now();
-  const daysSinceCreated = (now - memory.created_at) / (1000 * 60 * 60 * 24);
-  const daysSinceAccess = (now - memory.last_accessed) / (1000 * 60 * 60 * 24);
-  const accessRate = memory.access_count / Math.max(daysSinceCreated, 1);
-
-  // High access rate but low importance
-  if (accessRate > 0.1 && memory.importance < 7) {
-    return {
-      suggested: Math.min(memory.importance + 2, 9),
-      reason: 'Frequently accessed, importance should be higher',
-      confidence: 0.8,
-    };
-  }
-
-  // Low access rate but high importance
-  if (accessRate < 0.01 && memory.importance > 7 && daysSinceCreated > 90) {
-    return {
-      suggested: Math.max(memory.importance - 2, 5),
-      reason: 'Rarely accessed despite high importance, consider reducing',
-      confidence: 0.6,
-    };
-  }
-
-  // Not accessed in long time
-  if (daysSinceAccess > 180 && memory.importance < 8) {
-    return {
-      suggested: Math.max(memory.importance - 1, 2),
-      reason: 'Not accessed in 6+ months, likely less important',
-      confidence: 0.7,
-    };
-  }
-
-  // No suggestion
-  return null;
 }
