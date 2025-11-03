@@ -133,11 +133,6 @@ export interface SearchFilters {
   includeExpired: boolean; // Now always specified internally
 }
 
-export interface HotContextOptions {
-  limit?: number;
-  type?: MemoryType;
-}
-
 // ============================================================================
 // Scoring Types
 // ============================================================================
@@ -157,25 +152,6 @@ export interface TTLConfig {
   importanceMultiplier: number;
   accessBonusDays: number;
   refreshThresholdDays: number;
-}
-
-export interface HotScore {
-  recencyScore: number; // 0-5
-  importanceScore: number; // 0-5
-  totalScore: number; // 0-10
-}
-
-// ============================================================================
-// Configuration Types
-// ============================================================================
-
-export interface MemoryConfig {
-  databasePath: string;
-  defaultTTLDays: number;
-  hotContextLimit: number;
-  enableAutoCapture: boolean;
-  cacheContextMinutes: number;
-  searchBatchSize: number;
 }
 
 // ============================================================================
@@ -254,12 +230,6 @@ export interface RecallResponse {
   has_more: boolean;
   tokens_used: number;
   query: string;
-}
-
-export interface HotContextResponse {
-  hot_memories: FormattedMemory[];
-  count: number;
-  estimated_tokens: number;
 }
 
 export interface UpdateResponse {

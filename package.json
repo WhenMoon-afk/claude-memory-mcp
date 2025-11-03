@@ -1,7 +1,7 @@
 {
   "name": "@memory-mcp/server",
   "version": "2.0.0",
-  "description": "Brain-inspired memory with smart context loading - MCPB bundle",
+  "description": "Brain-inspired memory for AI agents - MCP server",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {

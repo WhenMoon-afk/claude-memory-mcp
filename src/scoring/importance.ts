@@ -197,34 +197,3 @@ export function boostImportanceOnAccess(
   return currentImportance;
 }
 
-/**
- * Calculate hot score (for hot context)
- */
-export function calculateHotScore(
-  importance: number,
-  lastAccessed: number,
-  now: number
-): number {
-  // Recency score (0-5)
-  const recencyScore = calculateRecencyScore(lastAccessed, now);
-
-  // Importance score (0-5)
-  const importanceScore = importance / 2;
-
-  // Weighted combination (importance weighs more)
-  return recencyScore * 0.4 + importanceScore * 0.6;
-}
-
-/**
- * Calculate recency score (0-5)
- */
-function calculateRecencyScore(lastAccessed: number, now: number): number {
-  const hoursAgo = (now - lastAccessed) / (1000 * 60 * 60);
-
-  if (hoursAgo < 1) return 5; // Very recent
-  if (hoursAgo < 6) return 4; // Recent
-  if (hoursAgo < 24) return 3; // Today
-  if (hoursAgo < 168) return 2; // This week
-  if (hoursAgo < 720) return 1; // This month
-  return 0; // Older
-}

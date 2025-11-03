@@ -15,10 +15,6 @@ dist/
 build/
 coverage/
 
-# MCPB bundle artifacts
-*.mcpb
-.mcpb-build/
-
 # Database files
 *.db
 *.db-journal
@@ -64,4 +60,3 @@ coverage/
 tmp/
 temp/
 *.tmp
-*.mcpb

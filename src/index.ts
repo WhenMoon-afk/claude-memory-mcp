@@ -18,18 +18,14 @@ import { getDatabase, closeDatabase } from './database/connection.js';
 import { memoryStore } from './tools/memory-store.js';
 import { memoryRecall } from './tools/memory-recall.js';
 import { memoryForget } from './tools/memory-forget.js';
-import type { MemoryConfig, MemoryInput, SearchOptions } from './types/index.js';
+import type { MemoryInput, SearchOptions } from './types/index.js';
 
 /**
  * Configuration from environment or defaults
  */
-const config: MemoryConfig = {
+const config = {
   databasePath: process.env['MEMORY_DB_PATH'] || './memory.db',
   defaultTTLDays: parseInt(process.env['DEFAULT_TTL_DAYS'] || '90'),
-  hotContextLimit: parseInt(process.env['HOT_CONTEXT_LIMIT'] || '20'),
-  enableAutoCapture: process.env['ENABLE_AUTO_CAPTURE'] !== 'false',
-  cacheContextMinutes: parseInt(process.env['CACHE_CONTEXT_MINUTES'] || '5'),
-  searchBatchSize: parseInt(process.env['SEARCH_BATCH_SIZE'] || '100'),
 };
 
 /**

@@ -50,7 +50,7 @@ export async function memoryRecall(
     const { results, totalCount } = semanticSearch(db, searchOptions);
     console.error(`[memoryRecall] Search returned ${results.length} results, total count: ${totalCount}`);
 
-    // Track access for hot context scoring
+    // Track access for frequency tracking
     const currentTime = now();
     for (const result of results) {
       // Increment access_count and update last_accessed

@@ -14,7 +14,6 @@ import type {
   Provenance,
 } from '../types/index.js';
 import { deserializeMetadata } from '../database/connection.js';
-import { calculateHotScore } from '../scoring/importance.js';
 
 // Database row types (before deserialization)
 interface EntityRow {
@@ -312,51 +311,6 @@ function batchFetchProvenance(
   }
 
   return provenanceMap;
-}
-
-/**
- * Get hot context (recently accessed + high importance)
- */
-export function getHotContext(
-  db: Database.Database,
-  limit: number = 20,
-  type?: string
-): MemorySearchResult[] {
-  const now = Date.now();
-
-  let query = `
-    SELECT * FROM memories
-    WHERE is_deleted = 0
-      AND (expires_at IS NULL OR expires_at > ?)
-  `;
-
-  const params: (string | number)[] = [now];
-
-  if (type) {
-    query += ` AND type = ?`;
-    params.push(type);
-  }
-
-  query += ` ORDER BY last_accessed DESC, importance DESC LIMIT ?`;
-  params.push(limit);
-
-  const stmt = db.prepare(query);
-  const rows = stmt.all(...params) as MemoryRow[];
-
-  const memories = rows.map(rowToMemory);
-
-  // Calculate hot scores
-  const scoredMemories = memories.map((memory) => ({
-    ...memory,
-    score: calculateHotScore(memory.importance, memory.last_accessed, now),
-    entities: [],
-    provenance: [],
-  }));
-
-  // Sort by hot score
-  scoredMemories.sort((a, b) => b.score - a.score);
-
-  return scoredMemories;
 }
 
 /**

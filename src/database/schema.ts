@@ -60,7 +60,6 @@ function applyMigrations(db: Database.Database, fromVersion: number): void {
         CREATE INDEX IF NOT EXISTS idx_memories_last_accessed ON memories(last_accessed);
         CREATE INDEX IF NOT EXISTS idx_memories_expires_at ON memories(expires_at);
         CREATE INDEX IF NOT EXISTS idx_memories_is_deleted ON memories(is_deleted);
-        CREATE INDEX IF NOT EXISTS idx_memories_hot_context ON memories(last_accessed DESC, importance DESC) WHERE is_deleted = 0;
 
         -- Entities table: Named entities
         CREATE TABLE IF NOT EXISTS entities (
@@ -159,10 +158,6 @@ function applyMigrations(db: Database.Database, fromVersion: number): void {
         );
       }
 
-      // Add index on access_count for hot context queries
-      db.exec(`
-        CREATE INDEX IF NOT EXISTS idx_memories_access_count ON memories(access_count DESC);
-      `);
 
       // Record migration
       db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(
@@ -266,26 +261,6 @@ export function createViews(db: Database.Database): void {
     WHERE m.is_deleted = 0
       AND (m.expires_at IS NULL OR m.expires_at > unixepoch() * 1000)
     GROUP BY m.id;
-  `);
-
-  // View: Hot context candidates
-  db.exec(`
-    CREATE VIEW IF NOT EXISTS v_hot_context AS
-    SELECT
-      m.*,
-      (m.importance * 0.6 +
-       CASE
-         WHEN (unixepoch() * 1000 - m.last_accessed) < 3600000 THEN 5
-         WHEN (unixepoch() * 1000 - m.last_accessed) < 21600000 THEN 4
-         WHEN (unixepoch() * 1000 - m.last_accessed) < 86400000 THEN 3
-         WHEN (unixepoch() * 1000 - m.last_accessed) < 604800000 THEN 2
-         WHEN (unixepoch() * 1000 - m.last_accessed) < 2592000000 THEN 1
-         ELSE 0
-       END * 0.4) as hot_score
-    FROM memories m
-    WHERE m.is_deleted = 0
-      AND (m.expires_at IS NULL OR m.expires_at > unixepoch() * 1000)
-    ORDER BY hot_score DESC;
   `);
 
   // View: Memory provenance chain

@@ -80,11 +80,9 @@ Add to your client’s MCP config:
 
 | Tool | Input | Description |
 |------|-------|-----------|
-| `memory_store` | `{ content, type?, importance?, ttl_days? }` | Store with auto-summary |
-| `memory_recall` | `{ query?, ids?, type?, max_tokens, index_only? }` | Search or fetch |
-| `memory_forget` | `{ id, reason?, permanent? }` | Soft/hard delete |
-| `memory_list_types` | `{}` | List types: `fact`, `entity`, `relationship`, `self` |
-| `memory_stats` | `{}` | DB stats: count, size, top entities |
+| `memory_store` | `{ content, type, importance?, entities?, ttl_days?, provenance? }` | Store or update memory with auto-summary |
+| `memory_recall` | `{ query, type?, entities?, limit?, max_tokens? }` | Search memories with token-aware loading |
+| `memory_forget` | `{ id, reason? }` | Soft-delete memory (preserves provenance) |
 
 ---
 
@@ -147,6 +145,31 @@ Your AI **knows what it knows** — and can ask for more.
 
 ---
 
+### Forget a Memory
+
+```json
+{
+  "tool": "memory_forget",
+  "input": {
+    "id": "mem_8b1",
+    "reason": "Information no longer relevant"
+  }
+}
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "memory_id": "mem_8b1",
+  "message": "Memory soft-deleted successfully. Reason: Information no longer relevant"
+}
+```
+
+> Soft-deleted memories are **preserved** in the database with full provenance trail. They won't appear in searches but remain recoverable.
+
+---
+
 ## Dual-Response Pattern
 
 ```
@@ -174,9 +197,8 @@ Your AI **knows what it knows** — and can ask for more.
 
 | Var | Default | Description |
 |-----|---------|-----------|
-| `MEMORY_DB_PATH` | `./memory.db` | Database location |
-| `DEBUG_MODE` | `false` | Verbose logging |
-| `DEFAULT_TTL_DAYS` | `365` | Auto-expire old memories |
+| `MEMORY_DB_PATH` | `./memory.db` | Database file location |
+| `DEFAULT_TTL_DAYS` | `90` | Default time-to-live for memories (days) |
 
 ---
 
@@ -190,11 +212,11 @@ For sensitive data, use OS-level encryption (FileVault, BitLocker).
 
 ## Best Practices
 
-1. **Start with `max_tokens: 1000`** — adjust per model.
-2. **Use `index_only: true`** for broad scans.
-3. **Filter by `type`** to reduce noise.
-4. **Reference provenance**: _“From our chat on Nov 3…”_
-5. **Backup `memory.db`** regularly.
+1. **Start with `max_tokens: 1000`** — adjust per model and task.
+2. **Filter by `type`** to reduce noise and improve relevance.
+3. **Use entity filtering** to narrow searches to specific topics.
+4. **Reference provenance**: Track source and context for audit trails.
+5. **Backup `memory.db`** regularly — it's just a file!
 
 
 
