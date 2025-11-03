@@ -1,21 +1,33 @@
 # Memory MCP v2.0
-
-**Token-optimized brain-inspired memory system with dual-response progressive loading**
-
+ 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue)](https://www.typescriptlang.org/)
-[![MCPB Ready](https://img.shields.io/badge/MCPB-Ready-green)](https://github.com/anthropics/mcpb)
+~~[![MCPB Ready](https://img.shields.io/badge/MCPB-Ready-green)](https://github.com/anthropics/mcpb)~~ (Work in Progress)
 
 ## Overview
 
-Memory MCP v2.0 is a complete TypeScript rewrite delivering **50% token savings** through intelligent dual-response architecture and SQLite FTS5 search. Built as an MCPB bundle for one-click installation in Claude Desktop.
+Memory MCP v2.0 is a complete TypeScript rewrite delivering major token savings through intelligent dual-response architecture and SQLite FTS5 search. 
+Planned to be built as an MCPB bundle for one-click installation in Claude Desktop and other MCP Clients.
+Token-optimized brain-inspired memory system with smart layered loading of information.
+Designed to be an option for a local-only mcp server upgrade to native memory for mcp clients such as claude desktop.
+Currently your database is not encrypted, it is stored locally and you are responsible for managing it.
+
+Layer 1: "I know what I know all the time. I also know how I generally feel towards the most important people I know."
+    -> Active context, hyper token efficient and summarized, maximum broad understanding but no depth or fine details or memories. 
+Layer 2: "I can choose to think about something I know and recall greater details about the memory or skill."
+Layer 3: "I can really think back to when I learned the skill or experienced the memory, and recall what context existed around when I acquired that memory "
+
+
+
+The goals of this implementation are to maximize token efficiency. It is also designed so that it can work together apart of a modularized set of systems modeling the architecture of the human brain. It works alongside of the Native memory that Claude has/will have soon, and aims to enhance memory rather than replace it. It can store memories that are learned from searching past conversations or if you load a snapshot from a previous conversation.
+
+
 
 ### What's New in v2.0
 
 🚀 **Dual-Response Pattern** - Index (all matches) + Details (within token budget)
 🔍 **SQLite FTS5 Search** - Lightweight full-text search, no embedding bloat
 ⚡ **Token-Aware by Default** - `max_tokens` parameter for intelligent budgeting
-📦 **~3MB Bundle** - No embedding models, pure FTS5 magic
 🎯 **Skill-Pattern Architecture** - Discover what exists, load details selectively
 ✨ **Simplified API** - 5 parameters for clean, intuitive usage
 
@@ -26,63 +38,10 @@ Memory MCP v2.0 is a complete TypeScript rewrite delivering **50% token savings*
 ✅ **Importance-Based Retention** - Auto-scoring + TTL management
 ✅ **Provenance Tracking** - Full audit trail for trust & debugging
 ✅ **Hot Context Scoring** - Recent + frequent + important prioritization
-✅ **MCPB Bundle** - One-click installation, auto-updates
-✅ **Plugin System** - Extensible architecture
+✅ **Memory source provenance**: Be able to track the source of what inspired a memory to be stored
+✅ **Strategic layers** of context that the model can query as needed to gain more information but only if needed.
 
-## Token Efficiency
 
-### v2.0 Dual-Response Pattern
-
-```typescript
-memory_recall({ query: "Python", max_tokens: 1000 })
-
-Returns:
-{
-  index: [...20 summaries],      // ~400 tokens (all matches)
-  details: [...3 full memories], // ~600 tokens (top matches)
-  total_count: 20,
-  tokens_used: 950
-}
-```
-
-**Benefits:**
-- Claude always sees what memories exist (index)
-- Claude gets full context for most relevant (details)
-- Token budget automatically managed
-- No guessing at detail levels
-
-### Token Savings Comparison
-
-| Scenario | v1.x (old) | v2.0 (new) | Savings |
-|----------|------------|------------|---------|
-| 10 matches, minimal | 300 tokens | 200 tokens | 33% |
-| 10 matches, standard | 2000 tokens | 850 tokens | 57% |
-| 50 matches, discovery | N/A | 1000 tokens | New |
-
-### Response Component Costs
-
-| Component | Tokens | Notes |
-|-----------|--------|-------|
-| Summary (index) | ~20 | 20-word auto-generated |
-| Full memory (details) | ~200 | Content + metadata |
-| Index (20 memories) | ~400 | All summaries |
-| Details (3 memories) | ~600 | Full content |
-
-## Installation
-
-### Option 1: MCPB Bundle (Recommended)
-
-1. Download `memory-mcp.mcpb` from [Releases](https://github.com/whenmoon-afk/claude-memory-mcp/releases)
-2. Claude Desktop → Settings → Developer → Install unpacked extension
-3. Select the `.mcpb` file
-
-The MCPB installer handles:
-- ✅ Dependency installation
-- ✅ Database setup
-- ✅ Skill loading
-- ✅ Configuration
-
-### Option 2: From Source
 
 ```bash
 git clone https://github.com/whenmoon-afk/claude-memory-mcp.git
@@ -105,7 +64,7 @@ npm run build
 
 ## Quick Start
 
-Once installed, Claude automatically gains memory capabilities:
+Once installed reload you must "Reload MCP Configuration" (or completely close and restart) for your MCP Client (such as claude desktop)
 
 ### 1. Store Memories
 ```typescript
@@ -501,43 +460,6 @@ MEMORY_DB_PATH=./memory.db           # Database location
 DEBUG_MODE=false                     # Enable debug logging
 ```
 
-Configuration via manifest.json (MCPB):
-
-```json
-{
-  "configuration": {
-    "MEMORY_DB_PATH": {
-      "type": "string",
-      "default": "~/.config/claude/memory-mcp/memory.db"
-    },
-    "DEBUG_MODE": {
-      "type": "boolean",
-      "default": false
-    }
-  }
-}
-```
-
-## Development
-
-### Setup
-```bash
-npm install
-npm run build
-```
-
-### Build Scripts
-```bash
-npm run build          # Compile TypeScript
-npm run typecheck      # Type checking only
-npm run clean          # Remove dist/
-npm test               # Run tests (if configured)
-```
-
-### Creating MCPB Bundle
-```bash
-node build-bundle.cjs  # Creates memory-mcp.mcpb
-```
 
 ### Project Structure
 ```
@@ -558,108 +480,34 @@ claude-memory-mcp/
 ├── tsconfig.json
 └── build-bundle.cjs          # Bundle builder
 ```
-
-## Troubleshooting
-
-### Not finding memories?
-
-Try broader search terms or remove filters:
-
-```typescript
-memory_recall({
-  query: "python",  // Broader than "python fastapi type hints"
-  max_tokens: 2000
-  // Remove type and entity filters
-});
-```
-
-### Token budget exhausted?
-
-Increase `max_tokens` or reduce `limit`:
-
-```typescript
-memory_recall({
-  query: "...",
-  max_tokens: 3000,  // Increase budget
-  limit: 10          // Or reduce results
-});
-```
-
-### FTS5 not working?
-
-Check SQLite version:
-
-```bash
-node -e "console.log(require('better-sqlite3')(':memory:').prepare('SELECT sqlite_version()').get())"
-# Should be 3.35+ for FTS5 support
-```
-
-### Build errors?
-
-Rebuild native bindings:
-
-```bash
-npm rebuild better-sqlite3 --build-from-source
-```
-
-## Migration from v1.x
-
-**Breaking Changes from v1.x (Python) to v2.0 (TypeScript):**
-
-1. **Platform:**
-   - ✅ TypeScript + Node.js (was Python)
-   - ✅ MCPB bundle support
-   - ✅ One-click installation
-
-2. **API Changes:**
-   - ✅ `max_tokens` parameter for intelligent budgeting
-   - ✅ Dual response structure (`index` + `details`)
-   - ✅ Merged create/update into single `memory_store` tool
-   - ✅ 3 tools (down from 6 in v1.x)
-
-3. **Technology:**
-   - ✅ SQLite FTS5 (built-in full-text search)
-   - ✅ Lightweight ~3MB bundle
-   - ✅ <10ms search latency
-
-4. **Database:**
-   - New SQLite schema with FTS5 support
-   - Manual migration required from v1.x Python databases
-   - Export from v1.x and import to v2.0 recommended
-
-## Contributing
-
-Contributions welcome! Areas of interest:
-
-- Performance optimizations
-- Additional scoring algorithms
-- Export/import features
-- Graph visualization
-- Documentation improvements
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) (if exists)
-
-## License
-
-MIT License - see [LICENSE](LICENSE)
+  
+    
 
 ## Version History
 
-**v2.0.0** (January 2025):
+**v2.0.0** (Nov 3, 2025):
 - Complete TypeScript rewrite from Python
 - Dual-response pattern (index + details)
 - SQLite FTS5 full-text search
 - Token-aware with `max_tokens` parameter
-- 50% token reduction vs v1.x
-- MCPB bundle support (~3MB)
-- 3 streamlined tools (down from 6)
 - Automatic entity extraction and importance scoring
+- Utilizes database storage to allow for memory retreival without context bloat
 
-**v1.x** (2024):
-- Python implementation
-- 6 separate tools
+
+- ~~MCPB bundle support~~ Work in Progress
+
+
+**v1.x.x** (Apr 29, 2025):
 - Basic memory storage and retrieval
+- Outdated MCP Specification
+- Single JSON file storage
+- Response times ~2 seconds when memory json file grew too big
+- Full JSON file is returned to model context -> Inefficient token consumption
 
 ---
 
-**Built with ❤️ for the MCP ecosystem**
+## License
+
+MIT License
+
+
