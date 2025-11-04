@@ -4,161 +4,84 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js >= 18](https://img.shields.io/badge/node-%3E%3D18-brightgreen)](https://nodejs.org/)
 
-**Local, Persistent Memory for Any MCP-Compatible AI**
-A lightweight, **zero-cloud**, **token-efficient** Model Context Protocol (MCP) server that gives your AI **durable, searchable, and context-aware memory** - entirely under your control.
+Local, persistent memory for AI agents via Model Context Protocol (MCP). Zero-cloud, token-efficient, stored in a single portable SQLite database.
 
-Built with **TypeScript**, **SQLite + FTS5**, and **minimal runtime dependencies** (MCP SDK + better-sqlite3), it runs locally and stores everything in a single, portable `.db` file.
-
-Works with **Claude Desktop**, **Cursor**, **Windsurf**, or any MCP client.
-
-📦 **Now available on npm**: Install with `npx @whenmoon-afk/memory-mcp`
-
----
-
-## Why Local Memory?
-
-| You Control | Cloud Services |
-|-----------|----------------|
-| Data never leaves your machine | Sent to remote servers |
-| Portable `.db` file | Locked in proprietary storage |
-| Full audit & backup | Opaque retention policies |
-| Zero recurring cost | Subscription required |
+**Stack:** TypeScript + SQLite FTS5 | **Runtime Deps:** MCP SDK + better-sqlite3
+**Clients:** Claude Desktop, Cursor, Windsurf, any MCP client
 
 ---
 
 ## Features
 
-| Feature | Benefit |
-|-------|--------|
-| **Dual-Response Pattern** | Returns *all* matches (compact index) + full *details* within token budget |
-| **Token Budgeting** | Auto-respects `max_tokens` (~30% index, ~70% details) |
-| **Hybrid Relevance Scoring** | 40% relevance, 30% importance, 20% recency, 10% frequency |
-| **Auto-Summarization** | Generates ≤20-word natural-language summaries |
-| **Entity Extraction** | Detects people, tools, concepts, preferences |
-| **FTS5 Full-Text Search** | Sub-10ms queries, Unicode, stemming — no embeddings |
-| **Provenance Tracking** | Full audit trail: source, timestamp, updates |
-| **Soft Deletes** | Memories preserved for debugging/rollback |
-| **Single-File DB** | `memory.db` — copy, backup, move freely |
+- **Dual-Response Pattern:** Index (all matches) + details (budget-capped) in one query
+- **Token Budgeting:** Auto-allocates ~30% index, ~70% details within `max_tokens`
+- **Smart Scoring:** 40% relevance, 30% importance, 20% recency, 10% frequency
+- **Auto-Summarization:** ≤20-word summaries for fast scanning
+- **Entity Extraction:** People, tools, concepts, preferences
+- **FTS5 Search:** Sub-10ms, Unicode, stemming, no embeddings
+- **Provenance:** Full audit trail with timestamps
+- **Soft Deletes:** Non-destructive, recoverable
+- **Portable:** Single `memory.db` file
 
 ---
 
 ## Installation
 
-### Prerequisites
-- Node.js ≥ 18
-- An **MCP-compatible client** (Claude Desktop, Cursor, Windsurf, etc.)
+**Requirements:** Node.js ≥ 18, MCP-compatible client
 
-### Option 1: NPM Package with Auto-Setup (Recommended)
-
-**Automatic installation** (configures Claude Desktop for you):
+**Auto-install (recommended):**
 ```bash
 npx @whenmoon-afk/memory-mcp
 ```
+Detects your OS, configures Claude Desktop, creates config backup. Then restart Claude Desktop.
 
-This will automatically:
-- Detect your operating system (macOS/Windows/Linux)
-- Add the memory server to your Claude Desktop configuration
-- Create a backup of your existing config
-- Configure the correct command format for your platform
-
-After installation, **restart Claude Desktop completely** (quit and reopen).
-
-**Or install globally**:
+**Global install:**
 ```bash
 npm install -g @whenmoon-afk/memory-mcp
 memory-mcp
 ```
 
-### Option 2: From Source
-
-For development or customization:
+**From source:**
 ```bash
 git clone https://github.com/WhenMoon-afk/claude-memory-mcp.git
 cd claude-memory-mcp
-npm install
-npm run build
+npm install && npm run build
 ```
 
-> Output: `dist/index.js` — your memory server.
+### Manual Configuration
 
----
-
-## Integrate with Your MCP Client
-
-Add to your client's MCP config file:
-
-**Claude Desktop**:
+Config paths:
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
 - Linux: `~/.config/Claude/claude_desktop_config.json`
 
-**Cursor/Windsurf**: Check your editor's MCP settings
-
-> **💡 Recommended**: Use the automatic installer (`npx @whenmoon-afk/memory-mcp`) which handles platform differences automatically.
-
-### Manual Configuration (macOS/Linux)
+**NPM install (macOS/Linux):**
 ```json
 {
   "mcpServers": {
     "memory": {
       "command": "npx",
       "args": ["-y", "@whenmoon-afk/memory-mcp"],
-      "env": {
-        "MEMORY_DB_PATH": "./memory.db"
-      }
+      "env": {"MEMORY_DB_PATH": "./memory.db"}
     }
   }
 }
 ```
 
-### Manual Configuration (Windows)
-
-**Windows requires the `cmd /c` wrapper** to execute npx properly:
-
+**NPM install (Windows - requires `cmd /c`):**
 ```json
 {
   "mcpServers": {
     "memory": {
       "command": "cmd",
       "args": ["/c", "npx", "-y", "@whenmoon-afk/memory-mcp"],
-      "env": {
-        "MEMORY_DB_PATH": "./memory.db"
-      }
+      "env": {"MEMORY_DB_PATH": "./memory.db"}
     }
   }
 }
 ```
 
-### Using Global Install
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "memory-mcp",
-      "env": {
-        "MEMORY_DB_PATH": "./memory.db"
-      }
-    }
-  }
-}
-```
-
-### From Source
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "node",
-      "args": ["/absolute/path/to/claude-memory-mcp/dist/index.js"],
-      "env": {
-        "MEMORY_DB_PATH": "./memory.db"
-      }
-    }
-  }
-}
-```
-
-> Restart or reload MCP servers.
+**Global/source:** Replace `command` with `memory-mcp` or `node`, adjust `args` accordingly.
 
 ---
 
@@ -270,83 +193,34 @@ Your AI **knows what it knows** — and can ask for more.
 
 ---
 
-## Database & Portability
+## Configuration
 
-- **File**: `memory.db` (SQLite) — path via `MEMORY_DB_PATH`
-- **Portable**: Copy to USB, cloud sync, or new machine
-- **Backup**: Just copy the file
-- **Tip**: For extra security, store `memory.db` on a **VeraCrypt Encrypted USB drive** (adds friction, but maximum control).
+**Environment Variables:**
+- `MEMORY_DB_PATH` (default: `./memory.db`) - Database file location
+- `DEFAULT_TTL_DAYS` (default: `90`) - Memory expiration in days
 
----
+**Database:** Single portable `memory.db` SQLite file. Copy/backup/sync freely.
 
-## Dependencies
-
-This project uses minimal runtime dependencies to keep the package lightweight:
-
-| Dependency | Version | Purpose |
-|-----------|---------|---------|
-| `@modelcontextprotocol/sdk` | ^1.0.4 | Official MCP protocol implementation |
-| `better-sqlite3` | ^11.0.0 | Fast, native SQLite3 bindings with FTS5 support |
-
-**Why these dependencies?**
-- **MCP SDK**: Required for implementing the Model Context Protocol standard
-- **better-sqlite3**: Native performance for full-text search and database operations, essential for memory recall speed
-
-All other dependencies are dev-only (TypeScript, testing, linting).
-
----
-
-## Environment Variables
-
-| Var | Default | Description |
-|-----|---------|-----------|
-| `MEMORY_DB_PATH` | `./memory.db` | Database file location |
-| `DEFAULT_TTL_DAYS` | `90` | Default time-to-live for memories (days) |
-
----
-
-### Security
-
-This is a **local-only** MCP server.  
-Data is stored in a plain SQLite file (`memory.db`).  
-For sensitive data, use OS-level encryption (FileVault, BitLocker).
+**Security:** Local-only server, plain SQLite storage. Use OS-level encryption (FileVault, BitLocker) for sensitive data.
 
 ---
 
 ## Best Practices
 
-1. **Start with `max_tokens: 1000`** — adjust per model and task.
-2. **Filter by `type`** to reduce noise and improve relevance.
-3. **Use entity filtering** to narrow searches to specific topics.
-4. **Reference provenance**: Track source and context for audit trails.
-5. **Backup `memory.db`** regularly — it's just a file!
+- Start with `max_tokens: 1000`, adjust per model/task
+- Filter by `type` to reduce noise
+- Use entity filtering for specific topics
+- Backup `memory.db` regularly
 
 ---
 
-## Quick Links
+## Links
 
-- 📦 **NPM Package**: https://www.npmjs.com/package/@whenmoon-afk/memory-mcp
-- 🐙 **GitHub Repository**: https://github.com/WhenMoon-afk/claude-memory-mcp
-- 🐛 **Report Issues**: https://github.com/WhenMoon-afk/claude-memory-mcp/issues
-- 📖 **MCP Documentation**: https://modelcontextprotocol.io
-
----
-
-## Contributing
-
-Contributions are welcome! Feel free to:
-- Report bugs or request features via [GitHub Issues](https://github.com/WhenMoon-afk/claude-memory-mcp/issues)
-- Submit pull requests for improvements
-- Share your use cases and feedback
-
----
+- [NPM Package](https://www.npmjs.com/package/@whenmoon-afk/memory-mcp)
+- [GitHub](https://github.com/WhenMoon-afk/claude-memory-mcp)
+- [Issues](https://github.com/WhenMoon-afk/claude-memory-mcp/issues)
+- [MCP Docs](https://modelcontextprotocol.io)
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
-
-**Copyright (c) 2025 WhenMoon-afk**
-
----
-
-**Built with ❤️ for the MCP community**
+MIT - Copyright (c) 2025 WhenMoon-afk
