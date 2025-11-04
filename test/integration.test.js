@@ -71,7 +71,10 @@ describe('Installer Logic', () => {
     // Check for platform handling
     expect(content).toContain('darwin'); // macOS
     expect(content).toContain('win32'); // Windows
-    expect(content).toContain('cmd /c'); // Windows wrapper
+
+    // v2.1.1: Unified node approach for all platforms
+    expect(content).toContain("command: 'node'");
+    expect(content).toContain('serverPath');
   });
 
   it('should detect correct platform', () => {
@@ -99,21 +102,21 @@ describe('Installer Logic', () => {
 });
 
 describe('Windows Compatibility', () => {
-  it('installer should include cmd /c wrapper for Windows', () => {
+  it('installer should use unified node approach', () => {
     const installPath = join(projectRoot, 'install.js');
     const content = readFileSync(installPath, 'utf-8');
 
-    // Verify Windows-specific handling
-    expect(content).toContain("command: 'cmd'");
-    expect(content).toContain("'/c'");
-    expect(content).toContain('npx');
+    // v2.1.1: Unified node approach (no more cmd /c wrapper)
+    expect(content).toContain("command: 'node'");
+    expect(content).toContain('serverPath');
+    expect(content).toContain('packageRoot');
   });
 
-  it('README should document Windows cmd /c requirement', () => {
+  it('README should document installation process', () => {
     const readmePath = join(projectRoot, 'README.md');
     const content = readFileSync(readmePath, 'utf-8');
 
-    expect(content).toContain('cmd /c');
+    expect(content).toContain('npx @whenmoon-afk/memory-mcp');
     expect(content).toContain('Windows');
   });
 });
@@ -167,10 +170,10 @@ describe('Version Consistency', () => {
     expect(srcVersion).toBe(pkg.version);
   });
 
-  it('should be version 2.1.0', () => {
+  it('should be version 2.1.1', () => {
     const packagePath = join(projectRoot, 'package.json');
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
-    expect(pkg.version).toBe('2.1.0');
+    expect(pkg.version).toBe('2.1.1');
   });
 });

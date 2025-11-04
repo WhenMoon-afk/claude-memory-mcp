@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2025-01-04
+
+### Fixed
+
+- **CRITICAL: Server startup failure** - Fixed installer configuration bug that caused server to crash immediately after installation
+  - **Root cause**: Installer was configuring Claude Desktop to run `npx @whenmoon-afk/memory-mcp`, which executed `install.js` again instead of the actual server
+  - **Symptoms**: JSON parsing errors when Claude tried to connect (installer output sent instead of MCP JSON-RPC protocol)
+  - **Fix**: Installer now configures Claude Desktop with direct path to `dist/index.js` using `node` command
+  - **Impact**: v2.1.0 was completely non-functional; v2.1.1 is a critical hotfix
+- Removed platform-specific Windows notes from installer (now using unified approach for all platforms)
+
+### Technical Details
+
+**Modified Files:**
+- `install.js` - Changed `getMcpServerConfig()` to use `node` + absolute path to `dist/index.js` instead of `npx` command
+- `package.json` - Version bumped to 2.1.1
+- `src/index.ts` - Version string updated to 2.1.1
+
+**How it works now:**
+1. User runs `npx @whenmoon-afk/memory-mcp` → Executes `install.js` (one-time setup)
+2. Installer configures Claude Desktop with: `node /path/to/package/dist/index.js`
+3. Claude Desktop starts server → Runs actual MCP server, not installer
+4. MCP JSON-RPC protocol works correctly
+
+---
+
 ## [2.1.0] - 2025-01-03
 
 ### Added

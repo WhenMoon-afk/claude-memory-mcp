@@ -36,21 +36,15 @@ function getClaudeConfigPath() {
  * Get platform-specific MCP server configuration
  */
 function getMcpServerConfig() {
-  const plat = platform();
+  // Get the absolute path to the installed package
+  const packageRoot = dirname(__dirname);
+  const serverPath = join(packageRoot, 'dist', 'index.js');
 
-  if (plat === 'win32') {
-    // Windows requires cmd /c wrapper for npx
-    return {
-      command: 'cmd',
-      args: ['/c', 'npx', '-y', '@whenmoon-afk/memory-mcp']
-    };
-  } else {
-    // macOS and Linux can use npx directly
-    return {
-      command: 'npx',
-      args: ['-y', '@whenmoon-afk/memory-mcp']
-    };
-  }
+  // All platforms use node directly with the server path
+  return {
+    command: 'node',
+    args: [serverPath]
+  };
 }
 
 /**
@@ -135,11 +129,6 @@ function install() {
 
   console.log('\n📍 Configuration Location:');
   console.log(`   ${configPath}`);
-
-  if (platform() === 'win32') {
-    console.log('\n💡 Windows Note:');
-    console.log('   This installer configured the server with the cmd /c wrapper required for Windows.');
-  }
 
   console.log('\n✨ Installation complete! Enjoy your persistent AI memory!\n');
 }
