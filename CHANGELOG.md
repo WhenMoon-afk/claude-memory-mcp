@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.2] - 2025-01-04
+
+### Fixed
+
+- **CRITICAL: Path resolution bug in installer** - Fixed incorrect path calculation that caused "Cannot find module" errors
+  - **Root cause**: Used `dirname(__dirname)` which went up one directory level too many
+  - **Symptoms**: Server path was `.../node_modules/@whenmoon-afk/dist/index.js` (missing `memory-mcp`)
+  - **Correct path**: `.../node_modules/@whenmoon-afk/memory-mcp/dist/index.js`
+  - **Fix**: Changed to use `__dirname` directly since it's already the package root
+  - **Impact**: v2.1.1 was non-functional; v2.1.2 fixes the path resolution
+
+### Technical Details
+
+**Modified Files:**
+- `install.js:38-48` - Changed `dirname(__dirname)` to `__dirname` for correct path resolution
+- `package.json` - Version bumped to 2.1.2
+- `src/index.ts` - Version string updated to 2.1.2
+- `test/integration.test.js` - Updated version expectation
+
+**Path resolution:**
+- Before: `join(dirname(__dirname), 'dist', 'index.js')` → Missing `memory-mcp` folder
+- After: `join(__dirname, 'dist', 'index.js')` → Correct full path
+
+---
+
 ## [2.1.1] - 2025-01-04
 
 ### Fixed

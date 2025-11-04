@@ -106,10 +106,11 @@ describe('Windows Compatibility', () => {
     const installPath = join(projectRoot, 'install.js');
     const content = readFileSync(installPath, 'utf-8');
 
-    // v2.1.1: Unified node approach (no more cmd /c wrapper)
+    // v2.1.1+: Unified node approach (no more cmd /c wrapper)
+    // v2.1.2: Direct __dirname usage for correct path resolution
     expect(content).toContain("command: 'node'");
     expect(content).toContain('serverPath');
-    expect(content).toContain('packageRoot');
+    expect(content).toContain('__dirname');
   });
 
   it('README should document installation process', () => {
@@ -170,10 +171,10 @@ describe('Version Consistency', () => {
     expect(srcVersion).toBe(pkg.version);
   });
 
-  it('should be version 2.1.1', () => {
+  it('should be version 2.1.2', () => {
     const packagePath = join(projectRoot, 'package.json');
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
-    expect(pkg.version).toBe('2.1.1');
+    expect(pkg.version).toBe('2.1.2');
   });
 });

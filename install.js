@@ -37,8 +37,8 @@ function getClaudeConfigPath() {
  */
 function getMcpServerConfig() {
   // Get the absolute path to the installed package
-  const packageRoot = dirname(__dirname);
-  const serverPath = join(packageRoot, 'dist', 'index.js');
+  // __dirname is already the package root (e.g., .../node_modules/@whenmoon-afk/memory-mcp/)
+  const serverPath = join(__dirname, 'dist', 'index.js');
 
   // All platforms use node directly with the server path
   return {

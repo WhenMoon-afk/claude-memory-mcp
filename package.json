@@ -1,6 +1,6 @@
 {
   "name": "@whenmoon-afk/memory-mcp",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Brain-inspired memory for AI agents - MCP server",
   "type": "module",
   "main": "./dist/index.js",
