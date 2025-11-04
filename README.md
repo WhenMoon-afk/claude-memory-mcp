@@ -7,7 +7,7 @@
 **Local, Persistent Memory for Any MCP-Compatible AI**
 A lightweight, **zero-cloud**, **token-efficient** Model Context Protocol (MCP) server that gives your AI **durable, searchable, and context-aware memory** - entirely under your control.
 
-Built with **TypeScript**, **SQLite + FTS5**, and **no external dependencies**, it runs locally and stores everything in a single, portable `.db` file.
+Built with **TypeScript**, **SQLite + FTS5**, and **minimal runtime dependencies** (MCP SDK + better-sqlite3), it runs locally and stores everything in a single, portable `.db` file.
 
 Works with **Claude Desktop**, **Cursor**, **Windsurf**, or any MCP client.
 
@@ -48,20 +48,24 @@ Works with **Claude Desktop**, **Cursor**, **Windsurf**, or any MCP client.
 - Node.js ≥ 18
 - An **MCP-compatible client** (Claude Desktop, Cursor, Windsurf, etc.)
 
-### Option 1: NPM Package (Recommended)
+### Option 1: NPM Package with Auto-Setup (Recommended)
 
-**Quick start with npx** (no installation needed):
+**Automatic installation** (configures Claude Desktop for you):
 ```bash
 npx @whenmoon-afk/memory-mcp
 ```
 
+This will automatically:
+- Detect your operating system (macOS/Windows/Linux)
+- Add the memory server to your Claude Desktop configuration
+- Create a backup of your existing config
+- Configure the correct command format for your platform
+
+After installation, **restart Claude Desktop completely** (quit and reopen).
+
 **Or install globally**:
 ```bash
 npm install -g @whenmoon-afk/memory-mcp
-```
-
-Then run:
-```bash
 memory-mcp
 ```
 
@@ -86,16 +90,37 @@ Add to your client's MCP config file:
 **Claude Desktop**:
 - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
 - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+- Linux: `~/.config/Claude/claude_desktop_config.json`
 
 **Cursor/Windsurf**: Check your editor's MCP settings
 
-### Using NPM Package (Recommended)
+> **💡 Recommended**: Use the automatic installer (`npx @whenmoon-afk/memory-mcp`) which handles platform differences automatically.
+
+### Manual Configuration (macOS/Linux)
 ```json
 {
   "mcpServers": {
     "memory": {
       "command": "npx",
-      "args": ["@whenmoon-afk/memory-mcp"],
+      "args": ["-y", "@whenmoon-afk/memory-mcp"],
+      "env": {
+        "MEMORY_DB_PATH": "./memory.db"
+      }
+    }
+  }
+}
+```
+
+### Manual Configuration (Windows)
+
+**Windows requires the `cmd /c` wrapper** to execute npx properly:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@whenmoon-afk/memory-mcp"],
       "env": {
         "MEMORY_DB_PATH": "./memory.db"
       }
@@ -251,6 +276,23 @@ Your AI **knows what it knows** — and can ask for more.
 - **Portable**: Copy to USB, cloud sync, or new machine
 - **Backup**: Just copy the file
 - **Tip**: For extra security, store `memory.db` on a **VeraCrypt Encrypted USB drive** (adds friction, but maximum control).
+
+---
+
+## Dependencies
+
+This project uses minimal runtime dependencies to keep the package lightweight:
+
+| Dependency | Version | Purpose |
+|-----------|---------|---------|
+| `@modelcontextprotocol/sdk` | ^1.0.4 | Official MCP protocol implementation |
+| `better-sqlite3` | ^11.0.0 | Fast, native SQLite3 bindings with FTS5 support |
+
+**Why these dependencies?**
+- **MCP SDK**: Required for implementing the Model Context Protocol standard
+- **better-sqlite3**: Native performance for full-text search and database operations, essential for memory recall speed
+
+All other dependencies are dev-only (TypeScript, testing, linting).
 
 ---
 
