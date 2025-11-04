@@ -34,7 +34,7 @@ const config = {
 const server = new Server(
   {
     name: '@whenmoon-afk/memory-mcp',
-    version: '2.0.0',
+    version: '2.1.0',
   },
   {
     capabilities: {

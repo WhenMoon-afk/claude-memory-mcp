@@ -1,20 +1,22 @@
 {
   "name": "@whenmoon-afk/memory-mcp",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Brain-inspired memory for AI agents - MCP server",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "memory-mcp": "dist/index.js"
+    "memory-mcp": "install.js"
   },
   "files": [
     "dist/",
+    "install.js",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "prepare": "npm run build",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
