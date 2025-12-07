@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  memory-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: memory-mcp:latest
+    container_name: memory-mcp-server
+
+    # Volume mapping for persistent database
+    volumes:
+      - ./data:/data
+
+    # Environment variables
+    environment:
+      - MEMORY_DB_PATH=/data/memory.db
+      - DEFAULT_TTL_DAYS=90
+      - NODE_ENV=production
+      # Optional: Add MEMORY_DB_DRIVER for driver selection
+      # - MEMORY_DB_DRIVER=better-sqlite3
+
+    # Stdin/stdout for MCP protocol communication
+    stdin_open: true
+    tty: true
+
+    # Resource limits (optional)
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    # Restart policy
+    restart: unless-stopped
+
+    # Note: No ports exposed - this is a stdio-based MCP server
+    # Communication happens via stdin/stdout, not HTTP
