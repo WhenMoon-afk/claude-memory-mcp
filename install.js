@@ -14,6 +14,25 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
+ * Get platform-specific database path
+ */
+function getDbPath() {
+  const plat = platform();
+
+  switch (plat) {
+    case 'darwin': // macOS
+      return join(homedir(), '.claude-memories', 'memory.db');
+
+    case 'win32': // Windows
+      return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'claude-memories', 'memory.db');
+
+    default: // Linux and others
+      const dataHome = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
+      return join(dataHome, 'claude-memories', 'memory.db');
+  }
+}
+
+/**
  * Get Claude Desktop config path based on platform
  */
 function getClaudeConfigPath() {
@@ -35,7 +54,7 @@ function getClaudeConfigPath() {
 /**
  * Get platform-specific MCP server configuration
  */
-function getMcpServerConfig() {
+function getMcpServerConfig(dbPath) {
   // Get the absolute path to the installed package
   // __dirname is already the package root (e.g., .../node_modules/@whenmoon-afk/memory-mcp/)
   const serverPath = join(__dirname, 'dist', 'index.js');
@@ -43,7 +62,10 @@ function getMcpServerConfig() {
   // All platforms use node directly with the server path
   return {
     command: 'node',
-    args: [serverPath]
+    args: [serverPath],
+    env: {
+      MEMORY_DB_PATH: dbPath
+    }
   };
 }
 
@@ -55,6 +77,25 @@ function install() {
 
   const configPath = getClaudeConfigPath();
   const configDir = dirname(configPath);
+
+  const dbPath = getDbPath();
+  const dbDir = dirname(dbPath);
+
+  // Show paths to user
+  console.log('📍 Paths:');
+  console.log(`   Config: ${configPath}`);
+  console.log(`   Database: ${dbPath}\n`);
+
+  // Ensure database directory exists
+  if (!existsSync(dbDir)) {
+    console.log(`📁 Creating database directory: ${dbDir}`);
+    try {
+      mkdirSync(dbDir, { recursive: true });
+    } catch (error) {
+      console.error(`❌ Failed to create database directory: ${error.message}`);
+      process.exit(1);
+    }
+  }
 
   // Ensure config directory exists
   if (!existsSync(configDir)) {
@@ -100,7 +141,7 @@ function install() {
   }
 
   // Add or update memory server configuration
-  const serverConfig = getMcpServerConfig();
+  const serverConfig = getMcpServerConfig(dbPath);
   const serverExists = config.mcpServers.memory !== undefined;
 
   config.mcpServers.memory = serverConfig;
@@ -127,8 +168,9 @@ function install() {
   console.log('2. The memory server will be available automatically');
   console.log('3. Try asking Claude to "store a memory" or "recall memories about..."');
 
-  console.log('\n📍 Configuration Location:');
-  console.log(`   ${configPath}`);
+  console.log('\n📍 Configuration Locations:');
+  console.log(`   Claude config: ${configPath}`);
+  console.log(`   Memory database: ${dbPath}`);
 
   console.log('\n✨ Installation complete! Enjoy your persistent AI memory!\n');
 }
