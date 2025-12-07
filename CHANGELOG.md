@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] - 2025-12-07
+
+### Added
+- **Pluggable database driver abstraction** - Support for different SQLite implementations
+  - `MEMORY_DB_DRIVER` environment variable to select driver
+  - Default: `better-sqlite3` (production)
+  - Stub: `sqljs` (future WebAssembly support)
+- **Platform-specific database location** - Installer now configures OS-appropriate paths
+  - macOS: `~/.claude-memories/memory.db`
+  - Windows: `%APPDATA%/claude-memories/memory.db`
+  - Linux: `~/.local/share/claude-memories/memory.db`
+- **Docker deployment support** - Containerized deployment option
+  - Multi-stage Dockerfile for optimized builds
+  - docker-compose.yml with persistent volume configuration
+- **Claude Code installation documentation** - Guide for terminal-based Claude users
+  - Global memory with `--scope user`
+  - Per-project memory with `--scope local`
+
+### Changed
+- Installer creates database directory automatically
+- Installer displays all configuration paths during setup
+- Installer passes `MEMORY_DB_PATH` via MCP config environment
+
+### Technical Details
+- Database abstraction uses DbDriver interface for future extensibility
+- Backward compatible: existing `./memory.db` setups continue working
+- Environment variable override always takes precedence
+
+---
+
 ## [2.1.2] - 2025-11-04
 
 ### Fixed
