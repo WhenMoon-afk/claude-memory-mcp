@@ -83,6 +83,150 @@ npm run build
 
 ---
 
+### Claude Code Installation
+
+For users of Claude Code (terminal-based Claude), use the `claude mcp add` command:
+
+**Global Memory (user-wide, persists across all projects):**
+```bash
+claude mcp add memory -s user -- npx -y @whenmoon-afk/memory-mcp
+```
+
+**Per-Project Memory (project-specific, stored in project directory):**
+```bash
+claude mcp add memory -s local -e MEMORY_DB_PATH=./memory.db -- npx -y @whenmoon-afk/memory-mcp
+```
+
+**Verify installation:**
+```bash
+claude mcp list
+```
+
+> **Tip:** Use `--scope user` for personal knowledge that spans projects. Use `--scope local` with `MEMORY_DB_PATH=./memory.db` for codebase-specific context that stays with the repository.
+
+---
+
+## Docker Deployment
+
+Run the Memory MCP server in a containerized environment with persistent storage.
+
+### Prerequisites
+- Docker installed ([Get Docker](https://docs.docker.com/get-docker/))
+- Docker Compose (included with Docker Desktop)
+
+### Quick Start with Docker Compose
+
+**1. Clone the repository:**
+```bash
+git clone https://github.com/WhenMoon-afk/claude-memory-mcp.git
+cd claude-memory-mcp
+```
+
+**2. Start the container:**
+```bash
+docker-compose up -d
+```
+
+This will:
+- Build the Docker image with Node.js 20
+- Create a persistent volume at `./data/` for the database
+- Start the MCP server in detached mode
+
+**3. View logs:**
+```bash
+docker-compose logs -f memory-mcp
+```
+
+**4. Stop the container:**
+```bash
+docker-compose down
+```
+
+### Manual Docker Build
+
+**Build the image:**
+```bash
+docker build -t memory-mcp:latest .
+```
+
+**Run the container:**
+```bash
+# Create data directory
+mkdir -p ./data
+
+# Run container with volume mount
+docker run -d \
+  --name memory-mcp \
+  -v "$(pwd)/data:/data" \
+  -e MEMORY_DB_PATH=/data/memory.db \
+  -e DEFAULT_TTL_DAYS=90 \
+  memory-mcp:latest
+```
+
+**Interact with the running container:**
+```bash
+# View logs
+docker logs -f memory-mcp
+
+# Execute commands inside container
+docker exec -it memory-mcp /bin/bash
+
+# Stop container
+docker stop memory-mcp
+
+# Remove container
+docker rm memory-mcp
+```
+
+### Volume Persistence
+
+The database is stored in a Docker volume mapped to `./data/` on your host:
+
+| Location | Path |
+|----------|------|
+| **Host** | `./data/memory.db` |
+| **Container** | `/data/memory.db` |
+
+**To backup your database:**
+```bash
+cp ./data/memory.db ./memory-backup-$(date +%Y%m%d).db
+```
+
+**To restore from backup:**
+```bash
+cp ./memory-backup-20250105.db ./data/memory.db
+docker-compose restart
+```
+
+### Environment Variables (Docker)
+
+Configure via `docker-compose.yml` or `-e` flags:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEMORY_DB_PATH` | `/data/memory.db` | Database file location inside container |
+| `DEFAULT_TTL_DAYS` | `90` | Default memory expiration (days) |
+| `MEMORY_DB_DRIVER` | `better-sqlite3` | Database driver (better-sqlite3 or sqljs) |
+| `NODE_ENV` | `production` | Node environment |
+
+### Docker Notes
+
+- **No HTTP Port**: This is a stdio-based MCP server. Communication happens via stdin/stdout, not HTTP requests.
+- **Native Dependencies**: Uses multi-stage build to compile better-sqlite3 native bindings
+- **Resource Limits**: Default docker-compose.yml sets 512MB memory limit (adjustable)
+- **Auto-restart**: Container restarts automatically unless explicitly stopped
+
+### Using with MCP Clients
+
+When running in Docker, you'll need to configure your MCP client to communicate with the containerized server. The exact method depends on your client:
+
+- **For local development**: Use `docker exec` to run commands
+- **For production**: Consider using a container orchestration platform (Kubernetes, ECS, etc.)
+
+> **Tip**: For most use cases, the **NPM package installation** (Option 1) is simpler and more suitable than Docker, since MCP servers typically run locally and communicate directly with the AI client via stdio.
+
+---
+
 ## Integrate with Your MCP Client
 
 Add to your client's MCP config file:
@@ -298,10 +442,16 @@ All other dependencies are dev-only (TypeScript, testing, linting).
 
 ## Environment Variables
 
-| Var | Default | Description |
-|-----|---------|-----------|
-| `MEMORY_DB_PATH` | `./memory.db` | Database file location |
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MEMORY_DB_PATH` | Platform-specific* | Database file location |
+| `MEMORY_DB_DRIVER` | `better-sqlite3` | Database driver (`better-sqlite3` or `sqljs`) |
 | `DEFAULT_TTL_DAYS` | `90` | Default time-to-live for memories (days) |
+
+*Default database locations (when installed via `npx`):
+- **macOS:** `~/.claude-memories/memory.db`
+- **Windows:** `%APPDATA%\claude-memories\memory.db`
+- **Linux:** `~/.local/share/claude-memories/memory.db`
 
 ---
 
