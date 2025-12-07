@@ -2,7 +2,7 @@
  * Memory forget tool - Soft delete memories
  */
 
-import type Database from 'better-sqlite3';
+import type { DbDriver } from '../database/db-driver.js';
 import type { ForgetResponse } from '../types/index.js';
 import { now, generateId, serializeMetadata } from '../database/connection.js';
 import { ValidationError } from '../types/index.js';
@@ -11,7 +11,7 @@ import { ValidationError } from '../types/index.js';
  * Forget (soft delete) a memory
  */
 export async function memoryForget(
-  db: Database.Database,
+  db: DbDriver,
   id: string,
   reason?: string
 ): Promise<ForgetResponse> {

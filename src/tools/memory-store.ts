@@ -3,7 +3,7 @@
  * v2.0: Merged create + update functionality with summary generation
  */
 
-import type Database from 'better-sqlite3';
+import type { DbDriver } from '../database/db-driver.js';
 import type { MemoryInput, Memory, Entity, StandardMemory } from '../types/index.js';
 import {
   extractEntities,
@@ -56,7 +56,7 @@ interface MemoryRowDB {
  * If input.id is not provided, creates new memory
  */
 export async function memoryStore(
-  db: Database.Database,
+  db: DbDriver,
   input: MemoryInput
 ): Promise<StandardMemory> {
   // Determine if this is an update or create
@@ -73,7 +73,7 @@ export async function memoryStore(
  * Create a new memory
  */
 async function createMemory(
-  db: Database.Database,
+  db: DbDriver,
   input: MemoryInput
 ): Promise<StandardMemory> {
   // Validate content
@@ -227,7 +227,7 @@ async function createMemory(
  * Update an existing memory
  */
 async function updateMemory(
-  db: Database.Database,
+  db: DbDriver,
   input: MemoryInput
 ): Promise<StandardMemory> {
   // Check if memory exists
@@ -420,7 +420,7 @@ async function updateMemory(
  * Create or get existing entity
  */
 function createOrGetEntity(
-  db: Database.Database,
+  db: DbDriver,
   name: string,
   context: string
 ): string {

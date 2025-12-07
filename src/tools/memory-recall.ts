@@ -3,7 +3,7 @@
  * v3.0: Dual-response pattern (index + details) for skill-like progressive loading
  */
 
-import type Database from 'better-sqlite3';
+import type { DbDriver } from '../database/db-driver.js';
 import type {
   SearchOptions,
   SearchOptionsInternal,
@@ -24,7 +24,7 @@ import { estimateTokens } from '../utils/token-estimator.js';
  * Returns: index (all matches as summaries) + details (top matches with full content)
  */
 export async function memoryRecall(
-  db: Database.Database,
+  db: DbDriver,
   options: SearchOptions
 ): Promise<RecallResponse> {
   try {

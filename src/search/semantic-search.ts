@@ -3,7 +3,7 @@
  * Replaces vector embeddings with lightweight keyword/phrase matching
  */
 
-import type Database from 'better-sqlite3';
+import type { DbDriver } from '../database/db-driver.js';
 import type {
   Memory,
   MemorySearchResult,
@@ -44,7 +44,7 @@ interface EntityJoinRow extends EntityRow {
  * Returns: { results: MemorySearchResult[], totalCount: number }
  */
 export function semanticSearch(
-  db: Database.Database,
+  db: DbDriver,
   options: SearchOptionsInternal
 ): { results: MemorySearchResult[]; totalCount: number } {
   const {
@@ -103,7 +103,7 @@ export function semanticSearch(
  * Get filtered candidate memories using FTS5
  */
 function getFilteredCandidates(
-  db: Database.Database,
+  db: DbDriver,
   ftsQuery: string,
   filters: SearchFilters
 ): Memory[] {
@@ -203,7 +203,7 @@ function calculateRecencyScore(lastAccessed: number, now: number): number {
  * Enrich results with entities and provenance
  */
 function enrichResults(
-  db: Database.Database,
+  db: DbDriver,
   results: MemorySearchResult[]
 ): MemorySearchResult[] {
   if (results.length === 0) {
@@ -228,7 +228,7 @@ function enrichResults(
  * Batch fetch entities for memories
  */
 function batchFetchEntities(
-  db: Database.Database,
+  db: DbDriver,
   memoryIds: string[]
 ): Map<string, Entity[]> {
   const entitiesMap = new Map<string, Entity[]>();
@@ -269,7 +269,7 @@ function batchFetchEntities(
  * Batch fetch provenance for memories
  */
 function batchFetchProvenance(
-  db: Database.Database,
+  db: DbDriver,
   memoryIds: string[]
 ): Map<string, Provenance[]> {
   const provenanceMap = new Map<string, Provenance[]>();

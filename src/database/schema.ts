@@ -2,14 +2,14 @@
  * Database schema definitions and migrations for Memory MCP
  */
 
-import type Database from 'better-sqlite3';
+import type { DbDriver } from './db-driver.js';
 
 export const SCHEMA_VERSION = 3;
 
 /**
  * Initialize database schema
  */
-export function initializeSchema(db: Database.Database): void {
+export function initializeSchema(db: DbDriver): void {
   // Enable foreign keys
   db.pragma('foreign_keys = ON');
 
@@ -35,10 +35,10 @@ export function initializeSchema(db: Database.Database): void {
 /**
  * Apply migrations from current version to latest
  */
-function applyMigrations(db: Database.Database, fromVersion: number): void {
+function applyMigrations(db: DbDriver, fromVersion: number): void {
   const migrations = [
     // Migration 1: Initial schema
-    (db: Database.Database) => {
+    (db: DbDriver) => {
       db.exec(`
         -- Memories table: Core memory storage
         CREATE TABLE IF NOT EXISTS memories (
@@ -115,7 +115,7 @@ function applyMigrations(db: Database.Database, fromVersion: number): void {
     },
 
     // Migration 2: Add summary and access_count fields for v2.0 optimization
-    (db: Database.Database) => {
+    (db: DbDriver) => {
       // Add summary column (TEXT, will be NOT NULL after backfill)
       db.exec(`
         ALTER TABLE memories ADD COLUMN summary TEXT;
@@ -167,7 +167,7 @@ function applyMigrations(db: Database.Database, fromVersion: number): void {
     },
 
     // Migration 3: Add FTS5 for keyword search (replaces vector embeddings)
-    (db: Database.Database) => {
+    (db: DbDriver) => {
       // Create FTS5 virtual table for full-text search on memory content
       db.exec(`
         CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -249,7 +249,7 @@ function applyMigrations(db: Database.Database, fromVersion: number): void {
 /**
  * Create optimized views for common queries
  */
-export function createViews(db: Database.Database): void {
+export function createViews(db: DbDriver): void {
   // View: Active memories with entity counts
   db.exec(`
     CREATE VIEW IF NOT EXISTS v_active_memories AS
@@ -284,7 +284,7 @@ export function createViews(db: Database.Database): void {
 /**
  * Optimize database for performance
  */
-export function optimizeDatabase(db: Database.Database): void {
+export function optimizeDatabase(db: DbDriver): void {
   // Analyze tables for query optimization
   db.exec('ANALYZE;');
 
@@ -311,7 +311,7 @@ export interface DatabaseStats {
   oldest_memory_age_days: number;
 }
 
-export function getDatabaseStats(db: Database.Database): DatabaseStats {
+export function getDatabaseStats(db: DbDriver): DatabaseStats {
   const now = Date.now();
 
   const stats = {

@@ -13,7 +13,7 @@ import {
   ErrorCode,
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
-import type Database from 'better-sqlite3';
+import type { DbDriver } from './database/db-driver.js';
 import { getDatabase, closeDatabase } from './database/connection.js';
 import { memoryStore } from './tools/memory-store.js';
 import { memoryRecall } from './tools/memory-recall.js';
@@ -26,6 +26,7 @@ import type { MemoryInput, SearchOptions } from './types/index.js';
 const config = {
   databasePath: process.env['MEMORY_DB_PATH'] || './memory.db',
   defaultTTLDays: parseInt(process.env['DEFAULT_TTL_DAYS'] || '90'),
+  databaseDriver: process.env['MEMORY_DB_DRIVER'] || 'better-sqlite3',
 };
 
 /**
@@ -44,7 +45,7 @@ const server = new Server(
 );
 
 // Database instance (initialized in main)
-let db: Database.Database;
+let db: DbDriver;
 
 /**
  * Tool definitions
@@ -229,6 +230,7 @@ async function main() {
     // Log startup info to stderr (not stdout, which is used for MCP protocol)
     console.error('Memory MCP v2.0 server started');
     console.error(`Database: ${config.databasePath}`);
+    console.error(`Driver: ${config.databaseDriver}`);
   } catch (error) {
     console.error('Failed to start server:', error);
     throw error;

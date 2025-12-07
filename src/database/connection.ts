@@ -2,9 +2,10 @@
  * Database connection management and utilities
  */
 
-import Database from 'better-sqlite3';
 import { existsSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
+import type { DbDriver } from './db-driver.js';
+import { createDriverFromEnv } from './driver-factory.js';
 import {
   initializeSchema,
   createViews,
@@ -14,12 +15,12 @@ import {
 } from './schema.js';
 import { DatabaseError } from '../types/index.js';
 
-let dbInstance: Database.Database | null = null;
+let dbInstance: DbDriver | null = null;
 
 /**
  * Get or create database connection
  */
-export function getDatabase(path: string): Database.Database {
+export function getDatabase(path: string): DbDriver {
   if (dbInstance) {
     return dbInstance;
   }
@@ -31,9 +32,12 @@ export function getDatabase(path: string): Database.Database {
       mkdirSync(dir, { recursive: true });
     }
 
-    // Open database
-    dbInstance = new Database(path, {
-      verbose: process.env['NODE_ENV'] === 'development' ? () => {} : undefined,
+    // Open database using driver factory (respects MEMORY_DB_DRIVER env var)
+    dbInstance = createDriverFromEnv({
+      path,
+      options: {
+        verbose: process.env['NODE_ENV'] === 'development' ? () => {} : undefined,
+      },
     });
 
     // Initialize schema
@@ -67,7 +71,7 @@ export function closeDatabase(): void {
 /**
  * Execute a transaction
  */
-export function transaction<T>(db: Database.Database, fn: () => T): T {
+export function transaction<T>(db: DbDriver, fn: () => T): T {
   const txn = db.transaction(fn);
   return txn();
 }
@@ -116,7 +120,7 @@ export interface PruneResult {
 }
 
 export function pruneMemories(
-  db: Database.Database,
+  db: DbDriver,
   olderThanDays: number = 0,
   dryRun: boolean = false
 ): PruneResult {
@@ -196,6 +200,6 @@ export function pruneMemories(
 /**
  * Get database statistics
  */
-export function getStats(db: Database.Database): DatabaseStats {
+export function getStats(db: DbDriver): DatabaseStats {
   return getDatabaseStats(db);
 }
