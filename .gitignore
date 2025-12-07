@@ -60,3 +60,6 @@ coverage/
 tmp/
 temp/
 *.tmp
+
+# Planning documents
+.planning/
