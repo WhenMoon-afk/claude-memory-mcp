@@ -35,7 +35,9 @@ describe('Package Integrity', () => {
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
     expect(pkg.bin).toBeDefined();
-    expect(pkg.bin['memory-mcp']).toBe('install.js');
+    // v2.2.1: bin points directly to server, not installer
+    // npx should start the MCP server, not run installation
+    expect(pkg.bin['memory-mcp']).toBe('dist/index.js');
   });
 
   it('should include required files in package', () => {
@@ -171,10 +173,10 @@ describe('Version Consistency', () => {
     expect(srcVersion).toBe(pkg.version);
   });
 
-  it('should be version 2.2.0', () => {
+  it('should be version 2.2.1', () => {
     const packagePath = join(projectRoot, 'package.json');
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
-    expect(pkg.version).toBe('2.2.0');
+    expect(pkg.version).toBe('2.2.1');
   });
 });
