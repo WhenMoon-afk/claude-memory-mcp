@@ -5,6 +5,9 @@
  * Brain-inspired memory system with smart context loading
  */
 
+import { homedir, platform } from 'os';
+import { join, dirname } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -21,10 +24,45 @@ import { memoryForget } from './tools/memory-forget.js';
 import type { MemoryInput, SearchOptions } from './types/index.js';
 
 /**
+ * Get platform-specific default database path
+ * Ensures consistent location across Claude Desktop, Claude Code, and other clients
+ */
+function getDefaultDbPath(): string {
+  const plat = platform();
+
+  let dbPath: string;
+
+  if (plat === 'darwin') {
+    // macOS: ~/.claude-memories/memory.db
+    dbPath = join(homedir(), '.claude-memories', 'memory.db');
+  } else if (plat === 'win32') {
+    // Windows: %APPDATA%/claude-memories/memory.db
+    dbPath = join(
+      process.env['APPDATA'] || join(homedir(), 'AppData', 'Roaming'),
+      'claude-memories',
+      'memory.db'
+    );
+  } else {
+    // Linux/other: XDG compliant ~/.local/share/claude-memories/memory.db
+    const xdgData =
+      process.env['XDG_DATA_HOME'] || join(homedir(), '.local', 'share');
+    dbPath = join(xdgData, 'claude-memories', 'memory.db');
+  }
+
+  // Ensure directory exists
+  const dbDir = dirname(dbPath);
+  if (!existsSync(dbDir)) {
+    mkdirSync(dbDir, { recursive: true });
+  }
+
+  return dbPath;
+}
+
+/**
  * Configuration from environment or defaults
  */
 const config = {
-  databasePath: process.env['MEMORY_DB_PATH'] || './memory.db',
+  databasePath: process.env['MEMORY_DB_PATH'] || getDefaultDbPath(),
   defaultTTLDays: parseInt(process.env['DEFAULT_TTL_DAYS'] || '90'),
   databaseDriver: process.env['MEMORY_DB_DRIVER'] || 'better-sqlite3',
 };
@@ -35,7 +73,7 @@ const config = {
 const server = new Server(
   {
     name: '@whenmoon-afk/memory-mcp',
-    version: '2.2.1',
+    version: '2.2.2',
   },
   {
     capabilities: {
