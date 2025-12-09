@@ -173,10 +173,10 @@ describe('Version Consistency', () => {
     expect(srcVersion).toBe(pkg.version);
   });
 
-  it('should be version 2.2.1', () => {
+  it('should be version 2.2.2', () => {
     const packagePath = join(projectRoot, 'package.json');
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
-    expect(pkg.version).toBe('2.2.1');
+    expect(pkg.version).toBe('2.2.2');
   });
 });

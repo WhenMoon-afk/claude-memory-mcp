@@ -87,9 +87,15 @@ npm run build
 
 For users of Claude Code (terminal-based Claude), use the `claude mcp add` command:
 
-**Global Memory (user-wide, persists across all projects):**
+**Recommended (user-wide installation):**
 ```bash
-claude mcp add memory -s user -- npx -y @whenmoon-afk/memory-mcp
+claude mcp add memory --scope user -- npx -y @whenmoon-afk/memory-mcp
+```
+
+**Alternative (direct node invocation, more reliable, no npx):**
+```bash
+npm install -g @whenmoon-afk/memory-mcp
+claude mcp add memory --scope user -- node $(npm root -g)/@whenmoon-afk/memory-mcp/dist/index.js
 ```
 
 **Per-Project Memory (project-specific, stored in project directory):**
@@ -100,7 +106,11 @@ claude mcp add memory -s local -e MEMORY_DB_PATH=./memory.db -- npx -y @whenmoon
 **Verify installation:**
 ```bash
 claude mcp list
+# Or within a Claude Code session:
+/mcp
 ```
+
+> **Note:** The server automatically uses platform-appropriate database location. Both Claude Desktop and Claude Code will share the same memory database by default.
 
 > **Tip:** Use `--scope user` for personal knowledge that spans projects. Use `--scope local` with `MEMORY_DB_PATH=./memory.db` for codebase-specific context that stays with the repository.
 

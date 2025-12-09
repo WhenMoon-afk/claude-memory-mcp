@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.2] - 2025-12-09
+
+### Fixed
+
+- **Platform-aware database defaults** - Server now uses OS-appropriate database location regardless of how it's started
+  - Previously Claude Code users got `./memory.db` in project directory (wrong)
+  - Now all clients use consistent location by default
+  - `MEMORY_DB_PATH` environment variable still works for custom locations
+
+| Platform | Default Database Location |
+|----------|---------------------------|
+| macOS | `~/.claude-memories/memory.db` |
+| Windows | `%APPDATA%/claude-memories/memory.db` |
+| Linux | `~/.local/share/claude-memories/memory.db` |
+
+### Technical Details
+
+- Added `getDefaultDbPath()` function to `src/index.ts`
+- Directory auto-created on first run if it doesn't exist
+- Backward compatible with existing `MEMORY_DB_PATH` configurations
+
+---
+
 ## [2.2.1] - 2025-12-08
 
 ### Fixed
