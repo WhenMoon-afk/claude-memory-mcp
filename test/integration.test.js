@@ -35,9 +35,8 @@ describe('Package Integrity', () => {
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
     expect(pkg.bin).toBeDefined();
-    // v2.2.1: bin points directly to server, not installer
-    // npx should start the MCP server, not run installation
-    expect(pkg.bin['memory-mcp']).toBe('dist/index.js');
+    // v2.3.0: bin points to installer for Claude Desktop auto-setup
+    expect(pkg.bin['memory-mcp']).toBe('install.js');
   });
 
   it('should include required files in package', () => {

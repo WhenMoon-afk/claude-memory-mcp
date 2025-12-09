@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "memory-mcp": "dist/index.js"
+    "memory-mcp": "install.js"
   },
   "files": [
     "dist/",
