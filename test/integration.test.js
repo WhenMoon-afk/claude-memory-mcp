@@ -131,8 +131,8 @@ describe('Documentation', () => {
     // Should NOT contain the false claim
     expect(content).not.toContain('no external dependencies');
 
-    // Should mention actual dependencies
-    expect(content).toContain('minimal runtime dependencies');
+    // Should mention actual dependencies (v2.3.0: simplified README)
+    expect(content).toContain('minimal dependencies');
     expect(content).toContain('@modelcontextprotocol/sdk');
     expect(content).toContain('better-sqlite3');
   });
@@ -142,7 +142,7 @@ describe('Documentation', () => {
     const content = readFileSync(readmePath, 'utf-8');
 
     expect(content).toContain('## Dependencies');
-    expect(content).toContain('MCP SDK');
+    expect(content).toContain('@modelcontextprotocol/sdk');
     expect(content).toContain('better-sqlite3');
   });
 
@@ -150,9 +150,9 @@ describe('Documentation', () => {
     const readmePath = join(projectRoot, 'README.md');
     const content = readFileSync(readmePath, 'utf-8');
 
-    expect(content).toContain('Automatic installation');
+    // v2.3.0: Simplified README with streamlined installation docs
+    expect(content).toContain('automatically configure Claude Desktop');
     expect(content).toContain('npx @whenmoon-afk/memory-mcp');
-    expect(content).toContain('Auto-Setup');
   });
 });
 
@@ -172,10 +172,10 @@ describe('Version Consistency', () => {
     expect(srcVersion).toBe(pkg.version);
   });
 
-  it('should be version 2.2.2', () => {
+  it('should be version 2.3.0', () => {
     const packagePath = join(projectRoot, 'package.json');
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
-    expect(pkg.version).toBe('2.2.2');
+    expect(pkg.version).toBe('2.3.0');
   });
 });

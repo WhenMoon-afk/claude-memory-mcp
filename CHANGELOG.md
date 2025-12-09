@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] - 2025-12-09
+
+### Changed
+- **Scope clarification**: Memory MCP is now focused on Claude Desktop
+- Simplified README to essential installation and usage information
+- Bin entry restored to install.js for Claude Desktop auto-configuration
+
+### Removed
+- Docker support (Dockerfile, docker-compose.yml, .dockerignore) - was untested
+- Claude Code installation documentation - use native Claude Code memory or episodic-memory plugin instead
+
+### Fixed
+- Bin entry now correctly points to install.js (installer) instead of dist/index.js (server)
+- Running "npx @whenmoon-afk/memory-mcp" now properly runs the Claude Desktop installer
+
+---
+
 ## [2.2.2] - 2025-12-09
 
 ### Fixed
