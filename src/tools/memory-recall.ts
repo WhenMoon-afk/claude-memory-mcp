@@ -23,10 +23,10 @@ import { estimateTokens } from '../utils/token-estimator.js';
  * Recall memories using semantic search with intelligent token budgeting
  * Returns: index (all matches as summaries) + details (top matches with full content)
  */
-export async function memoryRecall(
+export function memoryRecall(
   db: DbDriver,
   options: SearchOptions
-): Promise<RecallResponse> {
+): RecallResponse {
   try {
     console.error('[memoryRecall] Starting recall with options:', JSON.stringify(options));
 

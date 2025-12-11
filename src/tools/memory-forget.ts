@@ -10,11 +10,11 @@ import { ValidationError } from '../types/index.js';
 /**
  * Forget (soft delete) a memory
  */
-export async function memoryForget(
+export function memoryForget(
   db: DbDriver,
   id: string,
   reason?: string
-): Promise<ForgetResponse> {
+): ForgetResponse {
   // Check if memory exists
   const existing = db
     .prepare('SELECT id FROM memories WHERE id = ? AND is_deleted = 0')

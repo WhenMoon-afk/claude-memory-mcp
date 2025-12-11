@@ -49,7 +49,7 @@ export function createDriver(type: DriverType, config: DriverConfig): DbDriver {
 
     default:
       throw new Error(
-        `Unsupported driver type: ${type}\n` +
+        `Unsupported driver type: ${type as string}\n` +
           'Supported drivers: better-sqlite3, sqljs\n' +
           'Set MEMORY_DB_DRIVER environment variable to select driver.'
       );

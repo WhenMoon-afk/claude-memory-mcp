@@ -211,20 +211,20 @@ server.setRequestHandler(ListToolsRequestSchema, () => {
 /**
  * Tool execution handler
  */
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, (request) => {
   try {
     const { name, arguments: args } = request.params;
 
     switch (name) {
       case 'memory_store': {
-        const result = await memoryStore(db, args as unknown as MemoryInput);
+        const result = memoryStore(db, args as unknown as MemoryInput);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
       }
 
       case 'memory_recall': {
-        const result = await memoryRecall(db, args as unknown as SearchOptions);
+        const result = memoryRecall(db, args as unknown as SearchOptions);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
@@ -232,7 +232,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       case 'memory_forget': {
         const { id, reason } = args as { id: string; reason?: string };
-        const result = await memoryForget(db, id, reason);
+        const result = memoryForget(db, id, reason);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };

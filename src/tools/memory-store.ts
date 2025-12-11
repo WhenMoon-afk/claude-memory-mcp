@@ -55,10 +55,10 @@ interface MemoryRowDB {
  * If input.id is provided, updates existing memory
  * If input.id is not provided, creates new memory
  */
-export async function memoryStore(
+export function memoryStore(
   db: DbDriver,
   input: MemoryInput
-): Promise<StandardMemory> {
+): StandardMemory {
   // Determine if this is an update or create
   const isUpdate = !!input.id;
 
@@ -72,10 +72,10 @@ export async function memoryStore(
 /**
  * Create a new memory
  */
-async function createMemory(
+function createMemory(
   db: DbDriver,
   input: MemoryInput
-): Promise<StandardMemory> {
+): StandardMemory {
   // Validate content
   const validation = validateContent(input.content, input.type);
   if (!validation.valid) {
@@ -226,10 +226,10 @@ async function createMemory(
 /**
  * Update an existing memory
  */
-async function updateMemory(
+function updateMemory(
   db: DbDriver,
   input: MemoryInput
-): Promise<StandardMemory> {
+): StandardMemory {
   // Check if memory exists
   const existing = db
     .prepare('SELECT * FROM memories WHERE id = ? AND is_deleted = 0')
