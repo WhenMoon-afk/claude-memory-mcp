@@ -103,6 +103,10 @@ Add this to your config (the installer does this automatically):
 - **GitHub**: https://github.com/WhenMoon-afk/claude-memory-mcp
 - **Issues**: https://github.com/WhenMoon-afk/claude-memory-mcp/issues
 
+## Disclaimer
+
+This project is provided as-is for use with Claude Desktop. It is actively maintained but may have breaking changes between versions during active development. For production deployments, pin specific versions in your dependencies.
+
 ## License
 
 MIT

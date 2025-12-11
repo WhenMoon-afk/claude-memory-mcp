@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code installation documentation - use native Claude Code memory or episodic-memory plugin instead
 
 ### Fixed
+- Removed async/await from tool functions (memoryStore, memoryRecall, memoryForget) - all database operations are synchronous with better-sqlite3
+- Fixed ESLint require-await and template literal errors
 - Bin entry now correctly points to install.js (installer) instead of dist/index.js (server)
 - Running "npx @whenmoon-afk/memory-mcp" now properly runs the Claude Desktop installer
 
