@@ -105,7 +105,7 @@ Add this to your config (the installer does this automatically):
 
 ## Disclaimer
 
-This project is provided as-is for use with Claude Desktop. It is actively maintained but may have breaking changes between versions during active development. For production deployments, pin specific versions in your dependencies.
+This project is provided as-is. It is actively maintained but may have breaking changes between minor versions.
 
 ## License
 
