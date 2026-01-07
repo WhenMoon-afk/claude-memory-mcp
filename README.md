@@ -167,32 +167,6 @@ The `npx github:` method bypasses npm cache. Alternatively:
 
 First run requires downloading and installing dependencies (can take 30+ seconds). Subsequent runs are faster but still fetch from GitHub. For faster startup, use the global install method.
 
-## Database Consolidation
-
-If you have multiple memory database files (e.g., from different Claude Desktop versions or backups), you can merge them.
-
-**Discover existing databases:**
-```bash
-npx @whenmoon-afk/memory-mcp-consolidate --discover
-```
-
-This searches common locations and shows all found databases with their memory counts, sizes, and WAL file status.
-
-**Merge databases:**
-```bash
-npx @whenmoon-afk/memory-mcp-consolidate ~/.memory-mcp/merged.db ~/old-db1.db ~/old-db2.db
-```
-
-Features:
-- Auto-discovers databases in common locations
-- Shows WAL file status (indicates uncommitted data)
-- Deduplicates by content hash (same content + type = duplicate)
-- Keeps most recently accessed version when duplicates found
-- Merges access counts from all duplicates
-- Preserves all provenance/audit records
-- Checkpoints WAL files before reading
-- Source databases are NOT modified
-
 ## Dependencies
 
 - `@modelcontextprotocol/sdk` - MCP protocol implementation

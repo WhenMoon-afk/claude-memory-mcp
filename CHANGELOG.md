@@ -12,30 +12,10 @@ This series is a complete rewrite of the original Python server. It is implement
 
 Upgrading from **1.x → 2.x** is a major, breaking change: storage format, deployment model, and configuration differ from the Python implementation.
 
-### [2.4.3] – 2025‑01‑07
+### [2.5.0] – 2025‑01‑07
 
-#### Fixed
-- Fixed consolidation tool foreign key constraint error when merging databases with duplicate entities. Entity IDs are now properly mapped after deduplication.
-
----
-
-### [2.4.2] – 2025‑01‑07
-
-#### Fixed
-- Fixed npm bin path format to use "./" prefix for proper CLI installation.
-
----
-
-### [2.4.1] – 2025‑01‑07
-
-#### Added
-- **Memory consolidation tool**: New `memory-mcp-consolidate` CLI for merging multiple memory databases into one.
-  - `--discover` mode: Automatically finds memory databases in common locations.
-  - Content-based deduplication: Uses SHA-256 hash of content + type to detect duplicates.
-  - Keeps most recently accessed version when duplicates found, merges access counts.
-  - Checkpoints WAL files before reading to ensure data integrity.
-  - Source databases are NOT modified.
-  - Run via: `npx @whenmoon-afk/memory-mcp-consolidate --discover` or `npx @whenmoon-afk/memory-mcp-consolidate <target.db> <source1.db> [source2.db] ...`
+#### Removed
+- Removed experimental memory consolidation tool to keep the package focused on core memory functionality.
 
 ---
 

@@ -1,18 +1,16 @@
 {
   "name": "@whenmoon-afk/memory-mcp",
-  "version": "2.4.3",
+  "version": "2.5.0",
   "description": "Brain-inspired memory for AI agents - MCP server",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
     "memory-mcp": "./dist/index.js",
-    "memory-mcp-install": "./install.js",
-    "memory-mcp-consolidate": "./scripts/consolidate-memories.js"
+    "memory-mcp-install": "./install.js"
   },
   "files": [
     "dist/",
     "install.js",
-    "scripts/",
     "README.md",
     "LICENSE"
   ],
@@ -31,7 +29,6 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "release": "npm run test && npm run build",
     "clean": "rm -rf dist",
-    "consolidate": "node scripts/consolidate-memories.js",
     "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
