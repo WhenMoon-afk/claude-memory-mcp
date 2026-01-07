@@ -100,11 +100,7 @@ After any installation method, **restart Claude Desktop completely** (quit and r
 
 ## Custom Database Location
 
-By default, memories are stored at:
-
-- **macOS**: `~/.claude-memories/memory.db`
-- **Windows**: `%APPDATA%/claude-memories/memory.db`
-- **Linux**: `~/.local/share/claude-memories/memory.db`
+By default, memories are stored at `~/.memory-mcp/memory.db` on all platforms.
 
 To use a custom location, add the `env` field to your config:
 
@@ -170,6 +166,22 @@ The `npx github:` method bypasses npm cache. Alternatively:
 ### Slow startup with github: method?
 
 First run requires downloading and installing dependencies (can take 30+ seconds). Subsequent runs are faster but still fetch from GitHub. For faster startup, use the global install method.
+
+## Database Consolidation
+
+If you have multiple memory database files (e.g., from different Claude Desktop versions or backups), you can merge them:
+
+```bash
+npx @whenmoon-afk/memory-mcp-consolidate ~/.memory-mcp/merged.db ~/old-db1.db ~/old-db2.db
+```
+
+Features:
+- Deduplicates by content hash (same content + type = duplicate)
+- Keeps most recently accessed version when duplicates found
+- Merges access counts from all duplicates
+- Preserves all provenance/audit records
+- Checkpoints WAL files before reading
+- Source databases are NOT modified
 
 ## Dependencies
 

@@ -6,11 +6,13 @@
   "main": "./dist/index.js",
   "bin": {
     "memory-mcp": "./dist/index.js",
-    "memory-mcp-install": "./install.js"
+    "memory-mcp-install": "./install.js",
+    "memory-mcp-consolidate": "./scripts/consolidate-memories.js"
   },
   "files": [
     "dist/",
     "install.js",
+    "scripts/",
     "README.md",
     "LICENSE"
   ],
@@ -29,6 +31,7 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "release": "npm run test && npm run build",
     "clean": "rm -rf dist",
+    "consolidate": "node scripts/consolidate-memories.js",
     "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
