@@ -14,8 +14,10 @@
 
 import Database from 'better-sqlite3';
 import { createHash } from 'crypto';
-import { existsSync, statSync } from 'fs';
-import { basename, resolve } from 'path';
+import { existsSync, statSync, readdirSync } from 'fs';
+import { basename, resolve, join, dirname } from 'path';
+import { homedir, platform } from 'os';
+import { execSync } from 'child_process';
 
 // ANSI colors for output
 const colors = {
@@ -45,6 +47,200 @@ function error(msg) {
 
 function header(msg) {
   console.log(`\n${colors.bright}${colors.cyan}${msg}${colors.reset}`);
+}
+
+/**
+ * Get common search paths for memory databases
+ */
+function getSearchPaths() {
+  const home = homedir();
+  const plat = platform();
+
+  const paths = [
+    // New unified path
+    join(home, '.memory-mcp'),
+    // Old paths
+    join(home, '.claude-memories'),
+  ];
+
+  if (plat === 'darwin') {
+    // macOS
+    paths.push(join(home, 'Library', 'Application Support', 'Claude'));
+    paths.push(join(home, 'Library', 'Application Support'));
+  } else if (plat === 'win32') {
+    // Windows
+    const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming');
+    paths.push(join(appData, 'claude-memories'));
+    paths.push(join(appData, 'Claude'));
+    paths.push(appData);
+    // Also check local app data for versioned Claude folders
+    const localAppData = process.env.LOCALAPPDATA || join(home, 'AppData', 'Local');
+    paths.push(localAppData);
+  } else {
+    // Linux
+    const xdgData = process.env.XDG_DATA_HOME || join(home, '.local', 'share');
+    const xdgConfig = process.env.XDG_CONFIG_HOME || join(home, '.config');
+    paths.push(join(xdgData, 'claude-memories'));
+    paths.push(join(xdgConfig, 'Claude'));
+  }
+
+  return paths.filter(p => existsSync(p));
+}
+
+/**
+ * Recursively find all .db files that look like memory databases
+ */
+function findDatabaseFiles(searchPath, maxDepth = 3, currentDepth = 0) {
+  const results = [];
+
+  if (currentDepth > maxDepth || !existsSync(searchPath)) {
+    return results;
+  }
+
+  try {
+    const entries = readdirSync(searchPath, { withFileTypes: true });
+
+    for (const entry of entries) {
+      const fullPath = join(searchPath, entry.name);
+
+      if (entry.isFile() && entry.name.endsWith('.db')) {
+        // Check if it looks like a memory database
+        if (isMemoryDatabase(fullPath)) {
+          results.push(fullPath);
+        }
+      } else if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
+        // Recurse into subdirectories
+        results.push(...findDatabaseFiles(fullPath, maxDepth, currentDepth + 1));
+      }
+    }
+  } catch (err) {
+    // Permission denied or other error, skip
+  }
+
+  return results;
+}
+
+/**
+ * Check if a database file is a memory database by checking for expected tables
+ */
+function isMemoryDatabase(dbPath) {
+  try {
+    const db = new Database(dbPath, { readonly: true, fileMustExist: true });
+    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").pluck().all();
+    db.close();
+
+    // Must have memories table to be a memory database
+    return tables.includes('memories');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get info about a database file
+ */
+function getDatabaseInfo(dbPath) {
+  const stats = statSync(dbPath);
+  const walPath = dbPath + '-wal';
+  const shmPath = dbPath + '-shm';
+
+  const hasWal = existsSync(walPath);
+  const hasShm = existsSync(shmPath);
+
+  let walSize = 0;
+  if (hasWal) {
+    walSize = statSync(walPath).size;
+  }
+
+  let memoryCount = 0;
+  let schemaVersion = 0;
+  let lastAccessed = 0;
+
+  try {
+    const db = new Database(dbPath, { readonly: true });
+
+    // Get schema version
+    try {
+      schemaVersion = db.prepare('SELECT MAX(version) FROM schema_version').pluck().get() || 0;
+    } catch {}
+
+    // Get memory count
+    try {
+      memoryCount = db.prepare('SELECT COUNT(*) FROM memories WHERE is_deleted = 0').pluck().get() || 0;
+    } catch {
+      try {
+        memoryCount = db.prepare('SELECT COUNT(*) FROM memories').pluck().get() || 0;
+      } catch {}
+    }
+
+    // Get last accessed time
+    try {
+      lastAccessed = db.prepare('SELECT MAX(last_accessed) FROM memories').pluck().get() || 0;
+    } catch {}
+
+    db.close();
+  } catch {}
+
+  return {
+    path: dbPath,
+    size: stats.size,
+    modified: stats.mtime,
+    hasWal,
+    walSize,
+    hasShm,
+    memoryCount,
+    schemaVersion,
+    lastAccessed: lastAccessed ? new Date(lastAccessed) : null,
+  };
+}
+
+/**
+ * Discover all memory databases on the system
+ */
+function discoverDatabases() {
+  header('Memory Database Discovery');
+  log('Searching for memory databases...\n');
+
+  const searchPaths = getSearchPaths();
+  const foundDbs = new Set();
+
+  for (const searchPath of searchPaths) {
+    log(`  Searching: ${searchPath}`);
+    const dbs = findDatabaseFiles(searchPath);
+    dbs.forEach(db => foundDbs.add(db));
+  }
+
+  if (foundDbs.size === 0) {
+    warn('No memory databases found in common locations.');
+    log('\nYou can specify database paths manually:');
+    log('  node scripts/consolidate-memories.js <target.db> <source1.db> [source2.db] ...');
+    return [];
+  }
+
+  header(`Found ${foundDbs.size} database(s):`);
+
+  const dbInfos = [];
+  for (const dbPath of foundDbs) {
+    const info = getDatabaseInfo(dbPath);
+    dbInfos.push(info);
+  }
+
+  // Sort by memory count (most memories first)
+  dbInfos.sort((a, b) => b.memoryCount - a.memoryCount);
+
+  // Display info
+  for (let i = 0; i < dbInfos.length; i++) {
+    const info = dbInfos[i];
+    const sizeKb = (info.size / 1024).toFixed(1);
+    const walIndicator = info.hasWal ? ` ${colors.yellow}[WAL: ${(info.walSize / 1024).toFixed(1)}KB]${colors.reset}` : '';
+    const lastAccessStr = info.lastAccessed ? info.lastAccessed.toLocaleDateString() : 'unknown';
+
+    log(`\n  ${colors.bright}[${i + 1}]${colors.reset} ${info.path}`);
+    log(`      Size: ${sizeKb} KB${walIndicator}`);
+    log(`      Memories: ${info.memoryCount} | Schema: v${info.schemaVersion} | Last used: ${lastAccessStr}`);
+  }
+
+  return dbInfos;
 }
 
 /**
@@ -525,28 +721,52 @@ function consolidate(targetPath, sourcePaths) {
 // CLI
 const args = process.argv.slice(2);
 
-if (args.length < 2) {
+// Check for --discover flag
+if (args.includes('--discover') || args.includes('-d')) {
+  const dbInfos = discoverDatabases();
+
+  if (dbInfos.length > 0) {
+    log('\n' + colors.cyan + 'To consolidate these databases:' + colors.reset);
+    log('  node scripts/consolidate-memories.js <target.db> <source1.db> [source2.db] ...\n');
+    log('Example (consolidate all found databases):');
+    const allPaths = dbInfos.map(d => `"${d.path}"`).join(' ');
+    log(`  node scripts/consolidate-memories.js ~/.memory-mcp/consolidated.db ${allPaths}\n`);
+  }
+  process.exit(0);
+}
+
+// Check for --help flag
+if (args.includes('--help') || args.includes('-h') || args.length < 2) {
   console.log(`
 ${colors.bright}Memory Database Consolidation Tool${colors.reset}
 
 Merges multiple memory database files into one, deduplicating by content hash.
 
 ${colors.cyan}Usage:${colors.reset}
-  node scripts/consolidate-memories.js <target.db> <source1.db> [source2.db] ...
+  node scripts/consolidate-memories.js [options] <target.db> <source1.db> [source2.db] ...
+
+${colors.cyan}Commands:${colors.reset}
+  --discover, -d    Find all memory databases on your system
+  --help, -h        Show this help message
 
 ${colors.cyan}Example:${colors.reset}
+  # First, discover existing databases
+  node scripts/consolidate-memories.js --discover
+
+  # Then consolidate them
   node scripts/consolidate-memories.js ~/.memory-mcp/consolidated.db ~/old-db1.db ~/old-db2.db
 
-${colors.cyan}Options:${colors.reset}
-  - Duplicates are identified by content hash (same content + type)
-  - When duplicates found, keeps the most recently accessed version
+${colors.cyan}Features:${colors.reset}
+  - Discovers memory databases in common locations
+  - Identifies databases with WAL files (uncommitted data)
+  - Deduplicates by content hash (same content + type)
+  - Keeps most recently accessed version of duplicates
   - Merges access_count from all duplicates
   - Preserves all provenance records
+  - Checkpoints WAL files before reading
   - Source databases are NOT modified
-
-${colors.yellow}Note:${colors.reset} Run this from the claude-memory-mcp directory after building.
 `);
-  process.exit(1);
+  process.exit(args.length < 2 ? 1 : 0);
 }
 
 const [targetPath, ...sourcePaths] = args.map(p => resolve(p));
