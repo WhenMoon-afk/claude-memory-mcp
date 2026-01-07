@@ -383,23 +383,30 @@ function mergeMemories(allMemories) {
 
 /**
  * Merge entities (unique by name)
+ * Returns both the merged entities and a map from old entity IDs to new entity IDs
  */
 function mergeEntities(allEntities) {
-  const byName = new Map();
+  const byName = new Map();  // name -> kept entity
+  const oldIdToNewId = new Map();  // old entity ID -> new entity ID
   let duplicatesFound = 0;
 
   for (const entity of allEntities) {
     if (byName.has(entity.name)) {
       duplicatesFound++;
-      // Keep the first one seen (or could merge metadata)
+      // Map this entity's ID to the kept entity's ID
+      const keptEntity = byName.get(entity.name);
+      oldIdToNewId.set(entity.id, keptEntity.id);
     } else {
       byName.set(entity.name, entity);
+      // Map entity ID to itself (it's the kept one)
+      oldIdToNewId.set(entity.id, entity.id);
     }
   }
 
   return {
     entities: Array.from(byName.values()),
     duplicatesFound,
+    oldIdToNewId,
   };
 }
 
@@ -592,10 +599,8 @@ function consolidate(targetPath, sourcePaths) {
     }
   }
 
-  const entityIdMap = new Map(); // entity name -> entity ID
-  for (const entity of mergedEntities.entities) {
-    entityIdMap.set(entity.name, entity.id);
-  }
+  // Entity ID mapping is returned from mergeEntities
+  const entityIdMap = mergedEntities.oldIdToNewId;
 
   // Create target database
   header('Step 5: Create consolidated database');
@@ -665,8 +670,9 @@ function consolidate(targetPath, sourcePaths) {
   const insertMemoryEntities = targetDb.transaction((links) => {
     for (const link of links) {
       const newMemoryId = memoryIdMap.get(link.memory_id);
-      if (newMemoryId) {
-        insertMemoryEntity.run(newMemoryId, link.entity_id, link.created_at);
+      const newEntityId = entityIdMap.get(link.entity_id);
+      if (newMemoryId && newEntityId) {
+        insertMemoryEntity.run(newMemoryId, newEntityId, link.created_at);
         memoryEntityCount++;
       }
     }

@@ -12,6 +12,13 @@ This series is a complete rewrite of the original Python server. It is implement
 
 Upgrading from **1.x → 2.x** is a major, breaking change: storage format, deployment model, and configuration differ from the Python implementation.
 
+### [2.4.3] – 2025‑01‑07
+
+#### Fixed
+- Fixed consolidation tool foreign key constraint error when merging databases with duplicate entities. Entity IDs are now properly mapped after deduplication.
+
+---
+
 ### [2.4.2] – 2025‑01‑07
 
 #### Fixed
