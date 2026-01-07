@@ -8,9 +8,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## 2.x – TypeScript + SQLite implementation (`@whenmoon-afk/memory-mcp`)
 
-This series is a complete rewrite of the original Python server. It is implemented in TypeScript, runs on Node.js, uses SQLite for storage, and is distributed as the npm package `@whenmoon-afk/memory-mcp`.  
+This series is a complete rewrite of the original Python server. It is implemented in TypeScript, runs on Node.js, uses SQLite for storage, and is distributed as the npm package `@whenmoon-afk/memory-mcp`.
 
-Upgrading from **1.x → 2.x** is a major, breaking change: storage format, deployment model, and configuration differ from the Python implementation.  
+Upgrading from **1.x → 2.x** is a major, breaking change: storage format, deployment model, and configuration differ from the Python implementation.
+
+### [2.4.0] – 2025‑01‑07
+
+#### Changed
+- **Distribution overhaul**: Primary installation method is now `npx github:whenmoon-afk/claude-memory-mcp`, which fetches directly from GitHub and bypasses npm cache issues that caused users to run stale versions.
+- **Bin entry fix**: The default `memory-mcp` bin now points to the server (`dist/index.js`), not the installer. The installer is available separately as `memory-mcp-install`.
+- **Dynamic version logging**: Server now reads version from `package.json` at runtime instead of hardcoding, fixing the "Memory MCP v2.0" log message bug.
+- **Unified database path**: All platforms now use `~/.memory-mcp/memory.db` for simplicity. Windows paths use forward slashes for config consistency.
+- **Installer updated**: `npx @whenmoon-afk/memory-mcp-install` now generates the `npx github:` config instead of node path config.
+
+#### Fixed
+- Fixed Windows compatibility by documenting working config patterns (plain `npx` works, no `cmd /c` wrapper needed for most setups).
+- Fixed Node.js version mismatch errors when running from different environments (devcontainer vs WSL vs native).
+- All log messages now use consistent `[memory-mcp v${VERSION}]` format.
+
+#### Documentation
+- README rewritten with platform-specific installation instructions (macOS, Linux, Windows, WSL).
+- Added troubleshooting section for common issues (stale cache, Windows connection errors, slow startup).
+- Multiple installation methods documented: GitHub (always-latest), global npm install (offline/reliable), and automatic installer.
+
+---
 
 ### [2.3.0] – 2025‑12‑09
 
