@@ -74,9 +74,9 @@ describe('Installer Logic', () => {
     expect(content).toContain('darwin'); // macOS
     expect(content).toContain('win32'); // Windows
 
-    // v2.1.1: Unified node approach for all platforms
-    expect(content).toContain("command: 'node'");
-    expect(content).toContain('serverPath');
+    // v2.4.0: npx github: approach for all platforms
+    expect(content).toContain("command: 'npx'");
+    expect(content).toContain('github:whenmoon-afk/claude-memory-mcp');
   });
 
   it('should detect correct platform', () => {
@@ -104,15 +104,14 @@ describe('Installer Logic', () => {
 });
 
 describe('Windows Compatibility', () => {
-  it('installer should use unified node approach', () => {
+  it('installer should use npx github: approach', () => {
     const installPath = join(projectRoot, 'install.js');
     const content = readFileSync(installPath, 'utf-8');
 
-    // v2.1.1+: Unified node approach (no more cmd /c wrapper)
-    // v2.1.2: Direct __dirname usage for correct path resolution
-    expect(content).toContain("command: 'node'");
-    expect(content).toContain('serverPath');
-    expect(content).toContain('__dirname');
+    // v2.4.0: npx github: approach works on all platforms including Windows
+    expect(content).toContain("command: 'npx'");
+    expect(content).toContain('github:whenmoon-afk/claude-memory-mcp');
+    expect(content).toContain('MEMORY_DB_PATH');
   });
 
   it('README should document installation process', () => {

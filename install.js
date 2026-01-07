@@ -14,22 +14,20 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 /**
- * Get platform-specific database path
+ * Get database path - unified across all platforms
+ * Uses ~/.memory-mcp/memory.db for simplicity
  */
 function getDbPath() {
   const plat = platform();
 
-  switch (plat) {
-    case 'darwin': // macOS
-      return join(homedir(), '.claude-memories', 'memory.db');
-
-    case 'win32': // Windows
-      return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'claude-memories', 'memory.db');
-
-    default: // Linux and others
-      const dataHome = process.env.XDG_DATA_HOME || join(homedir(), '.local', 'share');
-      return join(dataHome, 'claude-memories', 'memory.db');
+  if (plat === 'win32') {
+    // Windows: Use forward slashes for consistency in config
+    // C:/Users/Username/.memory-mcp/memory.db
+    return join(homedir(), '.memory-mcp', 'memory.db').replace(/\\/g, '/');
   }
+
+  // macOS/Linux: ~/.memory-mcp/memory.db
+  return join(homedir(), '.memory-mcp', 'memory.db');
 }
 
 /**
@@ -53,16 +51,14 @@ function getClaudeConfigPath() {
 
 /**
  * Get platform-specific MCP server configuration
+ * Uses npx github: approach for reliable updates and cache bypass
  */
 function getMcpServerConfig(dbPath) {
-  // Get the absolute path to the installed package
-  // __dirname is already the package root (e.g., .../node_modules/@whenmoon-afk/memory-mcp/)
-  const serverPath = join(__dirname, 'dist', 'index.js');
-
-  // All platforms use node directly with the server path
+  // Use npx with github: protocol - works on all platforms
+  // This bypasses npm cache issues and always fetches latest from main branch
   return {
-    command: 'node',
-    args: [serverPath],
+    command: 'npx',
+    args: ['github:whenmoon-afk/claude-memory-mcp'],
     env: {
       MEMORY_DB_PATH: dbPath
     }
