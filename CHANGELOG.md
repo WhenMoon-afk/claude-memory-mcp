@@ -12,6 +12,13 @@ This series is a complete rewrite of the original Python server. It is implement
 
 Upgrading from **1.x → 2.x** is a major, breaking change: storage format, deployment model, and configuration differ from the Python implementation.
 
+### [2.4.2] – 2025‑01‑07
+
+#### Fixed
+- Fixed npm bin path format to use "./" prefix for proper CLI installation.
+
+---
+
 ### [2.4.1] – 2025‑01‑07
 
 #### Added
