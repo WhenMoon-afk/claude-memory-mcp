@@ -30,13 +30,14 @@ describe('Package Integrity', () => {
     expect(content.startsWith('#!/usr/bin/env node')).toBe(true);
   });
 
-  it('should have correct bin entry in package.json', () => {
+  it('should have correct bin entries in package.json', () => {
     const packagePath = join(projectRoot, 'package.json');
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
     expect(pkg.bin).toBeDefined();
-    // v2.3.0: bin points to installer for Claude Desktop auto-setup
-    expect(pkg.bin['memory-mcp']).toBe('install.js');
+    // v2.4.0: bin points to server, installer is separate
+    expect(pkg.bin['memory-mcp']).toBe('./dist/index.js');
+    expect(pkg.bin['memory-mcp-install']).toBe('./install.js');
   });
 
   it('should include required files in package', () => {
@@ -146,36 +147,34 @@ describe('Documentation', () => {
     expect(content).toContain('better-sqlite3');
   });
 
-  it('should document automatic installation', () => {
+  it('should document installation methods', () => {
     const readmePath = join(projectRoot, 'README.md');
     const content = readFileSync(readmePath, 'utf-8');
 
-    // v2.3.0: Simplified README with streamlined installation docs
-    expect(content).toContain('automatically configure Claude Desktop');
-    expect(content).toContain('npx @whenmoon-afk/memory-mcp');
+    // v2.4.0: Multiple installation methods documented
+    expect(content).toContain('## Quick Start');
+    expect(content).toContain('Direct from GitHub');
+    expect(content).toContain('Global Install');
+    expect(content).toContain('github:whenmoon-afk/claude-memory-mcp');
+    expect(content).toContain('memory-mcp-install');
   });
 });
 
 describe('Version Consistency', () => {
-  it('should have matching versions in package.json and src/index.ts', () => {
-    const packagePath = join(projectRoot, 'package.json');
-    const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
-
+  it('should read version dynamically from package.json', () => {
     const indexPath = join(projectRoot, 'src', 'index.ts');
     const indexContent = readFileSync(indexPath, 'utf-8');
 
-    // Extract version from src/index.ts
-    const versionMatch = indexContent.match(/version:\s*['"]([^'"]+)['"]/);
-    expect(versionMatch).toBeTruthy();
-
-    const srcVersion = versionMatch[1];
-    expect(srcVersion).toBe(pkg.version);
+    // v2.4.0: Version is read dynamically from package.json
+    expect(indexContent).toContain('VERSION');
+    expect(indexContent).toContain('packageJson.version');
+    expect(indexContent).toContain('version: VERSION');
   });
 
-  it('should be version 2.3.0', () => {
+  it('should be version 2.4.0', () => {
     const packagePath = join(projectRoot, 'package.json');
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
-    expect(pkg.version).toBe('2.3.0');
+    expect(pkg.version).toBe('2.4.0');
   });
 });

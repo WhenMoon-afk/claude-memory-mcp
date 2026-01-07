@@ -7,31 +7,120 @@ Local, persistent memory for Claude Desktop and MCP-compatible AI assistants.
 
 A lightweight MCP server that gives your AI durable, searchable memory — entirely on your machine. Built with TypeScript, SQLite + FTS5, and minimal dependencies.
 
-## Installation
+## Quick Start
 
-Requires Node.js 18+
+Choose your installation method below based on your platform and preference.
 
-Run this command to automatically configure Claude Desktop:
+### Option 1: Direct from GitHub (Always Latest)
 
-```bash
-npx @whenmoon-afk/memory-mcp
+This method fetches directly from GitHub, bypassing npm cache issues.
+
+**macOS / Linux:**
+
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `~/.config/Claude/claude_desktop_config.json` on Linux):
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "github:whenmoon-afk/claude-memory-mcp"]
+    }
+  }
+}
 ```
 
-This will:
-- Detect your OS (macOS/Windows/Linux)
-- Configure Claude Desktop with the memory server
-- Create backup of existing config
-- Set up platform-appropriate database location
+**Windows (Command Prompt wrapper):**
 
-After installation, restart Claude Desktop completely.
+Add to your Claude Desktop config (`%APPDATA%/Claude/claude_desktop_config.json`):
 
-## Database Location
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "github:whenmoon-afk/claude-memory-mcp"]
+    }
+  }
+}
+```
 
-Memories are stored locally:
+**Windows (Full npx.cmd path - alternative):**
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "C:\\Program Files\\nodejs\\npx.cmd",
+      "args": ["-y", "github:whenmoon-afk/claude-memory-mcp"]
+    }
+  }
+}
+```
+
+**WSL Users:** Use the macOS/Linux config above.
+
+### Option 2: Global Install (Most Reliable)
+
+Install globally for offline support and faster startup:
+
+```bash
+npm install -g @whenmoon-afk/memory-mcp
+```
+
+Find your global npm path:
+```bash
+npm root -g
+```
+
+Then add to Claude Desktop config:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "node",
+      "args": ["YOUR_GLOBAL_PATH/node_modules/@whenmoon-afk/memory-mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+Replace `YOUR_GLOBAL_PATH` with the output from `npm root -g`.
+
+### Option 3: Automatic Installer
+
+For first-time setup, the installer configures Claude Desktop automatically:
+
+```bash
+npx @whenmoon-afk/memory-mcp-install
+```
+
+After any installation method, **restart Claude Desktop completely** (quit and reopen).
+
+## Custom Database Location
+
+By default, memories are stored at:
 
 - **macOS**: `~/.claude-memories/memory.db`
 - **Windows**: `%APPDATA%/claude-memories/memory.db`
 - **Linux**: `~/.local/share/claude-memories/memory.db`
+
+To use a custom location, add the `env` field to your config:
+
+```json
+{
+  "mcpServers": {
+    "memory": {
+      "command": "npx",
+      "args": ["-y", "github:whenmoon-afk/claude-memory-mcp"],
+      "env": {
+        "MEMORY_DB_PATH": "/path/to/your/memory.db"
+      }
+    }
+  }
+}
+```
 
 The database is a single portable SQLite file. Back it up by copying the file.
 
@@ -51,31 +140,6 @@ The database is a single portable SQLite file. Back it up by copying the file.
 - Soft deletes with provenance tracking
 - Hybrid relevance scoring (recency + importance + frequency)
 
-## Manual Configuration
-
-If auto-setup doesn't work, add to your Claude Desktop config:
-
-**Config locations:**
-- **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
-- **Linux**: `~/.config/Claude/claude_desktop_config.json`
-
-Add this to your config (the installer does this automatically):
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "node",
-      "args": ["/path/to/node_modules/@whenmoon-afk/memory-mcp/dist/index.js"],
-      "env": {
-        "MEMORY_DB_PATH": "/path/to/.claude-memories/memory.db"
-      }
-    }
-  }
-}
-```
-
 ## Environment Variables
 
 | Variable | Default | Description |
@@ -85,12 +149,27 @@ Add this to your config (the installer does this automatically):
 
 ## Troubleshooting
 
-**Tools not appearing in Claude Desktop?**
+### Tools not appearing in Claude Desktop?
 
 1. Restart Claude Desktop completely (quit and reopen)
 2. Verify config file syntax is valid JSON
 3. Check that Node.js 18+ is installed: `node --version`
-4. Re-run installer: `npx @whenmoon-afk/memory-mcp`
+
+### "Connection closed" on Windows?
+
+Windows requires either:
+- The `cmd /c` wrapper method (see Windows config above), OR
+- The full path to `npx.cmd` (e.g., `C:\Program Files\nodejs\npx.cmd`)
+
+### Getting stale cached versions?
+
+The `npx github:` method bypasses npm cache. Alternatively:
+- Clear npm cache: `npm cache clean --force`
+- Use global install for version control
+
+### Slow startup with github: method?
+
+First run requires downloading and installing dependencies (can take 30+ seconds). Subsequent runs are faster but still fetch from GitHub. For faster startup, use the global install method.
 
 ## Dependencies
 

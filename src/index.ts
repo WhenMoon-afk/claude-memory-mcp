@@ -1,13 +1,24 @@
 #!/usr/bin/env node
 
 /**
- * Memory MCP v2.0 - Smart monolith MCP server
- * Brain-inspired memory system with smart context loading
+ * Memory MCP Server - Brain-inspired memory system with smart context loading
+ * Version is read dynamically from package.json
  */
 
 import { homedir, platform } from 'os';
 import { join, dirname } from 'path';
-import { existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+
+// Read version from package.json dynamically
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+// In dist/, package.json is one level up
+const packageJsonPath = join(__dirname, '..', 'package.json');
+const packageJson = JSON.parse(readFileSync(packageJsonPath, 'utf-8')) as {
+  version: string;
+};
+const VERSION = packageJson.version;
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -73,7 +84,7 @@ const config = {
 const server = new Server(
   {
     name: '@whenmoon-afk/memory-mcp',
-    version: '2.3.0',
+    version: VERSION,
   },
   {
     capabilities: {
@@ -257,20 +268,19 @@ server.setRequestHandler(CallToolRequestSchema, (request) => {
 async function main() {
   try {
     // Initialize database
-    console.error('Initializing database...');
+    console.error(`[memory-mcp v${VERSION}] Initializing database...`);
     db = getDatabase(config.databasePath);
-    console.error('Database initialized successfully');
+    console.error(`[memory-mcp v${VERSION}] Database initialized`);
 
     // Connect to transport
     const transport = new StdioServerTransport();
     await server.connect(transport);
 
     // Log startup info to stderr (not stdout, which is used for MCP protocol)
-    console.error('Memory MCP v2.0 server started');
-    console.error(`Database: ${config.databasePath}`);
-    console.error(`Driver: ${config.databaseDriver}`);
+    console.error(`[memory-mcp v${VERSION}] Server started`);
+    console.error(`[memory-mcp v${VERSION}] Database: ${config.databasePath}`);
   } catch (error) {
-    console.error('Failed to start server:', error);
+    console.error(`[memory-mcp v${VERSION}] Failed to start:`, error);
     throw error;
   }
 }
@@ -279,19 +289,19 @@ async function main() {
  * Cleanup on exit
  */
 process.on('SIGINT', () => {
-  console.error('Shutting down Memory MCP server...');
+  console.error(`[memory-mcp v${VERSION}] Shutting down...`);
   closeDatabase();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.error('Shutting down Memory MCP server...');
+  console.error(`[memory-mcp v${VERSION}] Shutting down...`);
   closeDatabase();
   process.exit(0);
 });
 
 // Start the server
 main().catch((error) => {
-  console.error('Fatal error:', error);
+  console.error(`[memory-mcp v${VERSION}] Fatal error:`, error);
   process.exit(1);
 });
