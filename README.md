@@ -180,16 +180,29 @@ First run requires downloading and installing dependencies (can take 30+ seconds
 - **GitHub**: https://github.com/WhenMoon-afk/claude-memory-mcp
 - **Issues**: https://github.com/WhenMoon-afk/claude-memory-mcp/issues
 
+## Want Cloud Sync?
+
+**[Substratia Pro](https://substratia.io)** (coming soon) adds:
+- Cloud sync across all your devices
+- Memory dashboard to view/edit what AI remembers
+- Automatic backups and disaster recovery
+- Team memory sharing
+
+**[Join the waitlist](https://substratia.io)** to get early access.
+
 ## Related Projects
 
-- **[momentum](https://github.com/WhenMoon-afk/momentum)** - Instant context recovery (<5ms)
-- **[AgentForge](https://substratia.io/builder)** - Visual agent config builder
+Part of the **Substratia** memory infrastructure ecosystem:
+
+- **[momentum](https://github.com/WhenMoon-afk/momentum)** - Instant context recovery (<5ms) for Claude Code
+- **[AgentForge](https://substratia.io/builder)** - Visual drag-and-drop agent config builder
 - **[Substratia](https://substratia.io)** - Memory infrastructure for AI
 
 ## Support
 
 - [GitHub Issues](https://github.com/WhenMoon-afk/claude-memory-mcp/issues) - Bug reports & feature requests
 - [GitHub Sponsors](https://github.com/sponsors/WhenMoon-afk) - Support development
+- [Ko-fi](https://ko-fi.com/substratia) - One-time contributions
 
 ## Disclaimer
 
