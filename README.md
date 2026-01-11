@@ -5,6 +5,8 @@
 
 Local, persistent memory for Claude Desktop and MCP-compatible AI assistants.
 
+> *Part of the [Substratia](https://substratia.io) memory infrastructure ecosystem.*
+
 A lightweight MCP server that gives your AI durable, searchable memory — entirely on your machine. Built with TypeScript, SQLite + FTS5, and minimal dependencies.
 
 ## Quick Start
@@ -177,6 +179,17 @@ First run requires downloading and installing dependencies (can take 30+ seconds
 - **npm**: https://www.npmjs.com/package/@whenmoon-afk/memory-mcp
 - **GitHub**: https://github.com/WhenMoon-afk/claude-memory-mcp
 - **Issues**: https://github.com/WhenMoon-afk/claude-memory-mcp/issues
+
+## Related Projects
+
+- **[momentum](https://github.com/WhenMoon-afk/momentum)** - Instant context recovery (<5ms)
+- **[AgentForge](https://substratia.io/builder)** - Visual agent config builder
+- **[Substratia](https://substratia.io)** - Memory infrastructure for AI
+
+## Support
+
+- [GitHub Issues](https://github.com/WhenMoon-afk/claude-memory-mcp/issues) - Bug reports & feature requests
+- [GitHub Sponsors](https://github.com/sponsors/WhenMoon-afk) - Support development
 
 ## Disclaimer
 
