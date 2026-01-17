@@ -1,0 +1,26 @@
+# Lint and type check
+echo "Running lint..."
+npm run lint || exit 1
+
+echo "Running type check..."
+npm run typecheck || exit 1
+
+echo "Running tests..."
+npm test || exit 1
+
+# Block secrets
+echo "Checking for secrets..."
+if git diff --cached --name-only | xargs grep -l -E '(ANTHROPIC_API_KEY|OPENAI_API_KEY|sk-[a-zA-Z0-9]{20,}|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----|password\s*=\s*["\047][^"\047]{8,})' 2>/dev/null; then
+    echo "ERROR: Potential secrets detected in staged files!"
+    echo "Please remove sensitive data before committing."
+    exit 1
+fi
+
+# Block .env files
+if git diff --cached --name-only | grep -E '^\.env(\.|$)' 2>/dev/null; then
+    echo "ERROR: .env file detected in staged files!"
+    echo "Please remove .env files from staging."
+    exit 1
+fi
+
+echo "Pre-commit checks passed!"
