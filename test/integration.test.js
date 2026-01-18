@@ -51,12 +51,13 @@ describe('Package Integrity', () => {
     expect(pkg.files).toContain('LICENSE');
   });
 
-  it('should have prepare script for auto-build', () => {
+  it('should have prepublishOnly script for auto-build', () => {
     const packagePath = join(projectRoot, 'package.json');
     const pkg = JSON.parse(readFileSync(packagePath, 'utf-8'));
 
-    expect(pkg.scripts.prepare).toBeDefined();
-    expect(pkg.scripts.prepare).toContain('build');
+    // Build runs via prepublishOnly before npm publish
+    expect(pkg.scripts.prepublishOnly).toBeDefined();
+    expect(pkg.scripts.prepublishOnly).toContain('build');
   });
 });
 
