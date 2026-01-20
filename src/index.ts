@@ -32,8 +32,8 @@ import { getDatabase, closeDatabase } from './database/connection.js';
 import { memoryStore } from './tools/memory-store.js';
 import { memoryRecall } from './tools/memory-recall.js';
 import { memoryForget } from './tools/memory-forget.js';
-import type { MemoryInput, SearchOptions } from './types/index.js';
-import { isCloudEnabled, getCloudConfig, saveApiKey, getConfigPath, checkCloudHealth } from './cloud.js';
+import type { MemoryInput, SearchOptions, Memory } from './types/index.js';
+import { isCloudEnabled, getCloudConfig, saveApiKey, getConfigPath, checkCloudHealth, syncMemory } from './cloud.js';
 
 /**
  * Get platform-specific default database path
@@ -339,6 +339,34 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case 'memory_store': {
         const result = memoryStore(db, args as unknown as MemoryInput);
+
+        // Sync to cloud if enabled (fire-and-forget, don't block response)
+        if (isCloudEnabled()) {
+          // Convert StandardMemory to Memory format for cloud sync
+          const memoryForSync: Memory = {
+            id: result.id,
+            content: result.content,
+            summary: result.summary,
+            type: result.type as Memory['type'],
+            importance: result.importance,
+            created_at: new Date(result.created_at).getTime(),
+            last_accessed: new Date(result.last_accessed).getTime(),
+            access_count: 0,
+            expires_at: null,
+            metadata: result.entities ? { entities: result.entities } : {},
+            is_deleted: false,
+          };
+
+          // Fire-and-forget: sync asynchronously, log errors but don't fail
+          syncMemory(memoryForSync).then(syncResult => {
+            if (!syncResult.success) {
+              console.error(`[memory-mcp] Cloud sync failed: ${syncResult.error}`);
+            }
+          }).catch(err => {
+            console.error(`[memory-mcp] Cloud sync error:`, err);
+          });
+        }
+
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
