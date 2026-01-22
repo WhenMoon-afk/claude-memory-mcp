@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'Memory plugin ready. Use memory_recall to retrieve relevant context, memory_store to save learnings.'",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Before ending: If important decisions, user preferences, or project learnings emerged in this session that would be valuable to remember in future sessions, consider storing them with memory_store (importance 5-10 for critical items). Skip if nothing significant or already stored."
+          }
+        ]
+      }
+    ]
+  }
+}

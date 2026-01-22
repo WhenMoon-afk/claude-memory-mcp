@@ -1,6 +1,6 @@
 {
   "name": "@whenmoon-afk/memory-mcp",
-  "version": "2.6.0",
+  "version": "2.7.0",
   "description": "Brain-inspired memory for AI agents - MCP server",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,6 +10,10 @@
   },
   "files": [
     "dist/",
+    ".claude-plugin/",
+    "hooks/",
+    "skills/",
+    "commands/",
     "install.js",
     "README.md",
     "LICENSE"
