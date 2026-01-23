@@ -11,9 +11,42 @@ A lightweight MCP server that gives your AI durable, searchable memory — entir
 
 ## Quick Start
 
-Choose your installation method below based on your platform and preference.
+Choose your installation method based on your setup:
 
-### Option 1: Direct from GitHub (Always Latest)
+| Method | Best For | Install Time |
+|--------|----------|--------------|
+| Desktop Extension | Claude Desktop users | One click |
+| Claude Code Plugin | Claude Code users | One command |
+| NPX from GitHub | Always latest version | ~30 seconds |
+| Global Install | Offline/fast startup | Once |
+
+---
+
+### Option 1: Desktop Extension (Easiest)
+
+Download `memory-mcp.mcpb` from [GitHub Releases](https://github.com/whenmoon-afk/claude-memory-mcp/releases) and double-click to install in Claude Desktop.
+
+Or build from source:
+```bash
+git clone https://github.com/whenmoon-afk/claude-memory-mcp
+cd claude-memory-mcp
+npm install && npm run package:desktop
+# Creates memory-mcp.mcpb - drag into Claude Desktop
+```
+
+---
+
+### Option 2: Claude Code Plugin
+
+```bash
+claude plugin install github:whenmoon-afk/claude-memory-mcp
+```
+
+This installs the plugin with MCP server, hooks, skills, and commands.
+
+---
+
+### Option 3: NPX from GitHub (Always Latest)
 
 This method fetches directly from GitHub, bypassing npm cache issues.
 
@@ -62,7 +95,9 @@ Add to your Claude Desktop config (`%APPDATA%/Claude/claude_desktop_config.json`
 
 **WSL Users:** Use the macOS/Linux config above.
 
-### Option 2: Global Install (Most Reliable)
+---
+
+### Option 4: Global Install (Most Reliable)
 
 Install globally for offline support and faster startup:
 
@@ -90,7 +125,9 @@ Then add to Claude Desktop config:
 
 Replace `YOUR_GLOBAL_PATH` with the output from `npm root -g`.
 
-### Option 3: Automatic Installer
+---
+
+### Option 5: Automatic Installer
 
 For first-time setup, the installer configures Claude Desktop automatically:
 

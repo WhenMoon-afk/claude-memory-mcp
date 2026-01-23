@@ -13,7 +13,11 @@ claude.md
 node_modules/
 dist/
 build/
+build-desktop/
 coverage/
+
+# Desktop extension builds
+*.mcpb
 
 # Database files
 *.db

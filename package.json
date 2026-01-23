@@ -14,6 +14,7 @@
     "hooks/",
     "skills/",
     "commands/",
+    "desktop-extension/",
     "install.js",
     "README.md",
     "LICENSE"
@@ -33,7 +34,8 @@
     "format:check": "prettier --check \"src/**/*.ts\"",
     "release": "npm run test && npm run build",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "npm run clean && npm run build",
+    "package:desktop": "npm run build && node scripts/package-desktop.js"
   },
   "keywords": [
     "mcp",

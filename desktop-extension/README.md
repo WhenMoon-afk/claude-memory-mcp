@@ -43,11 +43,12 @@ Claude will automatically use these tools when relevant context is needed or wor
 Enable cloud backup and cross-device access:
 
 1. Create account at https://substratia.io
-2. Get API key from dashboard
-3. Enter key in extension settings
+2. Subscribe to Pro ($9/month)
+3. Get API key from dashboard
+4. Enter key in extension settings
 
-Free tier: 100 memories
-Pro ($9/month): Unlimited memories + dashboard
+**Free**: Unlimited local memories (no cloud)
+**Pro** ($9/month): Cloud sync, web dashboard, cross-device access
 
 ## Building from Source
 

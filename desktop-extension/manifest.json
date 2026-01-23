@@ -1,31 +1,39 @@
 {
+  "manifest_version": "0.2",
   "name": "memory-mcp",
   "version": "2.7.0",
-  "description": "Persistent memory for Claude. Remember decisions, preferences, and learnings across sessions.",
-  "author": "Substratia",
-  "homepage": "https://substratia.io",
-  "icon": "icon.png",
-  "license": "MIT",
-  "mcpServer": {
-    "command": "node",
-    "args": ["${EXTENSION_DIR}/server.js"]
+  "description": "Persistent memory for Claude. Store decisions, preferences, and learnings across sessions. Optional cloud sync with Substratia Pro.",
+  "author": {
+    "name": "Substratia",
+    "email": "hello@substratia.io",
+    "url": "https://substratia.io"
   },
-  "config": {
-    "database_path": {
-      "type": "string",
-      "description": "Custom database location (optional, defaults to ~/.memory-mcp/memory.db)",
-      "required": false
-    },
+  "homepage": "https://substratia.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/whenmoon-afk/claude-memory-mcp"
+  },
+  "license": "MIT",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {}
+    }
+  },
+  "user_config": {
     "cloud_api_key": {
       "type": "string",
-      "description": "Substratia Cloud API key for backup and cross-device sync (get yours at substratia.io/dashboard)",
-      "sensitive": true,
-      "required": false
+      "title": "Substratia Cloud API Key",
+      "description": "Enable cloud sync and backup. Get your key at substratia.io/dashboard",
+      "sensitive": true
     },
-    "default_ttl_days": {
-      "type": "number",
-      "description": "Default memory expiration in days (default: 90)",
-      "required": false
+    "database_path": {
+      "type": "string",
+      "title": "Database Path",
+      "description": "Custom database location (default: ~/.memory-mcp/memory.db)"
     }
   },
   "tools": [
@@ -45,8 +53,5 @@
       "name": "memory_cloud",
       "description": "Manage cloud sync connection for backup and cross-device access."
     }
-  ],
-  "prompts": {
-    "startup": "Memory plugin ready. I can recall past decisions and preferences, and store new learnings for future sessions. Use memory_recall to search, memory_store to save important context."
-  }
+  ]
 }

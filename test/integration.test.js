@@ -151,9 +151,11 @@ describe('Documentation', () => {
     const readmePath = join(projectRoot, 'README.md');
     const content = readFileSync(readmePath, 'utf-8');
 
-    // v2.4.0: Multiple installation methods documented
+    // v2.7.0: Multiple installation methods documented
     expect(content).toContain('## Quick Start');
-    expect(content).toContain('Direct from GitHub');
+    expect(content).toContain('NPX from GitHub');
+    expect(content).toContain('Desktop Extension');
+    expect(content).toContain('Claude Code Plugin');
     expect(content).toContain('Global Install');
     expect(content).toContain('github:whenmoon-afk/claude-memory-mcp');
     expect(content).toContain('memory-mcp-install');
