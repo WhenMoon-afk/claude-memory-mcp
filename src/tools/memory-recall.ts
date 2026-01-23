@@ -50,15 +50,16 @@ export function memoryRecall(
     const { results, totalCount } = semanticSearch(db, searchOptions);
     console.error(`[memoryRecall] Search returned ${results.length} results, total count: ${totalCount}`);
 
-    // Track access for frequency tracking
-    const currentTime = now();
-    for (const result of results) {
-      // Increment access_count and update last_accessed
+    // Track access for frequency tracking (batched for performance)
+    if (results.length > 0) {
+      const currentTime = now();
+      const ids = results.map(r => r.id);
+      const placeholders = ids.map(() => '?').join(',');
       db.prepare(
         `UPDATE memories
          SET access_count = access_count + 1, last_accessed = ?
-         WHERE id = ?`
-      ).run(currentTime, result.id);
+         WHERE id IN (${placeholders})`
+      ).run(currentTime, ...ids);
     }
 
     // Build options map for formatting (includes entities and provenance)
