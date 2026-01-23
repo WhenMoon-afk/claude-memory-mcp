@@ -127,6 +127,16 @@ Part of the **Substratia** memory infrastructure ecosystem:
 
 - [GitHub Issues](https://github.com/WhenMoon-afk/claude-memory-mcp/issues) - Bug reports & feature requests
 
+## Privacy Policy
+
+**Local-only by default**: All memories are stored locally on your machine in `~/.memory-mcp/memory.db`. No data is sent anywhere unless you explicitly enable cloud sync.
+
+**Cloud sync (optional)**: If you connect to Substratia Cloud, memories are synced to our servers. See our full privacy policy at https://substratia.io/privacy
+
+**What we collect**:
+- Local mode: Nothing. Zero telemetry.
+- Cloud mode: Memory content you choose to sync, usage metrics for service improvement.
+
 ## Disclaimer
 
 This project is provided as-is. It is actively maintained but may have breaking changes between minor versions.
