@@ -18,6 +18,7 @@ import { semanticSearch } from '../search/semantic-search.js';
 import { formatMemory, formatMemoryList, getMemoryTokenCount } from './response-formatter.js';
 import { now } from '../database/connection.js';
 import { estimateTokens } from '../utils/token-estimator.js';
+import { getMemoryCache } from '../cache/memory-cache.js';
 
 /**
  * Recall memories using semantic search with intelligent token budgeting
@@ -85,6 +86,13 @@ export function memoryRecall(
       metadata: result.metadata,
       is_deleted: result.is_deleted,
     }));
+
+    // Cache retrieved memories for faster subsequent access
+    const cache = getMemoryCache();
+    for (const memory of memories) {
+      const entityData = optionsMap.get(memory.id);
+      cache.set(memory.id, memory, entityData?.entities || []);
+    }
 
     // PHASE 1: Create index (all matches as minimal summaries)
     const index: MinimalMemory[] = formatMemoryList(memories, 'minimal') as MinimalMemory[];

@@ -26,6 +26,7 @@ import {
 import { ValidationError } from '../types/index.js';
 import { generateSummary } from '../extractors/summary-generator.js';
 import { formatMemory } from './response-formatter.js';
+import { getMemoryCache } from '../cache/memory-cache.js';
 
 // Database row types (raw, before deserialization)
 interface EntityRow {
@@ -220,6 +221,10 @@ function createMemory(
   // Format response using standard detail level (NO embeddings)
   const formattedResponse = formatMemory(memory, 'standard', { entities: entityObjects }) as StandardMemory;
 
+  // Cache the newly created memory
+  const cache = getMemoryCache();
+  cache.set(memoryId, memory, entityObjects);
+
   return formattedResponse;
 }
 
@@ -412,6 +417,11 @@ function updateMemory(
 
   // Format response using standard detail level (NO embeddings)
   const formattedResponse = formatMemory(memory, 'standard', { entities: entityObjects }) as StandardMemory;
+
+  // Invalidate and re-cache updated memory
+  const cache = getMemoryCache();
+  cache.invalidate(input.id ?? existing.id);
+  cache.set(input.id ?? existing.id, memory, entityObjects);
 
   return formattedResponse;
 }

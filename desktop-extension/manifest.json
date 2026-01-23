@@ -1,0 +1,52 @@
+{
+  "name": "memory-mcp",
+  "version": "2.7.0",
+  "description": "Persistent memory for Claude. Remember decisions, preferences, and learnings across sessions.",
+  "author": "Substratia",
+  "homepage": "https://substratia.io",
+  "icon": "icon.png",
+  "license": "MIT",
+  "mcpServer": {
+    "command": "node",
+    "args": ["${EXTENSION_DIR}/server.js"]
+  },
+  "config": {
+    "database_path": {
+      "type": "string",
+      "description": "Custom database location (optional, defaults to ~/.memory-mcp/memory.db)",
+      "required": false
+    },
+    "cloud_api_key": {
+      "type": "string",
+      "description": "Substratia Cloud API key for backup and cross-device sync (get yours at substratia.io/dashboard)",
+      "sensitive": true,
+      "required": false
+    },
+    "default_ttl_days": {
+      "type": "number",
+      "description": "Default memory expiration in days (default: 90)",
+      "required": false
+    }
+  },
+  "tools": [
+    {
+      "name": "memory_recall",
+      "description": "Search memories by query. Returns past decisions, preferences, and learnings."
+    },
+    {
+      "name": "memory_store",
+      "description": "Store new memory for future recall. Auto-extracts entities and generates summary."
+    },
+    {
+      "name": "memory_forget",
+      "description": "Remove a memory by ID (soft delete with audit trail)."
+    },
+    {
+      "name": "memory_cloud",
+      "description": "Manage cloud sync connection for backup and cross-device access."
+    }
+  ],
+  "prompts": {
+    "startup": "Memory plugin ready. I can recall past decisions and preferences, and store new learnings for future sessions. Use memory_recall to search, memory_store to save important context."
+  }
+}

@@ -6,6 +6,7 @@ import type { DbDriver } from '../database/db-driver.js';
 import type { ForgetResponse } from '../types/index.js';
 import { now, generateId, serializeMetadata } from '../database/connection.js';
 import { ValidationError } from '../types/index.js';
+import { getMemoryCache } from '../cache/memory-cache.js';
 
 /**
  * Forget (soft delete) a memory
@@ -46,6 +47,10 @@ export function memoryForget(
     null,
     serializeMetadata({ soft_delete: true })
   );
+
+  // Invalidate cache for deleted memory
+  const cache = getMemoryCache();
+  cache.invalidate(id);
 
   const response: ForgetResponse = {
     success: true,
