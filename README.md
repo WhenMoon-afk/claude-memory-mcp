@@ -11,48 +11,24 @@ A lightweight MCP server that gives your AI durable, searchable memory — entir
 
 ## Quick Start
 
-Choose your installation method based on your setup:
+### Claude Desktop
 
-| Method | Best For | Install Time |
-|--------|----------|--------------|
-| Desktop Extension | Claude Desktop users | One click |
-| Claude Code Plugin | Claude Code users | One command |
-| NPX from GitHub | Always latest version | ~30 seconds |
-| Global Install | Offline/fast startup | Once |
+Download `memory-mcp.mcpb` from [GitHub Releases](https://github.com/whenmoon-afk/claude-memory-mcp/releases) and double-click to install.
 
----
-
-### Option 1: Desktop Extension (Easiest)
-
-Download `memory-mcp.mcpb` from [GitHub Releases](https://github.com/whenmoon-afk/claude-memory-mcp/releases) and double-click to install in Claude Desktop.
-
-Or build from source:
-```bash
-git clone https://github.com/whenmoon-afk/claude-memory-mcp
-cd claude-memory-mcp
-npm install && npm run package:desktop
-# Creates memory-mcp.mcpb - drag into Claude Desktop
-```
-
----
-
-### Option 2: Claude Code Plugin
+### Claude Code
 
 ```bash
 claude plugin install github:whenmoon-afk/claude-memory-mcp
 ```
 
-This installs the plugin with MCP server, hooks, skills, and commands.
+<details>
+<summary><strong>Alternative: Manual JSON Config</strong></summary>
 
----
+Add to your Claude Desktop config file:
 
-### Option 3: NPX from GitHub (Always Latest)
-
-This method fetches directly from GitHub, bypassing npm cache issues.
-
-**macOS / Linux:**
-
-Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `~/.config/Claude/claude_desktop_config.json` on Linux):
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Linux**: `~/.config/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -65,99 +41,11 @@ Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_
 }
 ```
 
-**Windows (Command Prompt wrapper):**
+Windows may need `"command": "cmd", "args": ["/c", "npx", "-y", "github:whenmoon-afk/claude-memory-mcp"]`
 
-Add to your Claude Desktop config (`%APPDATA%/Claude/claude_desktop_config.json`):
+</details>
 
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "github:whenmoon-afk/claude-memory-mcp"]
-    }
-  }
-}
-```
-
-**Windows (Full npx.cmd path - alternative):**
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "C:\\Program Files\\nodejs\\npx.cmd",
-      "args": ["-y", "github:whenmoon-afk/claude-memory-mcp"]
-    }
-  }
-}
-```
-
-**WSL Users:** Use the macOS/Linux config above.
-
----
-
-### Option 4: Global Install (Most Reliable)
-
-Install globally for offline support and faster startup:
-
-```bash
-npm install -g @whenmoon-afk/memory-mcp
-```
-
-Find your global npm path:
-```bash
-npm root -g
-```
-
-Then add to Claude Desktop config:
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "node",
-      "args": ["YOUR_GLOBAL_PATH/node_modules/@whenmoon-afk/memory-mcp/dist/index.js"]
-    }
-  }
-}
-```
-
-Replace `YOUR_GLOBAL_PATH` with the output from `npm root -g`.
-
----
-
-### Option 5: Automatic Installer
-
-For first-time setup, the installer configures Claude Desktop automatically:
-
-```bash
-npx @whenmoon-afk/memory-mcp-install
-```
-
-After any installation method, **restart Claude Desktop completely** (quit and reopen).
-
-## Custom Database Location
-
-By default, memories are stored at `~/.memory-mcp/memory.db` on all platforms.
-
-To use a custom location, add the `env` field to your config:
-
-```json
-{
-  "mcpServers": {
-    "memory": {
-      "command": "npx",
-      "args": ["-y", "github:whenmoon-afk/claude-memory-mcp"],
-      "env": {
-        "MEMORY_DB_PATH": "/path/to/your/memory.db"
-      }
-    }
-  }
-}
-```
-
-The database is a single portable SQLite file. Back it up by copying the file.
+After installation, **restart Claude Desktop** (quit and reopen).
 
 ## Tools
 

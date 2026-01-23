@@ -119,8 +119,9 @@ describe('Windows Compatibility', () => {
     const readmePath = join(projectRoot, 'README.md');
     const content = readFileSync(readmePath, 'utf-8');
 
-    expect(content).toContain('npx @whenmoon-afk/memory-mcp');
-    expect(content).toContain('Windows');
+    // v2.7.0: Simplified to primary install methods
+    expect(content).toContain('claude plugin install');
+    expect(content).toContain('.mcpb');
   });
 });
 
@@ -151,14 +152,11 @@ describe('Documentation', () => {
     const readmePath = join(projectRoot, 'README.md');
     const content = readFileSync(readmePath, 'utf-8');
 
-    // v2.7.0: Multiple installation methods documented
+    // v2.7.0: Simplified installation methods
     expect(content).toContain('## Quick Start');
-    expect(content).toContain('NPX from GitHub');
-    expect(content).toContain('Desktop Extension');
-    expect(content).toContain('Claude Code Plugin');
-    expect(content).toContain('Global Install');
+    expect(content).toContain('### Claude Desktop');
+    expect(content).toContain('### Claude Code');
     expect(content).toContain('github:whenmoon-afk/claude-memory-mcp');
-    expect(content).toContain('memory-mcp-install');
   });
 });
 
