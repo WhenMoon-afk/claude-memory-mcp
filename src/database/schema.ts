@@ -4,7 +4,7 @@
 
 import type { DbDriver } from './db-driver.js';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * Initialize database schema
@@ -230,6 +230,40 @@ function applyMigrations(db: DbDriver, fromVersion: number): void {
       // Record migration
       db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(
         3,
+        Date.now()
+      );
+    },
+
+    // Migration 4: Add cloud sync queue for background sync
+    (db: DbDriver) => {
+      db.exec(`
+        -- Cloud sync queue: tracks which memories need syncing
+        CREATE TABLE IF NOT EXISTS cloud_sync_queue (
+          memory_id TEXT PRIMARY KEY,
+          status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'syncing', 'synced', 'failed')),
+          attempts INTEGER NOT NULL DEFAULT 0,
+          last_attempt_at INTEGER,
+          last_error TEXT,
+          created_at INTEGER NOT NULL,
+          synced_at INTEGER,
+          FOREIGN KEY (memory_id) REFERENCES memories(id) ON DELETE CASCADE
+        );
+
+        -- Indexes for efficient queue processing
+        CREATE INDEX IF NOT EXISTS idx_sync_queue_status ON cloud_sync_queue(status);
+        CREATE INDEX IF NOT EXISTS idx_sync_queue_attempts ON cloud_sync_queue(attempts);
+      `);
+
+      // Enqueue all existing undeleted memories for initial sync
+      db.exec(`
+        INSERT OR IGNORE INTO cloud_sync_queue (memory_id, status, created_at)
+        SELECT id, 'pending', ${Date.now()}
+        FROM memories WHERE is_deleted = 0;
+      `);
+
+      // Record migration
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(
+        4,
         Date.now()
       );
     },

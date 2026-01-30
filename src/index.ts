@@ -32,8 +32,10 @@ import { getDatabase, closeDatabase } from './database/connection.js';
 import { memoryStore } from './tools/memory-store.js';
 import { memoryRecall } from './tools/memory-recall.js';
 import { memoryForget } from './tools/memory-forget.js';
-import type { MemoryInput, SearchOptions, Memory } from './types/index.js';
-import { isCloudEnabled, getCloudConfig, saveApiKey, getConfigPath, checkCloudHealth, syncMemory } from './cloud.js';
+import type { MemoryInput, SearchOptions } from './types/index.js';
+import { isCloudEnabled, getCloudConfig, saveApiKey, getConfigPath, checkCloudHealth } from './cloud.js';
+import { getSyncManager, stopSyncManager } from './sync-manager.js';
+import type { SyncStats } from './sync-manager.js';
 
 /**
  * Get platform-specific default database path
@@ -131,9 +133,27 @@ async function handleMemoryCloud(action: string, apiKey?: string): Promise<strin
       }
 
       const healthResult = await checkCloudHealth(cloudConfig);
-      const status = healthResult.ok ? 'Connected' : `Unavailable (${healthResult.error})`;
+      const connectionStatus = healthResult.ok ? 'Connected' : `Unavailable (${healthResult.error})`;
 
-      return `Cloud sync: ${status}\nConfig file: ${configPath}\nAPI URL: ${cloudConfig.apiUrl}`;
+      // Get sync queue stats
+      let syncInfo = '';
+      try {
+        const syncManager = getSyncManager(db);
+        const stats: SyncStats = syncManager.getStats();
+        const lastSync = stats.lastSyncAt
+          ? new Date(stats.lastSyncAt).toISOString()
+          : 'Never';
+
+        syncInfo = `\n\nSync Queue:\n  Pending: ${stats.pending}\n  Synced: ${stats.synced}\n  Failed: ${stats.failed}\n  Last sync: ${lastSync}`;
+
+        if (stats.lastError) {
+          syncInfo += `\n  Last error: ${stats.lastError}`;
+        }
+      } catch {
+        syncInfo = '\n\nSync queue: unavailable';
+      }
+
+      return `Cloud sync: ${connectionStatus}\nConfig file: ${configPath}\nAPI URL: ${cloudConfig.apiUrl}${syncInfo}`;
     }
 
     case 'help':
@@ -340,31 +360,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'memory_store': {
         const result = memoryStore(db, args as unknown as MemoryInput);
 
-        // Sync to cloud if enabled (fire-and-forget, don't block response)
+        // Enqueue for background cloud sync (non-blocking)
         if (isCloudEnabled()) {
-          // Convert StandardMemory to Memory format for cloud sync
-          const memoryForSync: Memory = {
-            id: result.id,
-            content: result.content,
-            summary: result.summary,
-            type: result.type as Memory['type'],
-            importance: result.importance,
-            created_at: new Date(result.created_at).getTime(),
-            last_accessed: new Date(result.last_accessed).getTime(),
-            access_count: 0,
-            expires_at: null,
-            metadata: result.entities ? { entities: result.entities } : {},
-            is_deleted: false,
-          };
-
-          // Fire-and-forget: sync asynchronously, log errors but don't fail
-          syncMemory(memoryForSync).then(syncResult => {
-            if (!syncResult.success) {
-              console.error(`[memory-mcp] Cloud sync failed: ${syncResult.error}`);
-            }
-          }).catch(err => {
-            console.error(`[memory-mcp] Cloud sync error:`, err);
-          });
+          const syncManager = getSyncManager(db);
+          syncManager.enqueue(result.id);
         }
 
         return {
@@ -418,6 +417,13 @@ async function main() {
     db = getDatabase(config.databasePath);
     console.error(`[memory-mcp v${VERSION}] Database initialized`);
 
+    // Start background cloud sync if configured
+    if (isCloudEnabled()) {
+      const syncManager = getSyncManager(db);
+      syncManager.start();
+      console.error(`[memory-mcp v${VERSION}] Cloud sync enabled (background)`);
+    }
+
     // Connect to transport
     const transport = new StdioServerTransport();
     await server.connect(transport);
@@ -436,12 +442,14 @@ async function main() {
  */
 process.on('SIGINT', () => {
   console.error(`[memory-mcp v${VERSION}] Shutting down...`);
+  stopSyncManager();
   closeDatabase();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   console.error(`[memory-mcp v${VERSION}] Shutting down...`);
+  stopSyncManager();
   closeDatabase();
   process.exit(0);
 });
