@@ -4,7 +4,7 @@
 
 import type { DbDriver } from './db-driver.js';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 /**
  * Initialize database schema
@@ -153,11 +153,8 @@ function applyMigrations(db: DbDriver, fromVersion: number): void {
         .get() as number;
 
       if (nullSummaries > 0) {
-        throw new Error(
-          `Migration 2 failed: ${nullSummaries} memories still have NULL summaries`
-        );
+        throw new Error(`Migration 2 failed: ${nullSummaries} memories still have NULL summaries`);
       }
-
 
       // Record migration
       db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(
@@ -267,6 +264,19 @@ function applyMigrations(db: DbDriver, fromVersion: number): void {
         Date.now()
       );
     },
+
+    // Migration 5: Remove cloud sync (simplify to local-only)
+    (db: DbDriver) => {
+      db.exec(`
+        DROP TABLE IF EXISTS cloud_sync_queue;
+      `);
+
+      // Record migration
+      db.prepare('INSERT INTO schema_version (version, applied_at) VALUES (?, ?)').run(
+        5,
+        Date.now()
+      );
+    },
   ];
 
   // Apply each migration in sequence
@@ -351,7 +361,9 @@ export function getDatabaseStats(db: DbDriver): DatabaseStats {
   const stats = {
     total_memories: db.prepare('SELECT COUNT(*) FROM memories').pluck().get() as number,
     active_memories: db
-      .prepare('SELECT COUNT(*) FROM memories WHERE is_deleted = 0 AND (expires_at IS NULL OR expires_at > ?)')
+      .prepare(
+        'SELECT COUNT(*) FROM memories WHERE is_deleted = 0 AND (expires_at IS NULL OR expires_at > ?)'
+      )
       .pluck()
       .get(now) as number,
     deleted_memories: db
@@ -359,13 +371,15 @@ export function getDatabaseStats(db: DbDriver): DatabaseStats {
       .pluck()
       .get() as number,
     expired_memories: db
-      .prepare('SELECT COUNT(*) FROM memories WHERE is_deleted = 0 AND expires_at IS NOT NULL AND expires_at <= ?')
+      .prepare(
+        'SELECT COUNT(*) FROM memories WHERE is_deleted = 0 AND expires_at IS NOT NULL AND expires_at <= ?'
+      )
       .pluck()
       .get(now) as number,
     total_entities: db.prepare('SELECT COUNT(*) FROM entities').pluck().get() as number,
     total_provenance_records: db.prepare('SELECT COUNT(*) FROM provenance').pluck().get() as number,
     database_size_bytes: db
-      .prepare("SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()")
+      .prepare('SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()')
       .pluck()
       .get() as number,
     memory_avg_importance:

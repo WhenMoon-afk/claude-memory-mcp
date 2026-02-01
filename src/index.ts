@@ -33,9 +33,6 @@ import { memoryStore } from './tools/memory-store.js';
 import { memoryRecall } from './tools/memory-recall.js';
 import { memoryForget } from './tools/memory-forget.js';
 import type { MemoryInput, SearchOptions } from './types/index.js';
-import { isCloudEnabled, getCloudConfig, saveApiKey, getConfigPath, checkCloudHealth } from './cloud.js';
-import { getSyncManager, stopSyncManager } from './sync-manager.js';
-import type { SyncStats } from './sync-manager.js';
 
 /**
  * Get platform-specific default database path
@@ -58,8 +55,7 @@ function getDefaultDbPath(): string {
     );
   } else {
     // Linux/other: XDG compliant ~/.local/share/claude-memories/memory.db
-    const xdgData =
-      process.env['XDG_DATA_HOME'] || join(homedir(), '.local', 'share');
+    const xdgData = process.env['XDG_DATA_HOME'] || join(homedir(), '.local', 'share');
     dbPath = join(xdgData, 'claude-memories', 'memory.db');
   }
 
@@ -80,113 +76,6 @@ const config = {
   defaultTTLDays: parseInt(process.env['DEFAULT_TTL_DAYS'] || '90'),
   databaseDriver: process.env['MEMORY_DB_DRIVER'] || 'better-sqlite3',
 };
-
-/**
- * Handle memory_cloud tool actions
- */
-async function handleMemoryCloud(action: string, apiKey?: string): Promise<string> {
-  switch (action) {
-    case 'connect': {
-      if (!apiKey) {
-        // Show current status and instructions
-        const cloudConfig = getCloudConfig();
-        const configPath = getConfigPath();
-
-        if (cloudConfig.enabled) {
-          return `Cloud sync already configured.\n\nConfig file: ${configPath}\nAPI URL: ${cloudConfig.apiUrl}\n\nTo reconfigure, provide a new api_key.`;
-        }
-
-        return `Connect to Substratia Cloud\n\n1. Go to https://substratia.io/dashboard\n2. Click "Connect Claude Code"\n3. Paste the command in Claude Code\n\nOr provide api_key parameter directly.`;
-      }
-
-      // Validate API key format (sk_ prefix)
-      const key = apiKey.trim();
-      if (!key.startsWith('sk_')) {
-        return `Invalid API key format. Keys should start with "sk_".\n\nGet your key from: https://substratia.io/dashboard`;
-      }
-
-      // Save the API key to config file
-      const result = saveApiKey(key);
-      if (!result.success) {
-        return `Failed to save API key: ${result.error}\n\nYou can set SUBSTRATIA_API_KEY environment variable instead.`;
-      }
-
-      const configPath = getConfigPath();
-
-      // Verify connection by checking cloud health
-      const cloudConfig = getCloudConfig();
-      const healthResult = await checkCloudHealth(cloudConfig);
-
-      if (!healthResult.ok) {
-        return `API key saved to: ${configPath}\n\nWarning: Could not verify connection (${healthResult.error})\nKey will be used when service is available.`;
-      }
-
-      return `Connected to Substratia Cloud!\n\nConfig saved to: ${configPath}\n\nYour memories will sync when cloud sync is fully enabled.`;
-    }
-
-    case 'status': {
-      const cloudConfig = getCloudConfig();
-      const configPath = getConfigPath();
-
-      if (!cloudConfig.enabled) {
-        return `Cloud sync: Not configured\n\nTo enable:\n1. Go to https://substratia.io/dashboard\n2. Create an API key\n3. Run: memory_cloud action:connect api_key:sk_xxx`;
-      }
-
-      const healthResult = await checkCloudHealth(cloudConfig);
-      const connectionStatus = healthResult.ok ? 'Connected' : `Unavailable (${healthResult.error})`;
-
-      // Get sync queue stats
-      let syncInfo = '';
-      try {
-        const syncManager = getSyncManager(db);
-        const stats: SyncStats = syncManager.getStats();
-        const lastSync = stats.lastSyncAt
-          ? new Date(stats.lastSyncAt).toISOString()
-          : 'Never';
-
-        syncInfo = `\n\nSync Queue:\n  Pending: ${stats.pending}\n  Synced: ${stats.synced}\n  Failed: ${stats.failed}\n  Last sync: ${lastSync}`;
-
-        if (stats.lastError) {
-          syncInfo += `\n  Last error: ${stats.lastError}`;
-        }
-      } catch {
-        syncInfo = '\n\nSync queue: unavailable';
-      }
-
-      return `Cloud sync: ${connectionStatus}\nConfig file: ${configPath}\nAPI URL: ${cloudConfig.apiUrl}${syncInfo}`;
-    }
-
-    case 'help':
-    default: {
-      const cloudEnabled = isCloudEnabled();
-      const cloudStatus = cloudEnabled ? 'Enabled' : 'Not configured';
-
-      return `# Memory MCP Cloud Sync
-
-## Actions
-
-**connect** - Setup API key for cloud sync
-  Optional: api_key (starts with sk_)
-
-**status** - Check cloud connection status
-
-**help** - This message
-
-## Cloud Sync
-Status: ${cloudStatus}
-${!cloudEnabled ? `
-To enable:
-1. Go to https://substratia.io/dashboard
-2. Click "Connect Claude Code"
-3. Paste the command in Claude Code
-` : ''}
-## Shared Config
-memory-mcp shares its config with momentum plugin.
-Config file: ~/.config/substratia/credentials.json
-Connect once, both tools sync to cloud.`;
-    }
-  }
-}
 
 /**
  * Initialize MCP server
@@ -230,7 +119,8 @@ server.setRequestHandler(ListToolsRequestSchema, () => {
             type: {
               type: 'string',
               enum: ['fact', 'entity', 'relationship', 'self'],
-              description: 'Type of memory: fact (discrete info), entity (people/places/things), relationship (connections), self (user preferences)',
+              description:
+                'Type of memory: fact (discrete info), entity (people/places/things), relationship (connections), self (user preferences)',
             },
             importance: {
               type: 'number',
@@ -281,7 +171,8 @@ server.setRequestHandler(ListToolsRequestSchema, () => {
             },
             max_tokens: {
               type: 'number',
-              description: 'Token budget for response (default: 1000). System auto-allocates: summaries first, then fills remaining budget with full content for top matches.',
+              description:
+                'Token budget for response (default: 1000). System auto-allocates: summaries first, then fills remaining budget with full content for top matches.',
               default: 1000,
               minimum: 100,
               maximum: 5000,
@@ -325,26 +216,6 @@ server.setRequestHandler(ListToolsRequestSchema, () => {
           required: ['id'],
         },
       },
-      {
-        name: 'memory_cloud',
-        description:
-          'Manage Substratia Cloud sync. Actions: connect (setup API key), status (check cloud connection), help (show usage).',
-        inputSchema: {
-          type: 'object',
-          properties: {
-            action: {
-              type: 'string',
-              enum: ['connect', 'status', 'help'],
-              description: 'connect=setup API key, status=check connection, help=show usage',
-            },
-            api_key: {
-              type: 'string',
-              description: 'For connect action: Substratia API key (starts with sk_)',
-            },
-          },
-          required: ['action'],
-        },
-      },
     ],
   };
 });
@@ -352,20 +223,13 @@ server.setRequestHandler(ListToolsRequestSchema, () => {
 /**
  * Tool execution handler
  */
-server.setRequestHandler(CallToolRequestSchema, async (request) => {
+server.setRequestHandler(CallToolRequestSchema, (request) => {
   try {
     const { name, arguments: args } = request.params;
 
     switch (name) {
       case 'memory_store': {
         const result = memoryStore(db, args as unknown as MemoryInput);
-
-        // Enqueue for background cloud sync (non-blocking)
-        if (isCloudEnabled()) {
-          const syncManager = getSyncManager(db);
-          syncManager.enqueue(result.id);
-        }
-
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
@@ -383,14 +247,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const result = memoryForget(db, id, reason);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-        };
-      }
-
-      case 'memory_cloud': {
-        const { action, api_key } = args as { action: string; api_key?: string };
-        const result = await handleMemoryCloud(action, api_key);
-        return {
-          content: [{ type: 'text', text: result }],
         };
       }
 
@@ -417,13 +273,6 @@ async function main() {
     db = getDatabase(config.databasePath);
     console.error(`[memory-mcp v${VERSION}] Database initialized`);
 
-    // Start background cloud sync if configured
-    if (isCloudEnabled()) {
-      const syncManager = getSyncManager(db);
-      syncManager.start();
-      console.error(`[memory-mcp v${VERSION}] Cloud sync enabled (background)`);
-    }
-
     // Connect to transport
     const transport = new StdioServerTransport();
     await server.connect(transport);
@@ -442,14 +291,12 @@ async function main() {
  */
 process.on('SIGINT', () => {
   console.error(`[memory-mcp v${VERSION}] Shutting down...`);
-  stopSyncManager();
   closeDatabase();
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
   console.error(`[memory-mcp v${VERSION}] Shutting down...`);
-  stopSyncManager();
   closeDatabase();
   process.exit(0);
 });

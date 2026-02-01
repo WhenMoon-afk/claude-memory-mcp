@@ -5,7 +5,7 @@
 
 Local, persistent memory for Claude Desktop and MCP-compatible AI assistants.
 
-> *Part of the [Substratia](https://substratia.io) memory infrastructure ecosystem.*
+> _Part of the [Substratia](https://substratia.io) memory infrastructure ecosystem._
 
 A lightweight MCP server that gives your AI durable, searchable memory — entirely on your machine. Built with TypeScript, SQLite + FTS5, and minimal dependencies.
 
@@ -49,11 +49,11 @@ After installation, **restart Claude Desktop** (quit and reopen).
 
 ## Tools
 
-| Tool | Description |
-|------|-------------|
-| `memory_store` | Store a memory with auto-summarization and entity extraction |
-| `memory_recall` | Search memories with token-aware loading |
-| `memory_forget` | Soft-delete a memory (preserves audit trail) |
+| Tool            | Description                                                  |
+| --------------- | ------------------------------------------------------------ |
+| `memory_store`  | Store a memory with auto-summarization and entity extraction |
+| `memory_recall` | Search memories with token-aware loading                     |
+| `memory_forget` | Soft-delete a memory (preserves audit trail)                 |
 
 ## Features
 
@@ -65,10 +65,10 @@ After installation, **restart Claude Desktop** (quit and reopen).
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MEMORY_DB_PATH` | Platform-specific | Database file location |
-| `DEFAULT_TTL_DAYS` | `90` | Default memory expiration |
+| Variable           | Default           | Description               |
+| ------------------ | ----------------- | ------------------------- |
+| `MEMORY_DB_PATH`   | Platform-specific | Database file location    |
+| `DEFAULT_TTL_DAYS` | `90`              | Default memory expiration |
 
 ## Troubleshooting
 
@@ -81,12 +81,14 @@ After installation, **restart Claude Desktop** (quit and reopen).
 ### "Connection closed" on Windows?
 
 Windows requires either:
+
 - The `cmd /c` wrapper method (see Windows config above), OR
 - The full path to `npx.cmd` (e.g., `C:\Program Files\nodejs\npx.cmd`)
 
 ### Getting stale cached versions?
 
 The `npx github:` method bypasses npm cache. Alternatively:
+
 - Clear npm cache: `npm cache clean --force`
 - Use global install for version control
 
@@ -105,16 +107,6 @@ First run requires downloading and installing dependencies (can take 30+ seconds
 - **GitHub**: https://github.com/WhenMoon-afk/claude-memory-mcp
 - **Issues**: https://github.com/WhenMoon-afk/claude-memory-mcp/issues
 
-## Want Cloud Sync?
-
-**[Substratia Pro](https://substratia.io)** (coming soon) adds:
-- Cloud sync across all your devices
-- Memory dashboard to view/edit what AI remembers
-- Automatic backups and disaster recovery
-- Team memory sharing
-
-**[Join the waitlist](https://substratia.io)** to get early access.
-
 ## Related Projects
 
 Part of the **Substratia** memory infrastructure ecosystem:
@@ -127,15 +119,9 @@ Part of the **Substratia** memory infrastructure ecosystem:
 
 - [GitHub Issues](https://github.com/WhenMoon-afk/claude-memory-mcp/issues) - Bug reports & feature requests
 
-## Privacy Policy
+## Privacy
 
-**Local-only by default**: All memories are stored locally on your machine in `~/.memory-mcp/memory.db`. No data is sent anywhere unless you explicitly enable cloud sync.
-
-**Cloud sync (optional)**: If you connect to Substratia Cloud, memories are synced to our servers. See our full privacy policy at https://substratia.io/privacy
-
-**What we collect**:
-- Local mode: Nothing. Zero telemetry.
-- Cloud mode: Memory content you choose to sync, usage metrics for service improvement.
+**Local-only**: All memories are stored locally on your machine. No data is sent anywhere. Zero telemetry.
 
 ## Disclaimer
 

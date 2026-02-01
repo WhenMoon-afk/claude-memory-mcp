@@ -1,9 +1,9 @@
 ---
 name: memory:status
-description: Show memory database status and cloud sync info
+description: Show memory database status
 ---
 
-Check memory plugin status using `memory_cloud action:status`. Report:
+Check memory plugin status using `memory_recall query:"*"`. Report:
+
 - Total memories stored locally
-- Cloud sync status (connected/disconnected)
 - Recent memory activity

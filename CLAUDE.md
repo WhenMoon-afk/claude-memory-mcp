@@ -27,7 +27,6 @@ npm start              # Run compiled server
 ```
 src/
 ├── index.ts           # MCP server entry point, tool definitions
-├── cloud.ts           # Cloud sync integration (Convex)
 ├── database/          # SQLite layer (better-sqlite3, FTS5)
 ├── extractors/        # Entity extraction from memory content
 ├── scoring/           # Hybrid relevance scoring (recency + importance + frequency)

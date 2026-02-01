@@ -1,8 +1,8 @@
 {
   "manifest_version": "0.2",
   "name": "memory-mcp",
-  "version": "2.7.0",
-  "description": "Persistent memory for Claude. Store decisions, preferences, and learnings across sessions. Optional cloud sync with Substratia Pro.",
+  "version": "3.0.0",
+  "description": "Persistent local memory for Claude. Store decisions, preferences, and learnings across sessions.",
   "author": {
     "name": "Substratia",
     "email": "hello@substratia.io",
@@ -24,12 +24,6 @@
     }
   },
   "user_config": {
-    "cloud_api_key": {
-      "type": "string",
-      "title": "Substratia Cloud API Key",
-      "description": "Enable cloud sync and backup. Get your key at substratia.io/dashboard",
-      "sensitive": true
-    },
     "database_path": {
       "type": "string",
       "title": "Database Path",
@@ -48,10 +42,6 @@
     {
       "name": "memory_forget",
       "description": "Remove a memory by ID (soft delete with audit trail)."
-    },
-    {
-      "name": "memory_cloud",
-      "description": "Manage cloud sync connection for backup and cross-device access."
     }
   ]
 }

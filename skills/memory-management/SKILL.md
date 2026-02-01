@@ -10,6 +10,7 @@ description: Store and recall memories across Claude Code sessions. Cures AI amn
 ## MCP Tools
 
 ### memory_store
+
 Store a memory for future recall.
 
 ```
@@ -23,6 +24,7 @@ memory_store(
 ```
 
 **When to store:**
+
 - User preferences ("I prefer tabs over spaces")
 - Project decisions ("We chose PostgreSQL for X reason")
 - Architecture patterns ("Auth flow uses JWT with refresh tokens")
@@ -30,6 +32,7 @@ memory_store(
 - Entity relationships ("User manages Project, Project has Tasks")
 
 ### memory_recall
+
 Search and retrieve relevant memories.
 
 ```
@@ -42,23 +45,18 @@ memory_recall(
 ```
 
 **When to recall:**
+
 - Starting work on a project (recall project context)
 - Making decisions (recall past decisions and rationale)
 - User asks "remember when..." or "what did we decide about..."
 - Before suggesting solutions (recall past learnings)
 
 ### memory_forget
+
 Remove a memory (soft delete with provenance).
 
 ```
 memory_forget(id: string)
-```
-
-### memory_cloud
-Manage Substratia Cloud sync (optional).
-
-```
-memory_cloud(action: "connect" | "status" | "help", api_key?: string)
 ```
 
 ## Best Practices
@@ -69,18 +67,11 @@ memory_cloud(action: "connect" | "status" | "help", api_key?: string)
 4. **Recall proactively** - Check for relevant context before making suggestions
 5. **Update over time** - Store corrections when past memories become outdated
 
-## Cloud Sync (Optional)
-
-Enable cloud backup and cross-device sync:
-1. Get API key at https://substratia.io/dashboard
-2. Run: `memory_cloud action:connect api_key:sk_xxx`
-3. Memories sync automatically on store
-
 ## Memory Types
 
-| Type | Use For |
-|------|---------|
-| `fact` | General knowledge, decisions, preferences |
-| `entity` | People, projects, systems, tools |
-| `relationship` | How entities connect (X depends on Y) |
-| `self` | User-specific preferences and patterns |
+| Type           | Use For                                   |
+| -------------- | ----------------------------------------- |
+| `fact`         | General knowledge, decisions, preferences |
+| `entity`       | People, projects, systems, tools          |
+| `relationship` | How entities connect (X depends on Y)     |
+| `self`         | User-specific preferences and patterns    |
