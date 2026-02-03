@@ -40,6 +40,72 @@ interface EntityJoinRow extends EntityRow {
 }
 
 /**
+ * Extract individual search terms from a query string, preserving quoted phrases.
+ */
+function extractTerms(query: string): string[] {
+  const terms: string[] = [];
+
+  const quoted = query.match(/"[^"]+"/g) || [];
+  quoted.forEach(q => terms.push(q.replace(/"/g, '').toLowerCase()));
+
+  const remainder = query.replace(/"[^"]+"/g, '').trim();
+  if (remainder) {
+    remainder.split(/\s+/).forEach(t => {
+      if (t.length > 0) terms.push(t.toLowerCase());
+    });
+  }
+
+  return terms;
+}
+
+/**
+ * Build an FTS5 query with OR expansion and prefix wildcards.
+ * "bonsai tree plant care" -> "bonsai* OR tree* OR plant* OR care*"
+ * Quoted phrases are preserved: '"plant care" bonsai' -> '"plant care" OR bonsai*'
+ */
+function buildFtsQuery(query: string): string {
+  if (!query) return query;
+
+  // Extract quoted phrases first
+  const parts: string[] = [];
+  const quoted = query.match(/"[^"]+"/g) || [];
+  quoted.forEach(q => parts.push(q));
+
+  // Get remaining unquoted terms
+  const remainder = query.replace(/"[^"]+"/g, '').trim();
+  if (remainder) {
+    remainder.split(/\s+/).forEach(term => {
+      if (term.length > 0) {
+        // Add prefix wildcard for partial matching
+        parts.push(term + '*');
+      }
+    });
+  }
+
+  if (parts.length === 0) return query;
+  if (parts.length === 1) return parts[0];
+  return parts.join(' OR ');
+}
+
+/**
+ * Boost score based on how many query terms match the memory content/summary.
+ * More matching terms = higher boost (rewards relevant multi-term matches).
+ */
+function calculateTermMatchBoost(memory: Memory, queryTerms: string[]): number {
+  if (queryTerms.length <= 1) return 0;
+
+  const text = ((memory.content || '') + ' ' + (memory.summary || '')).toLowerCase();
+  let matchCount = 0;
+  for (const term of queryTerms) {
+    if (text.includes(term)) matchCount++;
+  }
+
+  // Boost proportional to fraction of terms matched (max 0.3 boost for all terms)
+  return (matchCount / queryTerms.length) * 0.3;
+}
+
+
+/**
  * Perform full-text search on memories using FTS5
  * Returns: { results: MemorySearchResult[], totalCount: number }
  */
@@ -57,9 +123,8 @@ export function semanticSearch(
     includeExpired = false,
   } = options;
 
-  // Build FTS5 query (use simple keyword matching)
-  // FTS5 syntax: "phrase search" OR keyword1 keyword2
-  const ftsQuery = query.trim();
+  // Build FTS5 query with OR expansion and prefix wildcards
+  const ftsQuery = buildFtsQuery(query.trim());
 
   // Pre-filter candidates using FTS5
   const filters: SearchFilters = { includeExpired };
@@ -69,13 +134,15 @@ export function semanticSearch(
 
   const candidates = getFilteredCandidates(db, ftsQuery, filters);
 
-  // Calculate hybrid scores (FTS rank + importance + recency)
+  // Calculate hybrid scores with term-match boosting
+  const queryTerms = extractTerms(query.trim());
   const scoredResults = candidates.map((memory) => {
     const hybridScore = calculateHybridScore(memory);
+    const matchBoost = calculateTermMatchBoost(memory, queryTerms);
 
     return {
       ...memory,
-      score: hybridScore,
+      score: hybridScore + matchBoost,
       entities: [], // Will be populated later
       provenance: [], // Will be populated later
     };
