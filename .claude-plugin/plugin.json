@@ -1,6 +1,6 @@
 {
   "name": "memory-mcp",
-  "version": "2.7.0",
+  "version": "2.7.1",
   "description": "Persistent memory for Claude Code. Remember decisions, preferences, and learnings across sessions. Optional cloud sync.",
   "author": {
     "name": "whenmoon-afk"
@@ -8,10 +8,16 @@
   "homepage": "https://substratia.io",
   "repository": "https://github.com/whenmoon-afk/claude-memory-mcp",
   "license": "MIT",
-  "keywords": ["memory", "persistence", "context", "recall", "learning", "cloud", "sync", "substratia"],
-  "hooks": ["./hooks"],
-  "skills": ["./skills/memory-management"],
-  "commands": ["./commands"],
+  "keywords": [
+    "memory",
+    "persistence",
+    "context",
+    "recall",
+    "learning",
+    "cloud",
+    "sync",
+    "substratia"
+  ],
   "mcpServers": {
     "memory": {
       "command": "node",
