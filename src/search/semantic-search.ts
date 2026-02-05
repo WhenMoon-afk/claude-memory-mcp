@@ -46,7 +46,10 @@ function extractTerms(query: string): string[] {
   const terms: string[] = [];
 
   const quoted = query.match(/"[^"]+"/g) || [];
-  quoted.forEach(q => terms.push(q.replace(/"/g, '').toLowerCase()));
+  quoted.forEach(q => {
+    const term = q.replace(/"/g, '').toLowerCase();
+    if (term.length > 0) terms.push(term);
+  });
 
   const remainder = query.replace(/"[^"]+"/g, '').trim();
   if (remainder) {
@@ -82,7 +85,7 @@ function buildFtsQuery(query: string): string {
     });
   }
 
-  if (parts.length === 0) return query;
+  if (parts.length === 0) return '';
   if (parts.length === 1) return parts[0];
   return parts.join(' OR ');
 }
