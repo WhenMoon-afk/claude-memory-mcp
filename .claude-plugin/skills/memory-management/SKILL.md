@@ -73,10 +73,3 @@ memory_forget id:"mem_abc123" reason:"Outdated after refactor"
 | `pattern` | Code patterns, project-specific idioms |
 | `fact` | Factual information, configurations |
 
-## Cloud Sync (Optional)
-
-Memories sync to Substratia Cloud for backup and cross-device access.
-
-To connect: `memory_cloud action:connect api_key:YOUR_KEY`
-
-Get your API key at https://substratia.io/dashboard
