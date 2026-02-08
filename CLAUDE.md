@@ -55,8 +55,10 @@ src/
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `MEMORY_DB_PATH` | `~/.memory-mcp/memory.db` | Database location |
+| `MEMORY_DB_PATH` | `~/.claude-memories/memory.db` (platform-specific) | Database location |
 | `DEFAULT_TTL_DAYS` | `90` | Memory expiration |
+
+> **Note**: The default DB path (`~/.claude-memories/`) should be revisited — a more predictable, user-friendly location would improve UX.
 
 ## Testing
 

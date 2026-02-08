@@ -2,23 +2,11 @@
   "hooks": {
     "SessionStart": [
       {
-        "matcher": "startup|resume",
         "hooks": [
           {
             "type": "prompt",
             "prompt": "Memory plugin ready. Use memory_recall to search past learnings, decisions, and preferences. Memories persist across sessions.",
             "async": true
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "matcher": ".*",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "Before ending this session, consider if any important decisions, learnings, or preferences should be remembered. Use memory_store to save them for future sessions. Focus on: architectural decisions, user preferences, project-specific patterns, debugging solutions, and workflow insights."
           }
         ]
       }

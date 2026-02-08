@@ -1,7 +1,7 @@
 {
   "name": "memory-mcp",
-  "version": "2.7.1",
-  "description": "Persistent memory for Claude Code. Remember decisions, preferences, and learnings across sessions. Optional cloud sync.",
+  "version": "3.0.0",
+  "description": "Persistent memory for Claude Code. Remember decisions, preferences, and learnings across sessions.",
   "author": {
     "name": "whenmoon-afk"
   },
@@ -14,8 +14,6 @@
     "context",
     "recall",
     "learning",
-    "cloud",
-    "sync",
     "substratia"
   ],
   "mcpServers": {
