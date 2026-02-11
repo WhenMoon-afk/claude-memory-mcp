@@ -23,16 +23,16 @@ export interface Memory {
 }
 
 export interface MemoryInput {
-  id?: string; // If provided, update existing; if not, create new
+  id?: string | undefined; // If provided, update existing; if not, create new
   content: string;
-  type: MemoryType;
-  importance?: number;
-  entities?: string[];
-  tags?: string[];
-  metadata?: Record<string, unknown>;
-  ttl_days?: number | null;
-  expires_at?: string; // ISO timestamp
-  provenance?: ProvenanceInput;
+  type?: MemoryType | undefined;
+  importance?: number | undefined;
+  entities?: string[] | undefined;
+  tags?: string[] | undefined;
+  metadata?: Record<string, unknown> | undefined;
+  ttl_days?: number | null | undefined;
+  expires_at?: string | undefined; // ISO timestamp
+  provenance?: ProvenanceInput | undefined;
 }
 
 export interface MemoryUpdate {
@@ -102,9 +102,9 @@ export interface Provenance {
 
 export interface ProvenanceInput {
   source: string;
-  timestamp?: string;
-  context?: string;
-  user_id?: string;
+  timestamp?: string | undefined;
+  context?: string | undefined;
+  user_id?: string | undefined;
 }
 
 // ============================================================================
@@ -113,10 +113,10 @@ export interface ProvenanceInput {
 
 export interface SearchOptions {
   query: string;
-  max_tokens?: number; // Token budget for response
-  type?: MemoryType;
-  entities?: string[];
-  limit?: number;
+  max_tokens?: number | undefined; // Token budget for response
+  type?: MemoryType | undefined;
+  entities?: string[] | undefined;
+  limit?: number | undefined;
 }
 
 // Internal search options (includes implementation details)

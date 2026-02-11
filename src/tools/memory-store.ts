@@ -78,7 +78,7 @@ function createMemory(
   input: MemoryInput
 ): StandardMemory {
   // Validate content
-  const validation = validateContent(input.content, input.type);
+  const validation = validateContent(input.content, input.type ?? 'fact');
   if (!validation.valid) {
     throw new ValidationError(validation.errors.join(', '));
   }

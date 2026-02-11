@@ -32,7 +32,12 @@ import { getDatabase, closeDatabase } from './database/connection.js';
 import { memoryStore } from './tools/memory-store.js';
 import { memoryRecall } from './tools/memory-recall.js';
 import { memoryForget } from './tools/memory-forget.js';
-import type { MemoryInput, SearchOptions } from './types/index.js';
+import { z } from 'zod';
+import {
+  MemoryStoreSchema,
+  MemoryRecallSchema,
+  MemoryForgetSchema,
+} from './validation/schemas.js';
 
 /**
  * Get platform-specific default database path
@@ -155,7 +160,7 @@ server.setRequestHandler(ListToolsRequestSchema, () => {
               description: 'Provenance information (source, timestamp, context)',
             },
           },
-          required: ['content', 'type'],
+          required: ['content'],
         },
       },
       {
@@ -229,21 +234,23 @@ server.setRequestHandler(CallToolRequestSchema, (request) => {
 
     switch (name) {
       case 'memory_store': {
-        const result = memoryStore(db, args as unknown as MemoryInput);
+        const input = MemoryStoreSchema.parse(args);
+        const result = memoryStore(db, input);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
       }
 
       case 'memory_recall': {
-        const result = memoryRecall(db, args as unknown as SearchOptions);
+        const input = MemoryRecallSchema.parse(args);
+        const result = memoryRecall(db, input);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
         };
       }
 
       case 'memory_forget': {
-        const { id, reason } = args as { id: string; reason?: string };
+        const { id, reason } = MemoryForgetSchema.parse(args);
         const result = memoryForget(db, id, reason);
         return {
           content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
@@ -254,6 +261,13 @@ server.setRequestHandler(CallToolRequestSchema, (request) => {
         throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
   } catch (error) {
+    if (error instanceof z.ZodError) {
+      const details = error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
+      throw new McpError(ErrorCode.InvalidParams, `Invalid parameters: ${details}`);
+    }
+
     if (error instanceof McpError) {
       throw error;
     }

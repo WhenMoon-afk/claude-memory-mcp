@@ -15,11 +15,16 @@ Store a memory for future recall.
 
 ```
 memory_store(
-  content: string,       # What to remember
-  type?: "fact" | "entity" | "relationship" | "self",
-  importance?: 0-10,     # 8+ = critical, 5-7 = high, 3-4 = normal
-  tags?: string[],       # For categorization
-  context?: string       # Additional context
+  content: string,         # What to remember
+  type?: "fact" | "entity" | "relationship" | "self",  # Auto-classified if omitted
+  id?: string,             # Provide to update existing memory
+  importance?: 0-10,       # Auto-calculated if not provided
+  entities?: string[],     # Auto-extracted if not provided
+  tags?: string[],         # For categorization
+  metadata?: object,       # Additional metadata
+  ttl_days?: number,       # Time-to-live in days
+  expires_at?: string,     # Explicit expiration (ISO format)
+  provenance?: object      # Source, timestamp, context, user_id
 )
 ```
 
@@ -38,9 +43,10 @@ Search and retrieve relevant memories.
 ```
 memory_recall(
   query: string,         # What to search for
-  type?: string,         # Filter by memory type
-  limit?: number,        # Max results (default 10)
-  token_budget?: number  # Max tokens to return
+  max_tokens?: number,   # Token budget (default: 1000, range: 100-5000)
+  type?: "fact" | "entity" | "relationship" | "self",  # Filter by memory type
+  entities?: string[],   # Filter by related entities
+  limit?: number         # Max results (default: 20, max: 50)
 )
 ```
 
@@ -56,7 +62,10 @@ memory_recall(
 Remove a memory (soft delete with provenance).
 
 ```
-memory_forget(id: string)
+memory_forget(
+  id: string,            # Memory ID to forget
+  reason?: string        # Reason for forgetting (stored in provenance)
+)
 ```
 
 ## Best Practices
