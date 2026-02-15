@@ -14,8 +14,10 @@ Three MCP tools: `memory_store` (create/update with auto-summarization and entit
 npm install            # Install deps (compiles better-sqlite3 native bindings)
 npm run build          # Compile TypeScript (tsc → dist/)
 npm test               # Run vitest tests
+npm run test:watch     # Vitest in watch mode
+npm run test:coverage  # Vitest with v8 coverage
 npm run dev            # Watch mode with tsx
-npm run lint           # ESLint
+npm run lint           # ESLint (src/ only)
 npm run lint:fix       # ESLint with auto-fix
 npm run typecheck      # TypeScript type checking (tsc --noEmit)
 npm run format         # Prettier formatting
@@ -56,7 +58,7 @@ Content → `normalizeContent()` → `generateSummary()` → `extractEntities()`
 - **TypeScript strict mode** with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` — optional properties must explicitly include `undefined` in their type
 - **ESM only** — `"type": "module"` in package.json, use `.js` extensions in imports
 - **Husky pre-commit hook** runs lint + typecheck + tests + secrets scanning — all must pass before commit
-- **Commitlint** enforces conventional commits: `<type>: <description>` (feat, fix, docs, refactor, test, chore)
+- **Commitlint** enforces conventional commits: `<type>: <description>` (feat, fix, docs, refactor, test, chore, style, perf, ci, build, revert)
 - **CI matrix** tests on Node 18/20/22 across ubuntu/windows/macos
 
 ## Environment Variables
@@ -69,4 +71,4 @@ Content → `normalizeContent()` → `generateSummary()` → `extractEntities()`
 
 ## Testing
 
-Tests live in `test/` (integration) and `src/**/*.test.ts` (unit). Vitest config includes both patterns. Integration tests require a prior `npm run build` since they check `dist/index.js`.
+Tests live in `test/` (integration, `.js`) and `src/**/*.test.ts` (unit). Integration tests require a prior `npm run build` since they import `dist/index.js`. ESLint ignores `*.js` and `*.test.ts` files — only `src/**/*.ts` production code is linted.
