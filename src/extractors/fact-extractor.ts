@@ -43,9 +43,7 @@ export function isFact(content: string): boolean {
  * Classify memory type based on content
  */
 export function classifyMemoryType(content: string, entities: string[]): MemoryType {
-  const trimmed = content.toLowerCase();
-
-  // Relationship indicators
+  // Relationship indicators (case-insensitive)
   const relationshipPatterns = [
     /\b(depends on|requires|needs|uses|extends|implements)\b/i,
     /\b(reports to|works with|manages|leads|owns)\b/i,
@@ -54,20 +52,21 @@ export function classifyMemoryType(content: string, entities: string[]): MemoryT
     /\b(is a|is an|part of|member of|belongs to)\b/i,
   ];
 
-  const hasRelationship = relationshipPatterns.some((pattern) => pattern.test(trimmed));
+  const hasRelationship = relationshipPatterns.some((pattern) => pattern.test(content));
 
   if (hasRelationship && entities.length >= 2) {
     return 'relationship';
   }
 
   // Entity indicators (description of a single thing)
+  // These patterns test against original content to preserve case for capitalization checks
   const entityPatterns = [
     /^([A-Z][a-zA-Z\s]+)\s+-\s+/,  // "Name - description"
     /^([A-Z][a-zA-Z\s]+)\s+is\s+(a|an)\s+/i, // "Name is a..."
     /\b(person|organization|company|team|project|tool|library|framework)\b/i,
   ];
 
-  const hasEntityIndicator = entityPatterns.some((pattern) => pattern.test(trimmed));
+  const hasEntityIndicator = entityPatterns.some((pattern) => pattern.test(content));
 
   if (hasEntityIndicator && entities.length === 1) {
     return 'entity';

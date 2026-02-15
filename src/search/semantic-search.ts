@@ -57,9 +57,13 @@ export function semanticSearch(
     includeExpired = false,
   } = options;
 
-  // Build FTS5 query (use simple keyword matching)
-  // FTS5 syntax: "phrase search" OR keyword1 keyword2
-  const ftsQuery = query.trim();
+  // Sanitize query for FTS5 (special chars and operators cause parse errors)
+  const ftsQuery = sanitizeFtsQuery(query);
+
+  // Empty query after sanitization = no results
+  if (!ftsQuery) {
+    return { results: [], totalCount: 0 };
+  }
 
   // Pre-filter candidates using FTS5
   const filters: SearchFilters = { includeExpired };
@@ -97,6 +101,28 @@ export function semanticSearch(
     results: enrichedResults,
     totalCount,
   };
+}
+
+/**
+ * Sanitize user query for FTS5 to prevent parse errors.
+ * Quotes each word for literal matching, stripping FTS5 special characters.
+ */
+function sanitizeFtsQuery(query: string): string {
+  const trimmed = query.trim();
+  if (!trimmed) return '';
+
+  // Split into words, quote each for literal matching.
+  // This prevents FTS5 operators (AND, OR, NOT, NEAR) from being interpreted.
+  const words = trimmed.split(/\s+/);
+
+  return words
+    .map((word) => {
+      // Strip double quotes (FTS5 phrase delimiter) and asterisks (prefix operator)
+      const cleaned = word.replace(/["*]/g, '');
+      return cleaned ? `"${cleaned}"` : '';
+    })
+    .filter((w) => w.length > 0)
+    .join(' ');
 }
 
 /**
