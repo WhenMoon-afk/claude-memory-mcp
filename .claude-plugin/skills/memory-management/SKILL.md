@@ -31,12 +31,12 @@ Search memories by query. Returns relevant past context.
 
 ```
 memory_recall query:"authentication approach"
-memory_recall query:"user preferences" type:"preference"
+memory_recall query:"user preferences" type:"self"
 ```
 
 **Parameters:**
 - `query` (required): What to search for
-- `type`: Filter by memory type (decision, preference, learning, pattern, etc.)
+- `type`: Filter by memory type (`fact`, `entity`, `relationship`, `self`)
 - `entities`: Filter by related entities
 - `limit`: Max results (default 20, max 50)
 - `max_tokens`: Token budget for response (default 1000)
@@ -46,13 +46,13 @@ Store new memory for future recall.
 
 ```
 memory_store content:"User prefers Tailwind CSS over styled-components for this project"
-memory_store content:"Auth uses JWT tokens with 24h expiry, stored in httpOnly cookies" type:"decision"
+memory_store content:"Auth uses JWT tokens with 24h expiry, stored in httpOnly cookies" type:"fact"
 ```
 
 **Parameters:**
 - `content` (required): What to remember
-- `type`: Memory type (auto-detected if not provided)
-- `importance`: 1-10 scale (auto-calculated if not provided)
+- `type`: Memory type — `fact`, `entity`, `relationship`, `self` (auto-detected if not provided)
+- `importance`: 0-10 scale (auto-calculated if not provided)
 - `entities`: Related entities (auto-extracted if not provided)
 - `tags`: Additional categorization
 
@@ -67,9 +67,7 @@ memory_forget id:"mem_abc123" reason:"Outdated after refactor"
 
 | Type | Use For |
 |------|---------|
-| `decision` | Architectural choices, tech stack decisions |
-| `preference` | User/project preferences, conventions |
-| `learning` | Debugging solutions, discovered patterns |
-| `pattern` | Code patterns, project-specific idioms |
-| `fact` | Factual information, configurations |
-
+| `fact` | General knowledge, decisions, preferences |
+| `entity` | People, projects, systems, tools |
+| `relationship` | How entities connect (X depends on Y) |
+| `self` | User-specific preferences and patterns |
