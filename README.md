@@ -100,6 +100,7 @@ First run requires downloading and installing dependencies (can take 30+ seconds
 
 - `@modelcontextprotocol/sdk` - MCP protocol implementation
 - `better-sqlite3` - Fast native SQLite with FTS5
+- `zod` - Runtime input validation
 
 ## Links
 

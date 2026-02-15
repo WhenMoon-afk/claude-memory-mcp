@@ -14,7 +14,7 @@ export const MemoryStoreSchema = z.object({
   entities: z.array(z.string()).optional(),
   tags: z.array(z.string()).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
-  ttl_days: z.number().optional(),
+  ttl_days: z.number().nullable().optional(),
   expires_at: z.string().optional(),
   provenance: z
     .object({
