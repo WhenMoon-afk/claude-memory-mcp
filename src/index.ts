@@ -9,6 +9,7 @@ import { getObservationsPath, getIdentityDir } from "./paths.js";
 import { handleReflect } from "./tools/reflect.js";
 import { handleAnchor } from "./tools/anchor.js";
 import { handleSelf } from "./tools/self.js";
+import { generateIdentityPrompt } from "./tools/identity-prompt.js";
 
 export function createServer(): McpServer {
   const store = new ObservationStore(getObservationsPath());
@@ -79,6 +80,16 @@ export function createServer(): McpServer {
       inputSchema: z.object({}),
     },
     async () => handleSelf({}, store, identity),
+  );
+
+  server.registerPrompt(
+    "identity",
+    {
+      title: "Identity Context",
+      description:
+        "Load your persistent identity — soul, self-state, anchors, and observed patterns. Use at session start.",
+    },
+    () => generateIdentityPrompt(store, identity),
   );
 
   return server;
