@@ -23,8 +23,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - JSON observation store tracking concept frequency, distinct days, and contexts
 - Promotion formula: `score = total_recalls * log2(distinct_days + 1) * context_diversity * recency_weight`
 - Auto-detection of new days for distinct_days tracking
+- `auto_promote` option on reflect — automatically promotes concepts above threshold to identity-anchors.md
+- `identity` MCP prompt — loads persistent identity context automatically at session start
+- CLI subcommands: `setup` (install instructions), `reflect` (for hooks/scripts)
+- Auto-reflect stop hook documentation for Claude Code
 - XDG-compliant data directory resolution
-- 52 tests across 8 files (unit + integration)
+- CI coverage threshold enforcement (100% functions, 85% lines)
+- 68 tests across 11 files (unit + integration)
 
 ### Removed
 
