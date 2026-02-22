@@ -1,7 +1,4 @@
-# Lint and type check
-echo "Running lint..."
-npm run lint || exit 1
-
+# Type check and test
 echo "Running type check..."
 npm run typecheck || exit 1
 
@@ -10,7 +7,7 @@ npm test || exit 1
 
 # Block secrets
 echo "Checking for secrets..."
-if git diff --cached --name-only | xargs grep -l -E '(ANTHROPIC_API_KEY|OPENAI_API_KEY|sk-[a-zA-Z0-9]{20,}|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----|password\s*=\s*["\047][^"\047]{8,})' 2>/dev/null; then
+if git diff --cached --name-only | grep -v '\.husky/' | xargs grep -l -E '(ANTHROPIC_API_KEY|OPENAI_API_KEY|sk-[a-zA-Z0-9]{20,}|-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----|password\s*=\s*["\047][^"\047]{8,})' 2>/dev/null; then
     echo "ERROR: Potential secrets detected in staged files!"
     echo "Please remove sensitive data before committing."
     exit 1

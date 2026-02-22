@@ -1,21 +1,14 @@
 {
   "name": "@whenmoon-afk/memory-mcp",
-  "version": "3.0.0",
-  "description": "Brain-inspired memory for AI agents - MCP server",
+  "version": "4.0.0",
+  "description": "Identity persistence for AI agents - MCP server",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {
-    "memory-mcp": "./dist/index.js",
-    "memory-mcp-install": "./install.js"
+    "memory-mcp": "./dist/index.js"
   },
   "files": [
     "dist/",
-    ".claude-plugin/",
-    "hooks/",
-    "skills/",
-    "commands/",
-    "desktop-extension/",
-    "install.js",
     "README.md",
     "LICENSE"
   ],
@@ -23,28 +16,19 @@
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
-    "prepare": "husky",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\"",
-    "release": "npm run test && npm run build",
     "clean": "rm -rf dist",
-    "prepublishOnly": "npm run clean && npm run build",
-    "package:desktop": "npm run build && node scripts/package-desktop.js"
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
     "mcp",
-    "memory",
-    "context",
+    "identity",
+    "persistence",
     "ai",
-    "semantic-search",
-    "fts5",
-    "sqlite"
+    "memory"
   ],
   "author": "WhenMoon-afk",
   "license": "MIT",
@@ -58,20 +42,11 @@
   "homepage": "https://github.com/whenmoon-afk/claude-memory-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
-    "better-sqlite3": "^11.0.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.3.1",
-    "@commitlint/config-conventional": "^20.3.1",
-    "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^20.0.0",
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
     "@vitest/coverage-v8": "^1.3.0",
-    "eslint": "^8.57.0",
-    "husky": "^9.1.7",
-    "prettier": "^3.2.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.0",
     "vitest": "^1.3.0"
