@@ -94,6 +94,27 @@ if (isMainModule) {
     import("./cli.js").then(({ getSetupInstructions }) => {
       console.log(getSetupInstructions());
     });
+  } else if (subcommand === "reflect") {
+    const jsonArg = process.argv[3];
+    if (!jsonArg) {
+      console.error(
+        'Usage: memory-mcp reflect \'{"concepts":[{"name":"...","context":"..."}]}\' ',
+      );
+      process.exit(1);
+    }
+    import("./cli.js").then(async ({ runReflectCli }) => {
+      try {
+        const output = await runReflectCli(
+          jsonArg,
+          getObservationsPath(),
+          getIdentityDir(),
+        );
+        console.log(output);
+      } catch (err) {
+        console.error("Reflect failed:", err);
+        process.exit(1);
+      }
+    });
   } else {
     const server = createServer();
     const transport = new StdioServerTransport();

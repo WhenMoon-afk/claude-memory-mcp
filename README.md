@@ -56,6 +56,43 @@ Add to your config file:
 
 After installation, restart Claude Desktop.
 
+### Auto-Reflect Hook (Claude Code)
+
+Add a Stop hook to `.claude/settings.json` to automatically reflect at session end:
+
+```json
+{
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx -y @whenmoon-afk/memory-mcp reflect '{\"concepts\":[], \"session_summary\":\"Session ended.\", \"auto_promote\": true}'"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+For richer reflection, use a custom script that extracts concepts from the session transcript.
+
+### CLI Commands
+
+```bash
+# Start the MCP server (default)
+npx @whenmoon-afk/memory-mcp
+
+# Print setup instructions
+npx @whenmoon-afk/memory-mcp setup
+
+# Record concepts from CLI (for hooks/scripts)
+npx @whenmoon-afk/memory-mcp reflect '{"concepts":[{"name":"pattern","context":"ctx"}]}'
+```
+
 ## Data Storage
 
 All data is local. Stored at `$XDG_DATA_HOME/claude-memory/` (defaults to `~/.local/share/claude-memory/`).

@@ -1,4 +1,7 @@
 import { generateDesktopConfig, getDesktopConfigPath } from "./setup.js";
+import { ObservationStore } from "./observations.js";
+import { IdentityManager } from "./identity.js";
+import { handleReflect } from "./tools/reflect.js";
 
 export function getSetupInstructions(): string {
   const desktopPath = getDesktopConfigPath();
@@ -25,4 +28,18 @@ ${configJson}
 
 After setup, ask Claude to use the "self" tool to check identity state.
 `.trim();
+}
+
+export async function runReflectCli(
+  jsonInput: string,
+  storePath: string,
+  identityDir: string,
+): Promise<string> {
+  const parsed = JSON.parse(jsonInput);
+  const store = new ObservationStore(storePath);
+  const identity = new IdentityManager(identityDir);
+  identity.ensureFiles();
+
+  const result = await handleReflect(parsed, store, identity);
+  return result.content[0]!.text;
 }
