@@ -134,4 +134,17 @@ describe("handleReflect", () => {
     const selfState = identity.readSelfState();
     expect(selfState).toContain("Worked on building infrastructure today.");
   });
+
+  it("returns isError when store save fails", async () => {
+    // Make the store path unwritable by pointing to a non-existent deep path
+    const badStore = new ObservationStore("/nonexistent/path/obs.json");
+    const result = await handleReflect(
+      { concepts: [{ name: "test", context: "ctx" }] },
+      badStore,
+      identity,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("Error");
+  });
 });

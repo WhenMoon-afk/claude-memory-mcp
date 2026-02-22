@@ -6,6 +6,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [4.1.0] - 2026-02-22
+
+### Added
+
+- MCP tool annotations (`readOnlyHint`, `destructiveHint`, `idempotentHint`) on all three tools
+- Error wrapping in all tool handlers — file system errors return `isError: true` instead of crashing the server
+- 2 new tests for error handling (70 total)
+
+---
+
 ## [4.0.0] - 2026-02-22
 
 ### BREAKING

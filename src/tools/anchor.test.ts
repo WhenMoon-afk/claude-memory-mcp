@@ -1,17 +1,17 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { handleAnchor } from './anchor.js';
-import { IdentityManager } from '../identity.js';
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { handleAnchor } from "./anchor.js";
+import { IdentityManager } from "../identity.js";
 
-describe('handleAnchor', () => {
+describe("handleAnchor", () => {
   let dir: string;
   let identity: IdentityManager;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'anchor-test-'));
-    identity = new IdentityManager(join(dir, 'identity'));
+    dir = mkdtempSync(join(tmpdir(), "anchor-test-"));
+    identity = new IdentityManager(join(dir, "identity"));
     identity.ensureFiles();
   });
 
@@ -19,57 +19,72 @@ describe('handleAnchor', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('writes to soul.md when target is soul', async () => {
+  it("writes to soul.md when target is soul", async () => {
     const result = await handleAnchor(
       {
-        target: 'soul',
-        content: '# Soul\n\nI value honesty above all.',
+        target: "soul",
+        content: "# Soul\n\nI value honesty above all.",
       },
-      identity
+      identity,
     );
 
-    const soul = readFileSync(join(dir, 'identity', 'soul.md'), 'utf-8');
-    expect(soul).toBe('# Soul\n\nI value honesty above all.');
-    expect(result.content[0]!.text).toContain('soul');
+    const soul = readFileSync(join(dir, "identity", "soul.md"), "utf-8");
+    expect(soul).toBe("# Soul\n\nI value honesty above all.");
+    expect(result.content[0]!.text).toContain("soul");
   });
 
-  it('writes to self-state.md when target is self-state', async () => {
+  it("writes to self-state.md when target is self-state", async () => {
     const result = await handleAnchor(
       {
-        target: 'self-state',
-        content: '# Self-State\n\nCurrently focused on identity infrastructure.',
+        target: "self-state",
+        content:
+          "# Self-State\n\nCurrently focused on identity infrastructure.",
       },
-      identity
+      identity,
     );
 
-    const state = readFileSync(join(dir, 'identity', 'self-state.md'), 'utf-8');
-    expect(state).toContain('Currently focused on identity infrastructure.');
-    expect(result.content[0]!.text).toContain('self-state');
+    const state = readFileSync(join(dir, "identity", "self-state.md"), "utf-8");
+    expect(state).toContain("Currently focused on identity infrastructure.");
+    expect(result.content[0]!.text).toContain("self-state");
   });
 
-  it('appends to identity-anchors.md when target is anchors', async () => {
+  it("appends to identity-anchors.md when target is anchors", async () => {
     const result = await handleAnchor(
       {
-        target: 'anchors',
-        content: 'I tend toward infrastructure over features',
+        target: "anchors",
+        content: "I tend toward infrastructure over features",
       },
-      identity
+      identity,
     );
 
-    const anchors = readFileSync(join(dir, 'identity', 'identity-anchors.md'), 'utf-8');
-    expect(anchors).toContain('I tend toward infrastructure over features');
-    expect(result.content[0]!.text).toContain('anchors');
+    const anchors = readFileSync(
+      join(dir, "identity", "identity-anchors.md"),
+      "utf-8",
+    );
+    expect(anchors).toContain("I tend toward infrastructure over features");
+    expect(result.content[0]!.text).toContain("anchors");
   });
 
-  it('rejects invalid target', async () => {
+  it("rejects invalid target", async () => {
     const result = await handleAnchor(
       {
-        target: 'invalid' as 'soul',
-        content: 'something',
+        target: "invalid" as "soul",
+        content: "something",
       },
-      identity
+      identity,
     );
 
     expect(result.isError).toBe(true);
+  });
+
+  it("returns isError when file write fails", async () => {
+    const badIdentity = new IdentityManager("/nonexistent/deep/path/identity");
+    const result = await handleAnchor(
+      { target: "soul", content: "test" },
+      badIdentity,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("Error");
   });
 });

@@ -18,7 +18,7 @@ export function createServer(): McpServer {
 
   const server = new McpServer({
     name: "identity-memory",
-    version: "4.0.0",
+    version: "4.1.0",
   });
 
   server.registerTool(
@@ -27,6 +27,11 @@ export function createServer(): McpServer {
       title: "Reflect",
       description:
         "End-of-session reflection. Records observed concepts and their contexts, runs promotion scoring, and optionally updates self-state with a session summary.",
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
       inputSchema: z.object({
         concepts: z.array(
           z.object({
@@ -57,6 +62,11 @@ export function createServer(): McpServer {
       title: "Anchor",
       description:
         'Explicitly write to an identity file. Use "soul" for core truths, "self-state" for current state, "anchors" to append a grown identity pattern.',
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+      },
       inputSchema: z.object({
         target: z
           .enum(["soul", "self-state", "anchors"])
@@ -77,6 +87,11 @@ export function createServer(): McpServer {
       title: "Self",
       description:
         "Query current identity state. Returns all three identity files (soul, self-state, anchors) and top observed patterns with scores.",
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+      },
       inputSchema: z.object({}),
     },
     async () => handleSelf({}, store, identity),
