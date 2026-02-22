@@ -1,74 +1,50 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
 ## What This Is
 
-MCP server providing persistent memory for Claude Desktop and MCP-compatible AI assistants. Published to npm as `@whenmoon-afk/memory-mcp`. Part of the [Substratia](https://substratia.io) memory infrastructure ecosystem.
-
-Three MCP tools: `memory_store` (create/update with auto-summarization and entity extraction), `memory_recall` (FTS5 search with token-aware progressive loading), `memory_forget` (soft-delete with provenance audit trail).
+Identity persistence MCP server for AI agents. Published to npm as `@whenmoon-afk/memory-mcp`. Three MCP tools: `reflect` (session-end concept extraction + promotion scoring), `anchor` (explicit identity file writing), `self` (query current identity state).
 
 ## Commands
 
 ```bash
-npm install            # Install deps (compiles better-sqlite3 native bindings)
-npm run build          # Compile TypeScript (tsc → dist/)
-npm test               # Run vitest tests
+npm test               # Run vitest tests (45 tests)
 npm run test:watch     # Vitest in watch mode
-npm run test:coverage  # Vitest with v8 coverage
+npm run typecheck      # TypeScript strict mode check
+npm run build          # Compile TypeScript → dist/
 npm run dev            # Watch mode with tsx
-npm run lint           # ESLint (src/ only)
-npm run lint:fix       # ESLint with auto-fix
-npm run typecheck      # TypeScript type checking (tsc --noEmit)
-npm run format         # Prettier formatting
-npm run release        # Run tests + build (pre-publish check)
+npm start              # Run MCP server (stdio transport)
 ```
-
-Run a single test file: `npx vitest run test/integration.test.js`
-Run tests matching a pattern: `npx vitest run -t "pattern"`
 
 ## Architecture
 
-### Data Flow
-
 ```
-MCP Client → index.ts (tool routing + Zod validation) → tools/*.ts → database + extractors + scoring
+MCP Client → index.ts (registerTool + Zod) → tools/*.ts → observations.ts + identity.ts
 ```
 
-1. **Entry point** (`src/index.ts`): Registers MCP tools via `@modelcontextprotocol/sdk`, validates input with Zod schemas from `src/validation/schemas.ts`, routes to tool implementations
-2. **Tool implementations** (`src/tools/`): `memory-store.ts` handles both create and update (determined by presence of `input.id`), `memory-recall.ts` implements dual-response pattern (index summaries + token-budget-limited details), `memory-forget.ts` does soft deletes
-3. **Search** (`src/search/semantic-search.ts`): FTS5 full-text search with hybrid scoring (40% importance, 30% recency, 20% frequency, 10% base)
-4. **Response formatting** (`src/tools/response-formatter.ts`): Three detail levels — minimal (~30 tokens), standard (~200 tokens), full (~500 tokens). Token estimation uses ~4 chars/token heuristic
-
-### Database Layer
-
-- **Driver abstraction** (`src/database/db-driver.ts`): `DbDriver` interface decouples from better-sqlite3. Factory in `driver-factory.ts` selects driver via `MEMORY_DB_DRIVER` env var (default: `better-sqlite3`, stub: `sqljs`)
-- **Connection** (`src/database/connection.ts`): Singleton pattern, provides `getDatabase()`, `closeDatabase()`, and utility functions (`generateId`, `serializeMetadata`, `now`)
-- **Schema** (`src/database/schema.ts`): Versioned migrations (currently v5). Tables: `memories`, `entities`, `memory_entities` (M2M), `provenance`, `memories_fts` (FTS5 virtual table with triggers for sync)
-- **Cache** (`src/cache/memory-cache.ts`): In-memory LRU cache (200 entries, 60s TTL) with invalidation on store/update/delete
-
-### Auto-Processing Pipeline (on store)
-
-Content → `normalizeContent()` → `generateSummary()` → `extractEntities()` + `classifyMemoryType()` → `calculateImportance()` → `calculateTTL()` → SQLite INSERT + FTS5 trigger
+- **Entry** (`src/index.ts`): McpServer from `@modelcontextprotocol/sdk/server/mcp.js`, three tools registered via `registerTool()`
+- **Tools** (`src/tools/`): `reflect.ts` records concepts + runs promotion, `anchor.ts` writes to identity files, `self.ts` reads all identity state
+- **Observation store** (`src/observations.ts`): JSON file tracking concept frequency. Promotion formula: `score = total_recalls * log2(distinct_days + 1) * context_diversity * recency_weight`
+- **Identity files** (`src/identity.ts`): Manages `soul.md` (carved), `self-state.md` (written), `identity-anchors.md` (grown)
+- **Paths** (`src/paths.ts`): XDG-compliant data directory resolution
 
 ## Key Constraints
 
-- **MCP uses stdout** — All logging must use `console.error`, never `console.log`
-- **ESLint rule**: `no-console` warns except for `console.warn` and `console.error`
-- **TypeScript strict mode** with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes` — optional properties must explicitly include `undefined` in their type
-- **ESM only** — `"type": "module"` in package.json, use `.js` extensions in imports
-- **Husky pre-commit hook** runs lint + typecheck + tests + secrets scanning — all must pass before commit
-- **Commitlint** enforces conventional commits: `<type>: <description>` (feat, fix, docs, refactor, test, chore, style, perf, ci, build, revert)
-- **CI matrix** tests on Node 18/20/22 across ubuntu/windows/macos
+- **MCP uses stdout** — logging must use `console.error`, never `console.log`
+- **TypeScript strict mode** with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
+- **ESM only** — `"type": "module"`, use `.js` extensions in imports
+- **No database** — JSON observation store + markdown identity files
+- **Pre-commit hook** runs typecheck + tests + secret scanning
 
-## Environment Variables
+## Development Practices
+
+- **TDD**: Test first, watch it fail, minimal implementation, verify green
+- **Systematic debugging**: Root cause investigation before fixes. No guessing.
+- **No over-engineering**: Ship what's needed, nothing more
+
+## Environment
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `MEMORY_DB_PATH` | Platform-specific (`~/.claude-memories/` on macOS, XDG on Linux, `%APPDATA%` on Windows) | Database location |
-| `DEFAULT_TTL_DAYS` | `90` | Memory expiration |
-| `MEMORY_DB_DRIVER` | `better-sqlite3` | Database driver selection |
+| `XDG_DATA_HOME` | `~/.local/share` | Base data directory |
 
-## Testing
-
-Tests live in `test/` (integration, `.js`) and `src/**/*.test.ts` (unit). Integration tests require a prior `npm run build` since they import `dist/index.js`. ESLint ignores `*.js` and `*.test.ts` files — only `src/**/*.ts` production code is linted.
+Data stored at `$XDG_DATA_HOME/claude-memory/` (observations.json + identity/).
