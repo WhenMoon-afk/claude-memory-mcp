@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 export interface Observation {
   first_seen: string;
@@ -32,6 +32,9 @@ export class ObservationStore {
 
     if (existing) {
       existing.total_recalls++;
+      if (existing.last_seen !== now) {
+        existing.distinct_days++;
+      }
       existing.last_seen = now;
       if (!existing.contexts.includes(context)) {
         existing.contexts.push(context);
@@ -66,7 +69,7 @@ export class ObservationStore {
     // Recency weight: decay over 90 days
     const daysSinceLastSeen = Math.max(
       0,
-      (Date.now() - new Date(obs.last_seen).getTime()) / (1000 * 60 * 60 * 24)
+      (Date.now() - new Date(obs.last_seen).getTime()) / (1000 * 60 * 60 * 24),
     );
     const recencyWeight = Math.max(0.1, 1 - daysSinceLastSeen / 90);
 
@@ -106,7 +109,7 @@ export class ObservationStore {
 
   private load(): ObservationMap {
     try {
-      const raw = readFileSync(this.path, 'utf-8');
+      const raw = readFileSync(this.path, "utf-8");
       return JSON.parse(raw) as ObservationMap;
     } catch {
       return {};
