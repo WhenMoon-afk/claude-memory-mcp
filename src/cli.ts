@@ -36,6 +36,9 @@ export async function runReflectCli(
   identityDir: string,
 ): Promise<string> {
   const parsed = JSON.parse(jsonInput);
+  if (!Array.isArray(parsed.concepts)) {
+    throw new Error("Missing required field: concepts (must be an array)");
+  }
   const store = new ObservationStore(storePath);
   const identity = new IdentityManager(identityDir);
   identity.ensureFiles();

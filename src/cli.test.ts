@@ -86,5 +86,16 @@ describe("cli", () => {
         runReflectCli("not-json", storePath, identityDir),
       ).rejects.toThrow();
     });
+
+    it("throws on missing concepts field", async () => {
+      const storePath = join(dir, "observations.json");
+      const identityDir = join(dir, "identity");
+      const identity = new IdentityManager(identityDir);
+      identity.ensureFiles();
+
+      await expect(runReflectCli("{}", storePath, identityDir)).rejects.toThrow(
+        /concepts/i,
+      );
+    });
   });
 });
