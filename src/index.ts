@@ -110,10 +110,12 @@ export function createServer(): McpServer {
   return server;
 }
 
-// Auto-start when run directly
+// Auto-start when run directly (via node dist/index.js, npx memory-mcp, or tsx)
+const entryScript = process.argv[1] ?? "";
 const isMainModule =
-  process.argv[1]?.endsWith("index.js") ||
-  process.argv[1]?.endsWith("index.ts");
+  entryScript.endsWith("index.js") ||
+  entryScript.endsWith("index.ts") ||
+  entryScript.endsWith("memory-mcp");
 if (isMainModule) {
   const subcommand = process.argv[2];
   if (subcommand === "setup") {
