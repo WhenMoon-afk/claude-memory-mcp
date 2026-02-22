@@ -9,11 +9,17 @@ Identity persistence for AI agents. An MCP server that helps AI maintain a coher
 
 Three tools that help an AI agent build and maintain identity over time:
 
-| Tool      | Description                                                                                                          |
-| --------- | -------------------------------------------------------------------------------------------------------------------- |
-| `reflect` | End-of-session concept extraction. Records observed patterns, runs promotion scoring, optionally updates self-state. |
-| `anchor`  | Explicit identity writing. Write to soul (core truths), self-state (current state), or anchors (grown patterns).     |
-| `self`    | Query current identity. Returns all identity files and top observed patterns with scores.                            |
+| Tool      | Description                                                                                                                                                                            |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reflect` | End-of-session concept extraction. Records observed patterns, runs promotion scoring, optionally updates self-state. Set `auto_promote: true` to automatically anchor mature patterns. |
+| `anchor`  | Explicit identity writing. Write to soul (core truths), self-state (current state), or anchors (grown patterns).                                                                       |
+| `self`    | Query current identity. Returns all identity files and top observed patterns with scores.                                                                                              |
+
+Plus an MCP prompt for automatic context loading:
+
+| Prompt     | Description                                                                                |
+| ---------- | ------------------------------------------------------------------------------------------ |
+| `identity` | Loads persistent identity at session start — soul, self-state, anchors, observed patterns. |
 
 ## How It Works
 
