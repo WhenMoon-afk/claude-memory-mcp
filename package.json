@@ -1,6 +1,6 @@
 {
   "name": "@whenmoon-afk/memory-mcp",
-  "version": "4.1.0",
+  "version": "4.1.1",
   "description": "Identity persistence for AI agents - MCP server",
   "type": "module",
   "main": "./dist/index.js",

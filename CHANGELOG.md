@@ -6,6 +6,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [4.1.1] - 2026-02-22
+
+### Fixed
+
+- **Critical**: `npx memory-mcp setup` and `npx memory-mcp reflect` silently did nothing when installed via npm — the `isMainModule` check didn't match the `memory-mcp` bin symlink
+- CLI `reflect` now validates `concepts` field before calling handler (found via dogfooding)
+
+---
+
 ## [4.1.0] - 2026-02-22
 
 ### Added

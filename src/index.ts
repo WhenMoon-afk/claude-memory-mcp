@@ -18,7 +18,7 @@ export function createServer(): McpServer {
 
   const server = new McpServer({
     name: "identity-memory",
-    version: "4.1.0",
+    version: "4.1.1",
   });
 
   server.registerTool(
