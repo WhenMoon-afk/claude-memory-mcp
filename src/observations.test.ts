@@ -132,6 +132,13 @@ describe("ObservationStore", () => {
     it("returns 0 for unknown concept", () => {
       expect(store.score("unknown")).toBe(0);
     });
+
+    it("handles future last_seen date without negative score", () => {
+      store.record("future-pattern", "ctx");
+      store.get("future-pattern")!.last_seen = "2099-01-01";
+      const score = store.score("future-pattern");
+      expect(score).toBeGreaterThan(0);
+    });
   });
 
   describe("promotion check", () => {
