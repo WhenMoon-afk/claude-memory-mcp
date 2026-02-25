@@ -6,6 +6,25 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [Unreleased]
+
+### Fixed
+
+- **Data corruption recovery**: `observations.json` now creates `.bak` backup before every save. If the primary file is corrupted, the store automatically recovers from the backup on next load
+- **Promotion race condition**: If `appendAnchor()` fails during auto-promotion, in-memory `promoted` flags are now rolled back — prevents ghost promotions that could persist on the next `save()`
+- **Empty concept names**: `reflect` now silently skips concepts with empty or whitespace-only names instead of recording garbage entries
+- **Empty anchors**: `appendAnchor()` now silently skips empty or whitespace-only strings instead of writing blank `- ` entries
+- **Incorrect idempotentHint**: `reflect` tool annotation corrected from `true` to `false` — reflect increments counters and is not idempotent
+
+### Added
+
+- Desktop Extension packaging (MCPB): `manifest.json` + `.mcpbignore` for one-click install via Claude Desktop Connectors Directory
+- `npm run pack:mcpb` script for building `.mcpb` bundles (2.8MB vs 34MB unfiltered)
+- Edge case tests: future `last_seen` dates, double-corruption recovery, empty input validation
+- 114 tests across 12 files (up from 107)
+
+---
+
 ## [4.2.0] - 2026-02-25
 
 ### Changed
@@ -30,7 +49,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `appendSelfStateEntry()` on IdentityManager — dated entries with rotation
 - `pruneStale()` on ObservationStore — auto-removes single-recall concepts older than 30 days
 - Improved `reflect` output — new vs updated counts, per-concept scores, promotion status
-- 105 tests across 12 files (up from 71)
+- 107 tests across 12 files (up from 71)
 
 ---
 
