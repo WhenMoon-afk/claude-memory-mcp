@@ -46,7 +46,7 @@ export function createServer(): McpServer {
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: false,
       },
       inputSchema: z.object({
         concepts: z.array(
