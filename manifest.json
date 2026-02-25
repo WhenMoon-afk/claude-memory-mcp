@@ -22,10 +22,7 @@
     "entry_point": "dist/index.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/dist/index.js"],
-      "env": {
-        "IDENTITY_DATA_DIR": "${user_config.data_dir}"
-      }
+      "args": ["${__dirname}/dist/index.js"]
     }
   },
   "tools": [
@@ -43,14 +40,6 @@
     }
   ],
   "prompts_generated": true,
-  "user_config": {
-    "data_dir": {
-      "type": "directory",
-      "title": "Data Directory",
-      "description": "Where identity data is stored. Leave empty for default (~/.local/share/claude-memory).",
-      "required": false
-    }
-  },
   "compatibility": {
     "platforms": ["darwin", "win32", "linux"],
     "runtimes": {
