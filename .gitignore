@@ -8,6 +8,7 @@ claude.md
 
 # Local Claude Code configuration
 .claude/
+.claude-session-start
 
 # Node modules
 node_modules/

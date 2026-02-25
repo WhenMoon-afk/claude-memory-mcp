@@ -63,8 +63,12 @@ export class ObservationStore {
     const obs = this.data[concept];
     if (!obs) return 0;
 
-    const contextDiversity = obs.contexts.length / obs.total_recalls;
+    // sqrt dampens recall spam while still rewarding frequency
+    const recallFactor = Math.sqrt(obs.total_recalls);
     const daysFactor = Math.log2(obs.distinct_days + 1);
+    // Diversity bonus: more contexts = bonus, but never penalizes
+    const diversityBonus =
+      1 + 0.5 * Math.log2(Math.max(1, obs.contexts.length));
 
     // Recency weight: decay over 90 days
     const daysSinceLastSeen = Math.max(
@@ -73,7 +77,7 @@ export class ObservationStore {
     );
     const recencyWeight = Math.max(0.1, 1 - daysSinceLastSeen / 90);
 
-    return obs.total_recalls * daysFactor * contextDiversity * recencyWeight;
+    return recallFactor * daysFactor * diversityBonus * recencyWeight;
   }
 
   getPromotable(threshold: number): PromotableResult[] {
@@ -100,6 +104,23 @@ export class ObservationStore {
     if (obs) {
       obs.distinct_days++;
     }
+  }
+
+  pruneStale(maxAgeDays: number = 30): number {
+    const now = Date.now();
+    const cutoff = maxAgeDays * 24 * 60 * 60 * 1000;
+    let pruned = 0;
+
+    for (const [concept, obs] of Object.entries(this.data)) {
+      if (obs.promoted) continue;
+      if (obs.total_recalls > 1) continue;
+      const age = now - new Date(obs.last_seen).getTime();
+      if (age > cutoff) {
+        delete this.data[concept];
+        pruned++;
+      }
+    }
+    return pruned;
   }
 
   save(): void {

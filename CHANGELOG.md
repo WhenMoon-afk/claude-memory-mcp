@@ -6,12 +6,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ---
 
+## [4.2.0] - 2026-02-25
+
+### Changed
+
+- **MCP server renamed from "memory" to "identity"** — avoids collision with native Claude memory feature. Tools now appear as `identity:reflect`, `identity:anchor`, `identity:self`
+- **Scoring formula**: `sqrt(recalls) * log2(days + 1) * diversity_bonus * recency` — more observations increase score, diversity gives a bonus instead of a penalty
+- **session_summary**: `reflect` now appends dated entries to self-state (keeps last 5) instead of replacing
+- **self output**: Shows top 10 patterns by score with "...and N more" note, instead of dumping all
+
+### Fixed
+
+- **Windows data directory**: Added `APPDATA` support — resolves to `%APPDATA%\claude-memory` on Windows instead of creating non-idiomatic `.local/share/` path
+- **Anchor double-dash**: Appending content starting with `- ` no longer produces `- - content`
+- **auto_promote feedback**: When `auto_promote: true` but nothing crosses threshold, explains why instead of staying silent
+- **Identity prompt anchors**: Template detection checks for actual entries (`- ` lines) instead of matching header text
+- **Identity prompt self-state**: Checks for dated entries (`## YYYY-MM-DD` headers) instead of fragile string matching
+
+### Added
+
+- Startup verification: server logs `identity v4.2.0 ready` to stderr on successful start
+- Tool descriptions include "when to use" guidance for models
+- `appendSelfStateEntry()` on IdentityManager — dated entries with rotation
+- `pruneStale()` on ObservationStore — auto-removes single-recall concepts older than 30 days
+- Improved `reflect` output — new vs updated counts, per-concept scores, promotion status
+- 105 tests across 12 files (up from 71)
+
+---
+
 ## [4.1.1] - 2026-02-22
 
 ### Fixed
 
 - **Critical**: `npx memory-mcp setup` and `npx memory-mcp reflect` silently did nothing when installed via npm — the `isMainModule` check didn't match the `memory-mcp` bin symlink
-- CLI `reflect` now validates `concepts` field before calling handler (found via dogfooding)
+- CLI `reflect` now validates `concepts` field before calling handler (found via E2E install testing)
 
 ---
 
@@ -40,7 +68,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `self` tool — Query current identity state with observed patterns
 - Three managed identity files: `soul.md`, `self-state.md`, `identity-anchors.md`
 - JSON observation store tracking concept frequency, distinct days, and contexts
-- Promotion formula: `score = total_recalls * log2(distinct_days + 1) * context_diversity * recency_weight`
+- Promotion formula with concept scoring and threshold-based promotion
 - Auto-detection of new days for distinct_days tracking
 - `auto_promote` option on reflect — automatically promotes concepts above threshold to identity-anchors.md
 - `identity` MCP prompt — loads persistent identity context automatically at session start

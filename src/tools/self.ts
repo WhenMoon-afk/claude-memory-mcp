@@ -24,7 +24,7 @@ export async function handleSelf(
       sections.push(anchors);
     }
 
-    // Add observation stats
+    // Add observation stats — show top 10 by score
     const allObs = store.all();
     const entries = Object.entries(allObs);
     if (entries.length > 0) {
@@ -32,12 +32,19 @@ export async function handleSelf(
         .map(([concept]) => ({ concept, score: store.score(concept) }))
         .sort((a, b) => b.score - a.score);
 
+      const TOP_N = 10;
+      const shown = scored.slice(0, TOP_N);
+      const remaining = scored.length - shown.length;
+
       sections.push("## Observed Patterns\n");
-      for (const { concept, score } of scored) {
+      for (const { concept, score } of shown) {
         const obs = allObs[concept]!;
         sections.push(
           `- **${concept}** (score: ${score.toFixed(1)}, recalls: ${obs.total_recalls}, days: ${obs.distinct_days})`,
         );
+      }
+      if (remaining > 0) {
+        sections.push(`\n_...and ${remaining} more patterns below threshold_`);
       }
     }
 

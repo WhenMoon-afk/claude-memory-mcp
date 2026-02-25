@@ -125,8 +125,8 @@ describe("ObservationStore", () => {
 
       const score = store.score("debugging");
       expect(score).toBeGreaterThan(0);
-      // 5 * log2(4) * (3/5) * recency ~= 6.0
-      expect(score).toBeCloseTo(6.0, 0);
+      // sqrt(5) * log2(4) * (1 + 0.5*log2(3)) * recency ~= 8.0
+      expect(score).toBeCloseTo(8.0, 0);
     });
 
     it("returns 0 for unknown concept", () => {
@@ -165,6 +165,40 @@ describe("ObservationStore", () => {
       store.record("core-value", "ctx");
       store.markPromoted("core-value");
       expect(store.get("core-value")!.promoted).toBe(true);
+    });
+  });
+
+  describe("pruneStale", () => {
+    it("removes single-recall concepts older than cutoff", () => {
+      store.record("old-noise", "ctx");
+      store.get("old-noise")!.last_seen = "2025-01-01";
+      store.record("recent", "ctx");
+      // recent is today, old-noise is > 30 days ago
+
+      const pruned = store.pruneStale(30);
+      expect(pruned).toBe(1);
+      expect(store.get("old-noise")).toBeUndefined();
+      expect(store.get("recent")).toBeDefined();
+    });
+
+    it("keeps multi-recall concepts even if old", () => {
+      store.record("recurring", "ctx-a");
+      store.record("recurring", "ctx-b");
+      store.get("recurring")!.last_seen = "2025-01-01";
+
+      const pruned = store.pruneStale(30);
+      expect(pruned).toBe(0);
+      expect(store.get("recurring")).toBeDefined();
+    });
+
+    it("keeps promoted concepts even if single-recall and old", () => {
+      store.record("promoted-once", "ctx");
+      store.get("promoted-once")!.last_seen = "2025-01-01";
+      store.get("promoted-once")!.promoted = true;
+
+      const pruned = store.pruneStale(30);
+      expect(pruned).toBe(0);
+      expect(store.get("promoted-once")).toBeDefined();
     });
   });
 
