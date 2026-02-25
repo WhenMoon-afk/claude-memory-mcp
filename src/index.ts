@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { ObservationStore } from "./observations.js";
 import { IdentityManager } from "./identity.js";
-import { getObservationsPath, getIdentityDir } from "./paths.js";
+import { getDataDir, getObservationsPath, getIdentityDir } from "./paths.js";
 import { handleReflect } from "./tools/reflect.js";
 import { handleAnchor } from "./tools/anchor.js";
 import { handleSelf } from "./tools/self.js";
@@ -191,7 +191,7 @@ if (isMainModule) {
     server
       .connect(transport)
       .then(() => {
-        console.error("identity v4.2.0 ready");
+        console.error(`identity v4.2.0 ready (data: ${getDataDir()})`);
       })
       .catch((err: unknown) => {
         console.error("Failed to start identity server:", err);

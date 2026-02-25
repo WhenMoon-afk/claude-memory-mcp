@@ -144,14 +144,26 @@ npx @whenmoon-afk/memory-mcp anchor <soul|self-state|anchors> "content"
 
 ## Data Storage
 
-All data is local. Stored at `$XDG_DATA_HOME/claude-memory/` (defaults to `~/.local/share/claude-memory/`).
+All data is local. Default locations by platform:
+
+| Platform | Default Location                |
+| -------- | ------------------------------- |
+| Linux    | `~/.local/share/claude-memory/` |
+| macOS    | `~/.local/share/claude-memory/` |
+| Windows  | `%APPDATA%\claude-memory\`      |
+
+Override with environment variables (checked in order):
+
+1. `IDENTITY_DATA_DIR` — explicit path, used as-is
+2. `XDG_DATA_HOME` — appends `/claude-memory`
+3. `APPDATA` — appends `\claude-memory` (Windows)
 
 ```
 claude-memory/
   observations.json     # Concept frequency tracking
   identity/
     soul.md             # Core identity truths
-    self-state.md       # Current session state
+    self-state.md       # Recent session history
     identity-anchors.md # Promoted patterns
 ```
 

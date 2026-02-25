@@ -13,6 +13,13 @@ describe("getDataDir", () => {
     process.env = originalEnv;
   });
 
+  it("uses IDENTITY_DATA_DIR when set (highest priority)", () => {
+    process.env["IDENTITY_DATA_DIR"] = "/explicit/override";
+    process.env["XDG_DATA_HOME"] = "/custom/data";
+    expect(getDataDir()).toBe("/explicit/override");
+    delete process.env["IDENTITY_DATA_DIR"];
+  });
+
   it("uses XDG_DATA_HOME when set", () => {
     process.env["XDG_DATA_HOME"] = "/custom/data";
     expect(getDataDir()).toBe("/custom/data/claude-memory");

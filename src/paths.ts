@@ -4,6 +4,10 @@ import { homedir } from "node:os";
 const APP_NAME = "claude-memory";
 
 export function getDataDir(): string {
+  // Explicit override — use as-is (no APP_NAME suffix)
+  const explicit = process.env["IDENTITY_DATA_DIR"];
+  if (explicit) return explicit;
+
   const xdg = process.env["XDG_DATA_HOME"];
   if (xdg) return join(xdg, APP_NAME);
 
