@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
-import { createServer, TOOL_DESCRIPTIONS } from "./index.js";
+import { fileURLToPath } from "node:url";
+import { createServer, TOOL_DESCRIPTIONS, VERSION } from "./index.js";
 
 describe("createServer", () => {
   let dir: string;
@@ -48,5 +48,15 @@ describe("TOOL_DESCRIPTIONS", () => {
 
   it("anchor description guides when to use", () => {
     expect(TOOL_DESCRIPTIONS.anchor).toMatch(/permanent|persist|core/i);
+  });
+});
+
+describe("VERSION", () => {
+  it("matches package.json version", () => {
+    const __dirname = dirname(fileURLToPath(import.meta.url));
+    const pkg = JSON.parse(
+      readFileSync(join(__dirname, "..", "package.json"), "utf-8"),
+    );
+    expect(VERSION).toBe(pkg.version);
   });
 });

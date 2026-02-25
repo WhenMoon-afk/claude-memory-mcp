@@ -3,6 +3,9 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { ObservationStore } from "./observations.js";
 import { IdentityManager } from "./identity.js";
 import { getDataDir, getObservationsPath, getIdentityDir } from "./paths.js";
@@ -10,6 +13,12 @@ import { handleReflect } from "./tools/reflect.js";
 import { handleAnchor } from "./tools/anchor.js";
 import { handleSelf } from "./tools/self.js";
 import { generateIdentityPrompt } from "./tools/identity-prompt.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(
+  readFileSync(join(__dirname, "..", "package.json"), "utf-8"),
+);
+export const VERSION: string = pkg.version;
 
 export const TOOL_DESCRIPTIONS = {
   reflect:
@@ -26,7 +35,7 @@ export function createServer(): McpServer {
 
   const server = new McpServer({
     name: "identity",
-    version: "4.2.0",
+    version: VERSION,
   });
 
   server.registerTool(
@@ -191,7 +200,7 @@ if (isMainModule) {
     server
       .connect(transport)
       .then(() => {
-        console.error(`identity v4.2.0 ready (data: ${getDataDir()})`);
+        console.error(`identity v${VERSION} ready (data: ${getDataDir()})`);
       })
       .catch((err: unknown) => {
         console.error("Failed to start identity server:", err);
