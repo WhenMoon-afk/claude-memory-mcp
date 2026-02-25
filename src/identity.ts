@@ -92,6 +92,7 @@ export class IdentityManager {
   appendAnchor(anchor: string): void {
     // Strip leading whitespace/newlines, then strip leading "- " if present
     const cleaned = anchor.replace(/^\s+/, "").replace(/^- /, "");
+    if (!cleaned) return;
     appendFileSync(join(this.dir, ANCHORS_FILE), `\n- ${cleaned}\n`);
   }
 

@@ -126,6 +126,16 @@ describe("IdentityManager", () => {
       expect(content).not.toContain("- \n- newline");
       expect(content).toContain("- newline then dash");
     });
+
+    it("does not append empty or whitespace-only anchors", () => {
+      mgr.ensureFiles();
+      const before = readFileSync(join(dir, "identity-anchors.md"), "utf-8");
+      mgr.appendAnchor("");
+      mgr.appendAnchor("   ");
+      mgr.appendAnchor("\n\n");
+      const after = readFileSync(join(dir, "identity-anchors.md"), "utf-8");
+      expect(after).toBe(before);
+    });
   });
 
   describe("appendSelfStateEntry", () => {
