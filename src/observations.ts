@@ -158,7 +158,11 @@ export class ObservationStore {
     try {
       const raw = readFileSync(path, "utf-8");
       const parsed = JSON.parse(raw);
-      if (typeof parsed === "object" && parsed !== null) {
+      if (
+        typeof parsed === "object" &&
+        parsed !== null &&
+        !Array.isArray(parsed)
+      ) {
         return parsed as ObservationMap;
       }
       return null;

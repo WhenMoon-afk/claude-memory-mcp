@@ -266,6 +266,21 @@ describe("ObservationStore", () => {
       expect(Object.keys(recovered.all())).toHaveLength(0);
     });
 
+    it("rejects JSON arrays as invalid observation data", () => {
+      // A JSON array passes typeof === 'object' but would silently lose
+      // string-keyed records on next save since JSON.stringify arrays
+      // drop non-numeric properties
+      writeFileSync(storePath, "[]");
+      const recovered = new ObservationStore(storePath);
+      expect(Object.keys(recovered.all())).toHaveLength(0);
+
+      // Records should persist after save (proves data is object, not array)
+      recovered.record("test-concept", "ctx");
+      recovered.save();
+      const reloaded = new ObservationStore(storePath);
+      expect(reloaded.get("test-concept")).toBeDefined();
+    });
+
     it("creates backup file on save", () => {
       store.record("concept", "ctx");
       store.save();

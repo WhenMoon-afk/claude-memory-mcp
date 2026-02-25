@@ -77,6 +77,31 @@ describe("handleAnchor", () => {
     expect(result.isError).toBe(true);
   });
 
+  it("rejects empty content for soul target", async () => {
+    const before = identity.readSoul();
+    const result = await handleAnchor(
+      { target: "soul", content: "" },
+      identity,
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0]!.text).toContain("empty");
+    // File should not be modified
+    expect(identity.readSoul()).toBe(before);
+  });
+
+  it("rejects whitespace-only content for self-state target", async () => {
+    const before = identity.readSelfState();
+    const result = await handleAnchor(
+      { target: "self-state", content: "   \n  " },
+      identity,
+    );
+
+    expect(result.isError).toBe(true);
+    // File should not be modified
+    expect(identity.readSelfState()).toBe(before);
+  });
+
   it("returns isError when file write fails", async () => {
     const badIdentity = new IdentityManager("/nonexistent/deep/path/identity");
     const result = await handleAnchor(

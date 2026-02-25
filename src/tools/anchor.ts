@@ -11,6 +11,18 @@ export async function handleAnchor(
   identity: IdentityManager,
 ): Promise<ToolResult> {
   try {
+    if (!input.content.trim()) {
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Refused to write empty content to ${input.target}. Provide meaningful content.`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
     switch (input.target) {
       case "soul":
         identity.writeSoul(input.content);
