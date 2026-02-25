@@ -1,4 +1,4 @@
-# Memory MCP
+# Claude Memory MCP — Identity Persistence
 
 [![npm version](https://badge.fury.io/js/@whenmoon-afk%2Fmemory-mcp.svg)](https://www.npmjs.com/package/@whenmoon-afk/memory-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -52,7 +52,7 @@ Add to your config file:
 ```json
 {
   "mcpServers": {
-    "memory": {
+    "identity": {
       "command": "npx",
       "args": ["-y", "@whenmoon-afk/memory-mcp"]
     }
@@ -105,7 +105,7 @@ npx @whenmoon-afk/memory-mcp anchor anchors "New promoted pattern."
 If you prefer persistent MCP integration (tools always available in-session):
 
 ```bash
-claude mcp add memory-mcp -- npx -y @whenmoon-afk/memory-mcp
+claude mcp add identity -- npx -y @whenmoon-afk/memory-mcp
 ```
 
 Trade-off: tool schemas consume context tokens every session. Use this mode when you want Claude to call `reflect`/`self`/`anchor` interactively during sessions rather than only at session boundaries.
