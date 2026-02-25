@@ -155,6 +155,21 @@ describe("handleReflect", () => {
     expect(selfState).toContain("Worked on building infrastructure today.");
   });
 
+  it("does not update self-state with whitespace-only session summary", async () => {
+    const before = identity.readSelfState();
+    await handleReflect(
+      {
+        concepts: [{ name: "test", context: "ctx" }],
+        session_summary: "   ",
+      },
+      store,
+      identity,
+    );
+
+    const after = identity.readSelfState();
+    expect(after).toBe(before);
+  });
+
   it("shows threshold feedback when auto_promote is true but nothing qualifies", async () => {
     // Record a concept with low score (below threshold of 5.0)
     store.record("new-concept", "first observation");

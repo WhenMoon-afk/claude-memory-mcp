@@ -38,7 +38,7 @@ export async function handleReflect(
     const pruned = store.pruneStale();
     store.save();
 
-    if (input.session_summary) {
+    if (input.session_summary?.trim()) {
       identity.appendSelfStateEntry(input.session_summary);
     }
 
