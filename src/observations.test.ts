@@ -244,6 +244,21 @@ describe("ObservationStore", () => {
       expect(obs!.total_recalls).toBe(1);
     });
 
+    it("returns empty store when both primary and backup are corrupted", () => {
+      store.record("concept", "ctx");
+      store.save();
+      store.record("concept2", "ctx2");
+      store.save();
+
+      // Corrupt both files
+      writeFileSync(storePath, "not json");
+      writeFileSync(storePath + ".bak", "also not json");
+
+      const recovered = new ObservationStore(storePath);
+      expect(recovered.get("concept")).toBeUndefined();
+      expect(Object.keys(recovered.all())).toHaveLength(0);
+    });
+
     it("creates backup file on save", () => {
       store.record("concept", "ctx");
       store.save();

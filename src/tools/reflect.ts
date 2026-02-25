@@ -25,6 +25,7 @@ export async function handleReflect(
     const newConcepts: string[] = [];
     const updatedConcepts: string[] = [];
     for (const concept of input.concepts) {
+      if (!concept.name.trim()) continue;
       const existing = store.get(concept.name);
       if (existing) {
         updatedConcepts.push(concept.name);

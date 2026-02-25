@@ -74,6 +74,26 @@ describe("handleReflect", () => {
     expect(result.content[0]!.text).toContain("Recorded");
   });
 
+  it("skips concepts with empty or whitespace-only names", async () => {
+    const result = await handleReflect(
+      {
+        concepts: [
+          { name: "", context: "test" },
+          { name: "   ", context: "test" },
+          { name: "valid-concept", context: "real" },
+        ],
+      },
+      store,
+      identity,
+    );
+
+    // Only the valid concept should be recorded
+    expect(store.get("")).toBeUndefined();
+    expect(store.get("   ")).toBeUndefined();
+    expect(store.get("valid-concept")).toBeDefined();
+    expect(result.content[0]!.text).toContain("1 new");
+  });
+
   it("auto-promotes concepts above threshold when auto_promote is true", async () => {
     // Pre-seed a concept well above promotion threshold
     for (let i = 0; i < 15; i++) {
