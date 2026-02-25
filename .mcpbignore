@@ -1,0 +1,55 @@
+# Source files (dist/ is the built output)
+src/
+tsconfig.json
+
+# Tests and coverage
+*.test.ts
+*.test.js
+*.spec.ts
+*.spec.js
+coverage/
+.nyc_output/
+
+# Development tooling
+.husky/
+.github/
+.vscode/
+.idea/
+.eslintrc*
+.prettierrc*
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Documentation (README and LICENSE are kept)
+CHANGELOG.md
+CLAUDE.md
+.claude-session-start
+
+# Environment and secrets
+.env
+.env.*
+
+# Database files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Build artifacts and logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# npm artifacts
+.npmignore
+.npmrc
+
+# The mcpb output itself
+*.mcpb

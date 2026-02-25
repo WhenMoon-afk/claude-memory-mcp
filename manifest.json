@@ -1,0 +1,60 @@
+{
+  "manifest_version": "0.3",
+  "name": "identity",
+  "display_name": "Identity Persistence",
+  "version": "4.2.0",
+  "description": "Identity persistence for AI agents. Maintains coherent selfhood across sessions — not generic memory, but identity: who you are, what you've become, what matters to you.",
+  "long_description": "Three tools for building and maintaining identity over time:\n\n- **reflect**: End-of-session reflection. Records identity patterns, runs promotion scoring, prunes stale noise.\n- **self**: Query current identity state. Returns soul, self-state, anchors, and observed patterns.\n- **anchor**: Write to permanent identity files (soul, self-state, or anchors).\n\nAll data stays local. Zero telemetry. Zero network calls.",
+  "author": {
+    "name": "WhenMoon-afk",
+    "url": "https://github.com/whenmoon-afk"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/whenmoon-afk/claude-memory-mcp"
+  },
+  "homepage": "https://github.com/whenmoon-afk/claude-memory-mcp#readme",
+  "support": "https://github.com/whenmoon-afk/claude-memory-mcp/issues",
+  "keywords": ["identity", "persistence", "memory", "mcp", "ai"],
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "IDENTITY_DATA_DIR": "${user_config.data_dir}"
+      }
+    }
+  },
+  "tools": [
+    {
+      "name": "reflect",
+      "description": "End-of-session reflection. Records identity patterns, runs promotion scoring, prunes stale concepts."
+    },
+    {
+      "name": "self",
+      "description": "Query current identity state. Returns soul, self-state, anchors, and observed patterns with scores."
+    },
+    {
+      "name": "anchor",
+      "description": "Write to permanent identity files: soul (core truths), self-state (current state), or anchors (grown patterns)."
+    }
+  ],
+  "prompts_generated": true,
+  "user_config": {
+    "data_dir": {
+      "type": "directory",
+      "title": "Data Directory",
+      "description": "Where identity data is stored. Leave empty for default (~/.local/share/claude-memory).",
+      "required": false
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
+    }
+  }
+}

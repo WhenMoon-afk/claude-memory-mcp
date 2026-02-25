@@ -49,5 +49,10 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# MCPB (Desktop Extension) files — not needed for npm
+manifest.json
+.mcpbignore
+*.mcpb
+
 # Documentation (keep README, LICENSE)
 # But exclude internal planning docs (already in .gitignore)

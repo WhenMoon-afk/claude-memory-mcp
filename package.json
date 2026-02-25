@@ -24,7 +24,8 @@
     "prepare": "tsc",
     "prerelease": "npm run typecheck && npm test && npm run build",
     "release": "npm run prerelease && git tag v$(node -p \"require('./package.json').version\") && git push origin v$(node -p \"require('./package.json').version\")",
-    "prepublishOnly": "npm run clean && npm run build"
+    "prepublishOnly": "npm run clean && npm run build",
+    "pack:mcpb": "npm run build && npm prune --production && npx @anthropic-ai/mcpb pack . && npm install"
   },
   "keywords": [
     "mcp",
