@@ -1,20 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { handleSelf } from './self.js';
-import { ObservationStore } from '../observations.js';
-import { IdentityManager } from '../identity.js';
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { handleSelf } from "./self.js";
+import { ObservationStore } from "../observations.js";
+import { IdentityManager } from "../identity.js";
 
-describe('handleSelf', () => {
+describe("handleSelf", () => {
   let dir: string;
   let store: ObservationStore;
   let identity: IdentityManager;
 
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), 'self-test-'));
-    store = new ObservationStore(join(dir, 'observations.json'));
-    identity = new IdentityManager(join(dir, 'identity'));
+    dir = mkdtempSync(join(tmpdir(), "self-test-"));
+    store = new ObservationStore(join(dir, "observations.json"));
+    identity = new IdentityManager(join(dir, "identity"));
     identity.ensureFiles();
   });
 
@@ -22,51 +22,63 @@ describe('handleSelf', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('returns all three identity files', async () => {
-    identity.writeSoul('# Soul\n\nI am Cadence.');
-    identity.writeSelfState('# Self-State\n\nFeeling good.');
+  it("returns all three identity files", async () => {
+    identity.writeSoul("# Soul\n\nI am Cadence.");
+    identity.writeSelfState("# Self-State\n\nFeeling good.");
 
     const result = await handleSelf({}, store, identity);
     const text = result.content[0]!.text;
 
-    expect(text).toContain('I am Cadence');
-    expect(text).toContain('Feeling good');
-    expect(text).toContain('Identity Anchors');
+    expect(text).toContain("I am Cadence");
+    expect(text).toContain("Feeling good");
+    expect(text).toContain("Identity Anchors");
   });
 
-  it('includes observation stats when observations exist', async () => {
-    store.record('debugging', 'problem-solving');
-    store.record('honesty', 'values');
+  it("includes observation stats when observations exist", async () => {
+    store.record("debugging", "problem-solving");
+    store.record("honesty", "values");
     store.save();
 
     const result = await handleSelf({}, store, identity);
     const text = result.content[0]!.text;
 
-    expect(text).toContain('debugging');
-    expect(text).toContain('honesty');
+    expect(text).toContain("debugging");
+    expect(text).toContain("honesty");
   });
 
-  it('works with empty identity files', async () => {
+  it("works with empty identity files", async () => {
     const result = await handleSelf({}, store, identity);
     expect(result.content[0]!.text).toBeDefined();
   });
 
-  it('includes top observations sorted by score', async () => {
+  it("shows truncation message when more than 10 patterns exist", async () => {
+    // Create 12 patterns to trigger the "...and N more" text
+    for (let i = 0; i < 12; i++) {
+      store.record(`pattern-${i}`, `ctx-${i}`);
+    }
+    store.save();
+
+    const result = await handleSelf({}, store, identity);
+    const text = result.content[0]!.text;
+    expect(text).toContain("2 more observed patterns not shown");
+  });
+
+  it("includes top observations sorted by score", async () => {
     // Create observations with different strengths
     for (let i = 0; i < 5; i++) {
-      store.record('strong-pattern', `ctx-${i}`);
+      store.record("strong-pattern", `ctx-${i}`);
     }
-    store.get('strong-pattern')!.distinct_days = 5;
+    store.get("strong-pattern")!.distinct_days = 5;
 
-    store.record('weak-pattern', 'ctx-a');
+    store.record("weak-pattern", "ctx-a");
     store.save();
 
     const result = await handleSelf({}, store, identity);
     const text = result.content[0]!.text;
 
     // Strong pattern should appear before weak
-    const strongIdx = text.indexOf('strong-pattern');
-    const weakIdx = text.indexOf('weak-pattern');
+    const strongIdx = text.indexOf("strong-pattern");
+    const weakIdx = text.indexOf("weak-pattern");
     expect(strongIdx).toBeLessThan(weakIdx);
   });
 });

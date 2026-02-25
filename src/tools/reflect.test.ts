@@ -189,6 +189,24 @@ describe("handleReflect", () => {
     expect(text).toMatch(/no concepts.*threshold|threshold.*5/i);
   });
 
+  it("reports pruned stale concepts in output", async () => {
+    // Create a stale single-observation concept older than 30 days
+    store.record("stale-pattern", "old-context");
+    const obs = store.get("stale-pattern")!;
+    obs.last_seen = "2020-01-01"; // Very old
+    store.save();
+
+    const result = await handleReflect(
+      { concepts: [{ name: "fresh-pattern", context: "new" }] },
+      store,
+      identity,
+    );
+
+    expect(result.content[0]!.text).toContain("Pruned 1 stale");
+    // Stale concept should be gone
+    expect(store.get("stale-pattern")).toBeUndefined();
+  });
+
   it("returns isError when store save fails", async () => {
     // Make the store path unwritable by pointing to a non-existent deep path
     const badStore = new ObservationStore("/nonexistent/path/obs.json");
