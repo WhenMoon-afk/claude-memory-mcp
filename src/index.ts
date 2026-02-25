@@ -11,6 +11,14 @@ import { handleAnchor } from "./tools/anchor.js";
 import { handleSelf } from "./tools/self.js";
 import { generateIdentityPrompt } from "./tools/identity-prompt.js";
 
+export const TOOL_DESCRIPTIONS = {
+  reflect:
+    "End-of-session reflection. Records identity-relevant patterns (values, tendencies, recurring behaviors) — NOT project facts or one-time tasks. Concepts that recur across sessions get promoted to identity anchors. Stale single-observation concepts are auto-pruned. Call this at the end of each session.",
+  anchor:
+    'Write to a permanent identity file. Use "soul" for core truths, "self-state" for current state, "anchors" to append a grown identity pattern. Use sparingly for insights that should persist across all future sessions.',
+  self: "Query current identity state. Returns all three identity files (soul, self-state, anchors) and top observed patterns with scores. Use at session start to load context, or anytime to check current state.",
+} as const;
+
 export function createServer(): McpServer {
   const store = new ObservationStore(getObservationsPath());
   const identity = new IdentityManager(getIdentityDir());
@@ -25,8 +33,7 @@ export function createServer(): McpServer {
     "reflect",
     {
       title: "Reflect",
-      description:
-        "End-of-session reflection. Records identity-relevant patterns (values, tendencies, recurring behaviors) — NOT project facts or one-time tasks. Concepts that recur across sessions get promoted to identity anchors. Stale single-observation concepts are auto-pruned.",
+      description: TOOL_DESCRIPTIONS.reflect,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -66,8 +73,7 @@ export function createServer(): McpServer {
     "anchor",
     {
       title: "Anchor",
-      description:
-        'Explicitly write to an identity file. Use "soul" for core truths, "self-state" for current state, "anchors" to append a grown identity pattern.',
+      description: TOOL_DESCRIPTIONS.anchor,
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -91,8 +97,7 @@ export function createServer(): McpServer {
     "self",
     {
       title: "Self",
-      description:
-        "Query current identity state. Returns all three identity files (soul, self-state, anchors) and top observed patterns with scores.",
+      description: TOOL_DESCRIPTIONS.self,
       annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -183,9 +188,14 @@ if (isMainModule) {
   } else {
     const server = createServer();
     const transport = new StdioServerTransport();
-    server.connect(transport).catch((err: unknown) => {
-      console.error("Failed to start server:", err);
-      process.exit(1);
-    });
+    server
+      .connect(transport)
+      .then(() => {
+        console.error("identity v4.2.0 ready");
+      })
+      .catch((err: unknown) => {
+        console.error("Failed to start identity server:", err);
+        process.exit(1);
+      });
   }
 }
