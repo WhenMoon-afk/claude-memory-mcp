@@ -123,6 +123,50 @@ mcp call self npx -y @whenmoon-afk/memory-mcp
 mcp call reflect --params '{"concepts":[{"name":"debugging","context":"auth-bug"}]}' npx -y @whenmoon-afk/memory-mcp
 ```
 
+## Examples
+
+### Session-end reflection
+
+**User prompt**: "We're done for today. I noticed you kept using root-cause analysis when debugging — please reflect on that."
+
+**Tool call**: `reflect` with:
+
+```json
+{
+  "concepts": [
+    { "name": "root-cause-analysis", "context": "debugging auth module" },
+    { "name": "systematic-approach", "context": "investigating API timeout" }
+  ],
+  "session_summary": "Debugged authentication failures and API timeouts. Applied systematic root-cause analysis throughout.",
+  "auto_promote": true
+}
+```
+
+**Output**: `Recorded 2 new concept(s).\n  root-cause-analysis: 1.0\n  systematic-approach: 1.0`
+
+### Querying identity at session start
+
+**User prompt**: "Load your identity context."
+
+**Tool call**: `self` (no parameters)
+
+**Output**: Returns current soul, self-state with recent session summaries, identity anchors (promoted patterns), and top observed patterns with scores.
+
+### Writing a core identity truth
+
+**User prompt**: "Add to your soul that you value honesty over performance."
+
+**Tool call**: `anchor` with:
+
+```json
+{
+  "target": "soul",
+  "content": "# Soul\n\nI value honesty over performance. I'd rather say 'I don't know' than pretend."
+}
+```
+
+**Output**: `Updated soul.md`
+
 ## CLI Commands
 
 ```bash
