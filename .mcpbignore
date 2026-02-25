@@ -51,5 +51,11 @@ Thumbs.db
 .npmignore
 .npmrc
 
+# Test config
+vitest.config.ts
+
+# Internal reports
+UX-REPORT.md
+
 # The mcpb output itself
 *.mcpb

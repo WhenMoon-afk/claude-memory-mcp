@@ -44,7 +44,9 @@ export async function handleSelf(
         );
       }
       if (remaining > 0) {
-        sections.push(`\n_...and ${remaining} more patterns below threshold_`);
+        sections.push(
+          `\n_...and ${remaining} more observed patterns not shown_`,
+        );
       }
     }
 
