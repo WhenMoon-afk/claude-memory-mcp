@@ -17,6 +17,9 @@
   "homepage": "https://github.com/whenmoon-afk/claude-memory-mcp#readme",
   "support": "https://github.com/whenmoon-afk/claude-memory-mcp/issues",
   "keywords": ["identity", "persistence", "memory", "mcp", "ai"],
+  "privacy_policies": [
+    "https://github.com/whenmoon-afk/claude-memory-mcp#privacy-policy"
+  ],
   "server": {
     "type": "node",
     "entry_point": "dist/index.js",

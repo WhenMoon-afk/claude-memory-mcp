@@ -174,9 +174,21 @@ claude-memory/
 
 No database. No embeddings. No external services.
 
-## Privacy
+## Privacy Policy
 
-**Local-only**: All data stays on your machine. Zero telemetry. Zero network calls.
+**Local-only**: All data stays on your machine.
+
+- **Data collection**: None. The server collects no data from users.
+- **Network calls**: None. The server makes zero network requests. All operations are local filesystem reads and writes.
+- **Telemetry**: None. No analytics, no tracking, no crash reporting.
+- **Data storage**: Identity files and observations are stored in a local directory on your machine (see [Data Storage](#data-storage) above). You control the location via environment variables.
+- **Third-party sharing**: None. No data leaves your machine.
+- **Data retention**: You control retention. Delete the data directory to remove all data. The `pruneStale()` function automatically removes single-observation concepts older than 30 days.
+
+## Support
+
+- **Issues**: [github.com/whenmoon-afk/claude-memory-mcp/issues](https://github.com/whenmoon-afk/claude-memory-mcp/issues)
+- **Repository**: [github.com/whenmoon-afk/claude-memory-mcp](https://github.com/whenmoon-afk/claude-memory-mcp)
 
 ## License
 
