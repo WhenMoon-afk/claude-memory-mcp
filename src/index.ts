@@ -17,8 +17,8 @@ export function createServer(): McpServer {
   identity.ensureFiles();
 
   const server = new McpServer({
-    name: "identity-memory",
-    version: "4.1.1",
+    name: "identity",
+    version: "4.2.0",
   });
 
   server.registerTool(
@@ -26,7 +26,7 @@ export function createServer(): McpServer {
     {
       title: "Reflect",
       description:
-        "End-of-session reflection. Records observed concepts and their contexts, runs promotion scoring, and optionally updates self-state with a session summary.",
+        "End-of-session reflection. Records identity-relevant patterns (values, tendencies, recurring behaviors) — NOT project facts or one-time tasks. Concepts that recur across sessions get promoted to identity anchors. Stale single-observation concepts are auto-pruned.",
       annotations: {
         readOnlyHint: false,
         destructiveHint: false,
@@ -35,10 +35,16 @@ export function createServer(): McpServer {
       inputSchema: z.object({
         concepts: z.array(
           z.object({
-            name: z.string().describe("The concept or pattern observed"),
+            name: z
+              .string()
+              .describe(
+                "An identity pattern (e.g. 'root-cause-analysis', 'tdd-discipline', 'honest-communication'). Use kebab-case. Avoid project-specific task names.",
+              ),
             context: z
               .string()
-              .describe("The context in which it was observed"),
+              .describe(
+                "The context in which it was observed (e.g. 'debugging auth module', 'code review feedback')",
+              ),
           }),
         ),
         session_summary: z
@@ -140,6 +146,37 @@ if (isMainModule) {
         console.log(output);
       } catch (err) {
         console.error("Reflect failed:", err);
+        process.exit(1);
+      }
+    });
+  } else if (subcommand === "self") {
+    import("./cli.js").then(async ({ runSelfCli }) => {
+      try {
+        const output = await runSelfCli(
+          getObservationsPath(),
+          getIdentityDir(),
+        );
+        console.log(output);
+      } catch (err) {
+        console.error("Self failed:", err);
+        process.exit(1);
+      }
+    });
+  } else if (subcommand === "anchor") {
+    const target = process.argv[3];
+    const content = process.argv[4];
+    if (!target || !content) {
+      console.error(
+        "Usage: memory-mcp anchor <soul|self-state|anchors> <content>",
+      );
+      process.exit(1);
+    }
+    import("./cli.js").then(async ({ runAnchorCli }) => {
+      try {
+        const output = await runAnchorCli(target, content, getIdentityDir());
+        console.log(output);
+      } catch (err) {
+        console.error("Anchor failed:", err);
         process.exit(1);
       }
     });

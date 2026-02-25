@@ -23,9 +23,7 @@ export function generateIdentityPrompt(
 
   sections.push("# Identity Context");
   sections.push("");
-  sections.push(
-    "You have persistent identity managed by the memory-mcp server.",
-  );
+  sections.push("You have persistent identity managed by the identity server.");
   sections.push("");
 
   if (
@@ -37,19 +35,16 @@ export function generateIdentityPrompt(
     sections.push("");
   }
 
-  if (
-    selfState.trim() &&
-    !selfState.includes("Current state. Updated each session.")
-  ) {
+  // Show self-state if it has dated entries (## YYYY-MM-DD headers from appendSelfStateEntry)
+  if (selfState.trim() && /^## \d{4}-\d{2}-\d{2}/m.test(selfState)) {
     sections.push("## Self-State");
     sections.push(selfState);
     sections.push("");
   }
 
-  if (
-    anchors.trim() &&
-    !anchors.includes("Patterns that have been observed consistently")
-  ) {
+  // Show anchors if they contain actual entries (lines starting with "- ")
+  // The template header is always present, so check for content beyond it
+  if (anchors.trim() && /^- .+/m.test(anchors)) {
     sections.push("## Identity Anchors");
     sections.push(anchors);
     sections.push("");

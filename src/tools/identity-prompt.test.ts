@@ -43,6 +43,39 @@ describe("generateIdentityPrompt", () => {
     expect(text).toContain("session");
   });
 
+  it("includes anchors when promoted patterns exist", () => {
+    // appendAnchor adds entries below the template header
+    identity.appendAnchor("root-cause-analysis");
+    identity.appendAnchor("tdd-discipline");
+    const result = generateIdentityPrompt(store, identity);
+    const text = result.messages[0]!.content.text;
+    expect(text).toContain("Identity Anchors");
+    expect(text).toContain("root-cause-analysis");
+    expect(text).toContain("tdd-discipline");
+  });
+
+  it("excludes anchors section when only template header exists", () => {
+    // Fresh install — ensureFiles creates template-only file
+    const result = generateIdentityPrompt(store, identity);
+    const text = result.messages[0]!.content.text;
+    expect(text).not.toContain("Identity Anchors");
+  });
+
+  it("includes self-state when session entries exist", () => {
+    identity.appendSelfStateEntry("Validated memory-mcp end-to-end.");
+    const result = generateIdentityPrompt(store, identity);
+    const text = result.messages[0]!.content.text;
+    expect(text).toContain("Self-State");
+    expect(text).toContain("Validated memory-mcp");
+  });
+
+  it("excludes self-state when only template exists", () => {
+    // Fresh install — no appendSelfStateEntry called
+    const result = generateIdentityPrompt(store, identity);
+    const text = result.messages[0]!.content.text;
+    expect(text).not.toContain("Self-State");
+  });
+
   it("includes observed patterns when they exist", () => {
     store.record("debugging", "problem-solving");
     store.record("debugging", "architecture");

@@ -26,9 +26,9 @@ describe("setup", () => {
     it("creates config with memory-mcp server entry", () => {
       const config = generateDesktopConfig();
       expect(config.mcpServers).toBeDefined();
-      expect(config.mcpServers["memory-mcp"]).toBeDefined();
-      expect(config.mcpServers["memory-mcp"].command).toBe("npx");
-      expect(config.mcpServers["memory-mcp"].args).toContain(
+      expect(config.mcpServers["identity"]).toBeDefined();
+      expect(config.mcpServers["identity"].command).toBe("npx");
+      expect(config.mcpServers["identity"].args).toContain(
         "@whenmoon-afk/memory-mcp",
       );
     });
@@ -44,20 +44,20 @@ describe("setup", () => {
       };
       const config = generateDesktopConfig(existing);
       expect(config.mcpServers["other-server"]).toBeDefined();
-      expect(config.mcpServers["memory-mcp"]).toBeDefined();
+      expect(config.mcpServers["identity"]).toBeDefined();
     });
 
     it("does not overwrite existing memory-mcp entry", () => {
       const existing = {
         mcpServers: {
-          "memory-mcp": {
+          identity: {
             command: "custom",
             args: ["custom-path"],
           },
         },
       };
       const config = generateDesktopConfig(existing);
-      expect(config.mcpServers["memory-mcp"].command).toBe("custom");
+      expect(config.mcpServers["identity"].command).toBe("custom");
     });
   });
 

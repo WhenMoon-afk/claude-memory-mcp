@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { getSetupInstructions, runReflectCli } from "./cli.js";
+import {
+  getSetupInstructions,
+  runReflectCli,
+  runSelfCli,
+  runAnchorCli,
+} from "./cli.js";
 import { ObservationStore } from "./observations.js";
 import { IdentityManager } from "./identity.js";
 
@@ -27,7 +32,7 @@ describe("cli", () => {
     it("includes Desktop config example", () => {
       const output = getSetupInstructions();
       expect(output).toContain("claude_desktop_config.json");
-      expect(output).toContain("memory-mcp");
+      expect(output).toContain("identity");
     });
 
     it("includes npx command in Desktop config", () => {
@@ -96,6 +101,71 @@ describe("cli", () => {
       await expect(runReflectCli("{}", storePath, identityDir)).rejects.toThrow(
         /concepts/i,
       );
+    });
+  });
+
+  describe("runSelfCli", () => {
+    it("returns identity state", async () => {
+      const storePath = join(dir, "observations.json");
+      const identityDir = join(dir, "identity");
+      const identity = new IdentityManager(identityDir);
+      identity.ensureFiles();
+      identity.writeSoul("I am a test agent.");
+
+      const output = await runSelfCli(storePath, identityDir);
+      expect(output).toContain("I am a test agent");
+    });
+
+    it("includes observation scores when present", async () => {
+      const storePath = join(dir, "observations.json");
+      const identityDir = join(dir, "identity");
+      const identity = new IdentityManager(identityDir);
+      identity.ensureFiles();
+
+      const store = new ObservationStore(storePath);
+      store.record("debugging", "auth-bug");
+      store.save();
+
+      const output = await runSelfCli(storePath, identityDir);
+      expect(output).toContain("debugging");
+      expect(output).toContain("score:");
+    });
+  });
+
+  describe("runAnchorCli", () => {
+    it("writes to soul file", async () => {
+      const identityDir = join(dir, "identity");
+      const identity = new IdentityManager(identityDir);
+      identity.ensureFiles();
+
+      const output = await runAnchorCli(
+        "soul",
+        "I am a new soul.",
+        identityDir,
+      );
+      expect(output).toContain("Updated soul.md");
+      expect(identity.readSoul()).toContain("I am a new soul");
+    });
+
+    it("appends to anchors file", async () => {
+      const identityDir = join(dir, "identity");
+      const identity = new IdentityManager(identityDir);
+      identity.ensureFiles();
+
+      const output = await runAnchorCli(
+        "anchors",
+        "root-cause-analysis",
+        identityDir,
+      );
+      expect(output).toContain("Appended");
+      expect(identity.readAnchors()).toContain("root-cause-analysis");
+    });
+
+    it("rejects invalid target", async () => {
+      const identityDir = join(dir, "identity");
+      await expect(
+        runAnchorCli("invalid", "content", identityDir),
+      ).rejects.toThrow(/invalid target/i);
     });
   });
 });

@@ -36,7 +36,7 @@ describe("handleReflect", () => {
 
     expect(store.get("root-cause-analysis")).toBeDefined();
     expect(store.get("honesty")).toBeDefined();
-    expect(result.content[0]!.text).toContain("2 concepts recorded");
+    expect(result.content[0]!.text).toContain("2 new");
   });
 
   it("saves observation store to disk after recording", async () => {
@@ -66,12 +66,12 @@ describe("handleReflect", () => {
       identity,
     );
 
-    expect(result.content[0]!.text).toContain("promotable");
+    expect(result.content[0]!.text).toContain("Promotable");
   });
 
   it("handles empty concepts array", async () => {
     const result = await handleReflect({ concepts: [] }, store, identity);
-    expect(result.content[0]!.text).toContain("0 concepts recorded");
+    expect(result.content[0]!.text).toContain("Recorded");
   });
 
   it("auto-promotes concepts above threshold when auto_promote is true", async () => {
@@ -97,7 +97,7 @@ describe("handleReflect", () => {
     const anchors = identity.readAnchors();
     expect(anchors).toContain("core-pattern");
     // Should report in output
-    expect(result.content[0]!.text).toContain("promoted");
+    expect(result.content[0]!.text).toContain("Promoted");
   });
 
   it("does not auto-promote when auto_promote is false or unset", async () => {
@@ -133,6 +133,25 @@ describe("handleReflect", () => {
 
     const selfState = identity.readSelfState();
     expect(selfState).toContain("Worked on building infrastructure today.");
+  });
+
+  it("shows threshold feedback when auto_promote is true but nothing qualifies", async () => {
+    // Record a concept with low score (below threshold of 5.0)
+    store.record("new-concept", "first observation");
+    store.save();
+
+    const result = await handleReflect(
+      {
+        concepts: [{ name: "new-concept", context: "second observation" }],
+        auto_promote: true,
+      },
+      store,
+      identity,
+    );
+
+    const text = result.content[0]!.text;
+    // Should tell the user nothing was promoted and why
+    expect(text).toMatch(/no concepts.*threshold|threshold.*5/i);
   });
 
   it("returns isError when store save fails", async () => {

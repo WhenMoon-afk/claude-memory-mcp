@@ -16,8 +16,8 @@ export function generateDesktopConfig(existing?: DesktopConfig): DesktopConfig {
     ? { ...existing, mcpServers: { ...existing.mcpServers } }
     : { mcpServers: {} };
 
-  if (!base.mcpServers["memory-mcp"]) {
-    base.mcpServers["memory-mcp"] = {
+  if (!base.mcpServers["identity"]) {
+    base.mcpServers["identity"] = {
       command: "npx",
       args: ["-y", "@whenmoon-afk/memory-mcp"],
     };

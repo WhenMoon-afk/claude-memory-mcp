@@ -1,9 +1,15 @@
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import {
+  readFileSync,
+  writeFileSync,
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+} from "node:fs";
+import { join } from "node:path";
 
-const SOUL_FILE = 'soul.md';
-const SELF_STATE_FILE = 'self-state.md';
-const ANCHORS_FILE = 'identity-anchors.md';
+const SOUL_FILE = "soul.md";
+const SELF_STATE_FILE = "self-state.md";
+const ANCHORS_FILE = "identity-anchors.md";
 
 const SOUL_TEMPLATE = `# Soul
 
@@ -55,8 +61,38 @@ export class IdentityManager {
     writeFileSync(join(this.dir, SELF_STATE_FILE), content);
   }
 
+  appendSelfStateEntry(entry: string, maxEntries: number = 5): void {
+    const current = this.readSelfState();
+    const date = new Date().toISOString().slice(0, 10);
+    const newEntry = `## ${date}\n\n${entry}`;
+
+    // Parse existing entries (split on ## date headers)
+    const entryPattern = /^## \d{4}-\d{2}-\d{2}/m;
+    const parts = current.split(entryPattern);
+    const headers = current.match(new RegExp(entryPattern.source, "gm")) ?? [];
+
+    // Rebuild: keep header, add new entry, keep last (maxEntries-1) old entries
+    const oldEntries: string[] = [];
+    for (let i = 0; i < headers.length; i++) {
+      const body = (parts[i + 1] ?? "").trim();
+      if (body) {
+        oldEntries.push(`${headers[i]}\n\n${body}`);
+      }
+    }
+
+    const kept = oldEntries.slice(0, maxEntries - 1);
+    const allEntries = [newEntry, ...kept].join("\n\n");
+
+    writeFileSync(
+      join(this.dir, SELF_STATE_FILE),
+      `# Self-State\n\n${allEntries}\n`,
+    );
+  }
+
   appendAnchor(anchor: string): void {
-    appendFileSync(join(this.dir, ANCHORS_FILE), `\n- ${anchor}\n`);
+    // Strip leading whitespace/newlines, then strip leading "- " if present
+    const cleaned = anchor.replace(/^\s+/, "").replace(/^- /, "");
+    appendFileSync(join(this.dir, ANCHORS_FILE), `\n- ${cleaned}\n`);
   }
 
   readAll(): { soul: string; selfState: string; anchors: string } {
@@ -70,9 +106,9 @@ export class IdentityManager {
   private readFile(name: string): string {
     const path = join(this.dir, name);
     try {
-      return readFileSync(path, 'utf-8');
+      return readFileSync(path, "utf-8");
     } catch {
-      return '';
+      return "";
     }
   }
 

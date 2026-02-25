@@ -21,19 +21,49 @@ export async function handleReflect(
   identity: IdentityManager,
 ): Promise<ToolResult> {
   try {
+    // Track which concepts are new vs updated
+    const newConcepts: string[] = [];
+    const updatedConcepts: string[] = [];
     for (const concept of input.concepts) {
+      const existing = store.get(concept.name);
+      if (existing) {
+        updatedConcepts.push(concept.name);
+      } else {
+        newConcepts.push(concept.name);
+      }
       store.record(concept.name, concept.context);
     }
+    // Prune stale single-observation noise (>30 days old)
+    const pruned = store.pruneStale();
     store.save();
 
     if (input.session_summary) {
-      identity.writeSelfState(`# Self-State\n\n${input.session_summary}`);
+      identity.appendSelfStateEntry(input.session_summary);
     }
 
     const promotable = store.getPromotable(PROMOTION_THRESHOLD);
 
     const lines: string[] = [];
-    lines.push(`${input.concepts.length} concepts recorded.`);
+
+    // Summary line
+    if (input.concepts.length === 0) {
+      lines.push("Recorded 0 concepts.");
+    } else {
+      const parts: string[] = [];
+      if (newConcepts.length > 0) parts.push(`${newConcepts.length} new`);
+      if (updatedConcepts.length > 0)
+        parts.push(`${updatedConcepts.length} updated`);
+      lines.push(`Recorded ${parts.join(", ")} concept(s).`);
+    }
+
+    // Show scores for recorded concepts
+    const scored = input.concepts.map((c) => ({
+      name: c.name,
+      score: store.score(c.name),
+    }));
+    lines.push(
+      scored.map((s) => `  ${s.name}: ${s.score.toFixed(1)}`).join("\n"),
+    );
 
     if (input.auto_promote && promotable.length > 0) {
       for (const p of promotable) {
@@ -42,12 +72,24 @@ export async function handleReflect(
       }
       store.save();
       lines.push(
-        `${promotable.length} concept(s) promoted: ${promotable.map((p) => p.concept).join(", ")}`,
+        `Promoted ${promotable.length}: ${promotable.map((p) => p.concept).join(", ")}`,
       );
     } else if (promotable.length > 0) {
       lines.push(
-        `${promotable.length} promotable concept(s): ${promotable.map((p) => `${p.concept} (score: ${p.score.toFixed(1)})`).join(", ")}`,
+        `Promotable (>=${PROMOTION_THRESHOLD.toFixed(0)}): ${promotable.map((p) => `${p.concept} (${p.score.toFixed(1)})`).join(", ")}`,
       );
+    } else if (input.auto_promote) {
+      lines.push(
+        `No concepts crossed promotion threshold (${PROMOTION_THRESHOLD.toFixed(1)}). Concepts need more observations across multiple days to promote.`,
+      );
+    }
+
+    if (pruned > 0) {
+      lines.push(`Pruned ${pruned} stale concept(s).`);
+    }
+
+    if (input.session_summary) {
+      lines.push("Session summary saved to self-state.");
     }
 
     return {
