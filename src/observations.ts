@@ -34,7 +34,9 @@ export class ObservationStore {
 
   record(concept: string, context: string): void {
     const now = new Date().toISOString().slice(0, 10);
-    const existing = this.data[concept];
+    const existing = Object.hasOwn(this.data, concept)
+      ? this.data[concept]
+      : undefined;
 
     if (existing) {
       existing.total_recalls++;
@@ -58,7 +60,7 @@ export class ObservationStore {
   }
 
   get(concept: string): Observation | undefined {
-    return this.data[concept];
+    return Object.hasOwn(this.data, concept) ? this.data[concept] : undefined;
   }
 
   all(): ObservationMap {
@@ -66,7 +68,7 @@ export class ObservationStore {
   }
 
   score(concept: string): number {
-    const obs = this.data[concept];
+    const obs = this.get(concept);
     if (!obs) return 0;
 
     // sqrt dampens recall spam while still rewarding frequency
@@ -99,14 +101,14 @@ export class ObservationStore {
   }
 
   markPromoted(concept: string): void {
-    const obs = this.data[concept];
+    const obs = this.get(concept);
     if (obs) {
       obs.promoted = true;
     }
   }
 
   incrementDay(concept: string): void {
-    const obs = this.data[concept];
+    const obs = this.get(concept);
     if (obs) {
       obs.distinct_days++;
     }

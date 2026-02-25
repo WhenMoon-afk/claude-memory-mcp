@@ -100,6 +100,23 @@ describe("ObservationStore", () => {
       expect(obs!.total_recalls).toBe(1);
     });
 
+    it("handles prototype-chain concept names safely", () => {
+      // "constructor" exists on Object.prototype — must not confuse it
+      // with a real observation
+      store.record("constructor", "test-context");
+      const obs = store.get("constructor");
+      expect(obs).toBeDefined();
+      expect(obs!.total_recalls).toBe(1);
+      expect(obs!.contexts).toEqual(["test-context"]);
+
+      // "__proto__" is another dangerous key
+      store.record("__proto__", "another-context");
+      // Note: __proto__ behavior varies — just verify no crash
+      store.save();
+      const reloaded = new ObservationStore(storePath);
+      expect(reloaded.get("constructor")).toBeDefined();
+    });
+
     it("handles missing file gracefully", () => {
       const missing = join(dir, "nonexistent.json");
       const store2 = new ObservationStore(missing);
