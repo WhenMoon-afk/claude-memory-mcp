@@ -15,13 +15,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Empty concept names**: `reflect` now silently skips concepts with empty or whitespace-only names instead of recording garbage entries
 - **Empty anchors**: `appendAnchor()` now silently skips empty or whitespace-only strings instead of writing blank `- ` entries
 - **Incorrect idempotentHint**: `reflect` tool annotation corrected from `true` to `false` — reflect increments counters and is not idempotent
+- **Empty anchor content guard**: `anchor` tool now rejects empty/whitespace content for `soul` and `self-state` targets to prevent accidental data loss
+- **Array-shaped JSON corruption**: Observation store now rejects JSON arrays (pass `typeof === 'object'` but silently drop string-keyed properties on serialize)
+- **Whitespace session summaries**: `reflect` skips whitespace-only `session_summary` instead of creating blank self-state entries
+- **Misleading "below threshold" text**: `self` tool output now says "not shown" instead of "below threshold" for patterns past the top-10 display limit
+- **MCPB bundle cleanup**: Excluded `vitest.config.ts` and `UX-REPORT.md` from Desktop Extension bundle
 
 ### Added
 
 - Desktop Extension packaging (MCPB): `manifest.json` + `.mcpbignore` for one-click install via Claude Desktop Connectors Directory
 - `npm run pack:mcpb` script for building `.mcpb` bundles (2.8MB vs 34MB unfiltered)
-- Edge case tests: future `last_seen` dates, double-corruption recovery, empty input validation
-- 114 tests across 12 files (up from 107)
+- Edge case tests: future `last_seen` dates, double-corruption recovery, empty input validation, array corruption, empty anchor content
+- 118 tests across 12 files (up from 107)
 
 ---
 
