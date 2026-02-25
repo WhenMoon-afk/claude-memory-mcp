@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -165,5 +165,37 @@ describe("handleReflect", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0]!.text).toContain("Error");
+  });
+
+  it("rolls back promoted flag in memory if anchor write fails", async () => {
+    // Pre-seed a concept well above promotion threshold
+    for (let i = 0; i < 15; i++) {
+      store.record("fragile-pattern", `ctx-${i % 5}`);
+    }
+    store.get("fragile-pattern")!.distinct_days = 10;
+    store.save();
+
+    // Make appendAnchor throw
+    vi.spyOn(identity, "appendAnchor").mockImplementation(() => {
+      throw new Error("disk full");
+    });
+
+    const result = await handleReflect(
+      {
+        concepts: [{ name: "fragile-pattern", context: "reflection" }],
+        auto_promote: true,
+      },
+      store,
+      identity,
+    );
+
+    // The in-memory store should have promoted rolled back
+    // (so a future save() doesn't persist bad state)
+    expect(store.get("fragile-pattern")!.promoted).toBe(false);
+
+    // Should report error, not success
+    expect(result.isError).toBe(true);
+
+    vi.restoreAllMocks();
   });
 });

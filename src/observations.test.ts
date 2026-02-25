@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ObservationStore } from "./observations.js";
@@ -219,6 +219,42 @@ describe("ObservationStore", () => {
       expect(Object.keys(all)).toHaveLength(2);
       expect(all["a"]).toBeDefined();
       expect(all["b"]).toBeDefined();
+    });
+  });
+
+  describe("corrupted data recovery", () => {
+    it("recovers from backup when observations.json is corrupted", () => {
+      // First save: creates the file
+      store.record("important-concept", "real-context");
+      store.save();
+
+      // Second save: creates .bak from previous version
+      store.record("extra-concept", "extra-context");
+      store.save();
+
+      // Corrupt the primary file
+      writeFileSync(storePath, "{{{{not valid json at all");
+
+      // Create a new store from the corrupted file
+      const recovered = new ObservationStore(storePath);
+      const obs = recovered.get("important-concept");
+
+      // Should recover from backup (first save version)
+      expect(obs).toBeDefined();
+      expect(obs!.total_recalls).toBe(1);
+    });
+
+    it("creates backup file on save", () => {
+      store.record("concept", "ctx");
+      store.save();
+
+      const backupPath = storePath + ".bak";
+      // After second save, backup of first version should exist
+      store.record("concept2", "ctx2");
+      store.save();
+
+      const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
+      expect(backup["concept"]).toBeDefined();
     });
   });
 });

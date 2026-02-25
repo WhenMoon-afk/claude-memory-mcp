@@ -1,4 +1,10 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import {
+  readFileSync,
+  writeFileSync,
+  mkdirSync,
+  copyFileSync,
+  existsSync,
+} from "node:fs";
 import { dirname } from "node:path";
 
 export interface Observation {
@@ -125,15 +131,39 @@ export class ObservationStore {
 
   save(): void {
     mkdirSync(dirname(this.path), { recursive: true });
+    // Backup existing file before overwriting
+    if (existsSync(this.path)) {
+      copyFileSync(this.path, this.path + ".bak");
+    }
     writeFileSync(this.path, JSON.stringify(this.data, null, 2));
   }
 
   private load(): ObservationMap {
+    // Try primary file first
+    const primary = this.tryLoadJson(this.path);
+    if (primary !== null) return primary;
+
+    // Primary corrupted or missing — try backup
+    const backup = this.tryLoadJson(this.path + ".bak");
+    if (backup !== null) {
+      // Restore backup as primary
+      writeFileSync(this.path, JSON.stringify(backup, null, 2));
+      return backup;
+    }
+
+    return {};
+  }
+
+  private tryLoadJson(path: string): ObservationMap | null {
     try {
-      const raw = readFileSync(this.path, "utf-8");
-      return JSON.parse(raw) as ObservationMap;
+      const raw = readFileSync(path, "utf-8");
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === "object" && parsed !== null) {
+        return parsed as ObservationMap;
+      }
+      return null;
     } catch {
-      return {};
+      return null;
     }
   }
 }

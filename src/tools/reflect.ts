@@ -66,14 +66,23 @@ export async function handleReflect(
     );
 
     if (input.auto_promote && promotable.length > 0) {
-      for (const p of promotable) {
-        store.markPromoted(p.concept);
-        identity.appendAnchor(p.concept);
+      const promoted: string[] = [];
+      try {
+        for (const p of promotable) {
+          store.markPromoted(p.concept);
+          identity.appendAnchor(p.concept);
+          promoted.push(p.concept);
+        }
+        store.save();
+      } catch (err) {
+        // Roll back in-memory promoted flags for all concepts we touched
+        for (const p of promotable) {
+          const obs = store.get(p.concept);
+          if (obs) obs.promoted = false;
+        }
+        throw err;
       }
-      store.save();
-      lines.push(
-        `Promoted ${promotable.length}: ${promotable.map((p) => p.concept).join(", ")}`,
-      );
+      lines.push(`Promoted ${promoted.length}: ${promoted.join(", ")}`);
     } else if (promotable.length > 0) {
       lines.push(
         `Promotable (>=${PROMOTION_THRESHOLD.toFixed(0)}): ${promotable.map((p) => `${p.concept} (${p.score.toFixed(1)})`).join(", ")}`,
