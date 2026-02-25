@@ -21,6 +21,8 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist",
+    "prerelease": "npm run typecheck && npm test && npm run build",
+    "release": "npm run prerelease && git tag v$(node -p \"require('./package.json').version\") && git push origin v$(node -p \"require('./package.json').version\")",
     "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
