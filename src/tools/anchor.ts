@@ -32,13 +32,19 @@ export async function handleAnchor(
         identity.writeSelfState(input.content);
         return { content: [{ type: "text", text: "Updated self-state.md" }] };
 
-      case "anchors":
-        identity.appendAnchor(input.content);
+      case "anchors": {
+        const appended = identity.appendAnchor(input.content);
         return {
           content: [
-            { type: "text", text: "Appended to identity-anchors.md (anchors)" },
+            {
+              type: "text",
+              text: appended
+                ? "Appended to identity-anchors.md (anchors)"
+                : "Anchor already exists in identity-anchors.md — not duplicated",
+            },
           ],
         };
+      }
 
       default:
         return {

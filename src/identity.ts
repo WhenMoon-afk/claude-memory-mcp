@@ -89,18 +89,19 @@ export class IdentityManager {
     );
   }
 
-  appendAnchor(anchor: string): void {
+  appendAnchor(anchor: string): boolean {
     // Strip leading whitespace/newlines, then strip leading "- " if present
     const cleaned = anchor.replace(/^\s+/, "").replace(/^- /, "");
-    if (!cleaned) return;
+    if (!cleaned) return false;
     // Skip if anchor already exists (exact line match, not substring)
     const existing = this.readAnchors();
     const anchorLines = existing
       .split("\n")
       .map((line) => line.replace(/^- /, "").trim())
       .filter(Boolean);
-    if (anchorLines.includes(cleaned)) return;
+    if (anchorLines.includes(cleaned)) return false;
     appendFileSync(join(this.dir, ANCHORS_FILE), `\n- ${cleaned}\n`);
+    return true;
   }
 
   readAll(): { soul: string; selfState: string; anchors: string } {

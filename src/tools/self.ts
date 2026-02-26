@@ -12,15 +12,23 @@ export async function handleSelf(
 
     const sections: string[] = [];
 
-    if (soul) {
+    // Filter template-only content (same checks as identity-prompt.ts)
+    const hasSoul =
+      soul.trim() &&
+      !soul.includes("Core truths about who I am. This file is carved");
+    const hasSelfState =
+      selfState.trim() && /^## \d{4}-\d{2}-\d{2}/m.test(selfState);
+    const hasAnchors = anchors.trim() && /^- .+/m.test(anchors);
+
+    if (hasSoul) {
       sections.push(soul);
     }
 
-    if (selfState) {
+    if (hasSelfState) {
       sections.push(selfState);
     }
 
-    if (anchors) {
+    if (hasAnchors) {
       sections.push(anchors);
     }
 

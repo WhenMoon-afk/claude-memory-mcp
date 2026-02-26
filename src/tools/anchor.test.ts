@@ -65,6 +65,20 @@ describe("handleAnchor", () => {
     expect(result.content[0]!.text).toContain("anchors");
   });
 
+  it("reports when anchor already exists instead of claiming it was appended", async () => {
+    await handleAnchor(
+      { target: "anchors", content: "root-cause-analysis" },
+      identity,
+    );
+    const result = await handleAnchor(
+      { target: "anchors", content: "root-cause-analysis" },
+      identity,
+    );
+
+    expect(result.content[0]!.text).toContain("already exists");
+    expect(result.content[0]!.text).not.toContain("Appended");
+  });
+
   it("rejects invalid target", async () => {
     const result = await handleAnchor(
       {

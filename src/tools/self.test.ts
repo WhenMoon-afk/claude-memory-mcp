@@ -22,16 +22,17 @@ describe("handleSelf", () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("returns all three identity files", async () => {
+  it("returns all three identity files when they have real content", async () => {
     identity.writeSoul("# Soul\n\nI am Cadence.");
-    identity.writeSelfState("# Self-State\n\nFeeling good.");
+    identity.writeSelfState("# Self-State\n\n## 2026-02-25\n\nFeeling good.");
+    identity.appendAnchor("root-cause-analysis");
 
     const result = await handleSelf({}, store, identity);
     const text = result.content[0]!.text;
 
     expect(text).toContain("I am Cadence");
     expect(text).toContain("Feeling good");
-    expect(text).toContain("Identity Anchors");
+    expect(text).toContain("root-cause-analysis");
   });
 
   it("includes observation stats when observations exist", async () => {
@@ -49,6 +50,19 @@ describe("handleSelf", () => {
   it("works with empty identity files", async () => {
     const result = await handleSelf({}, store, identity);
     expect(result.content[0]!.text).toBeDefined();
+  });
+
+  it("excludes template-only content from fresh install", async () => {
+    // Fresh install has only template content — self should not show it
+    const result = await handleSelf({}, store, identity);
+    const text = result.content[0]!.text;
+
+    expect(text).not.toContain("Core truths about who I am");
+    expect(text).not.toContain("This file is carved");
+    expect(text).not.toContain("Updated each session");
+    expect(text).not.toContain(
+      "Grown automatically from the observation store",
+    );
   });
 
   it("shows truncation message when more than 10 patterns exist", async () => {
