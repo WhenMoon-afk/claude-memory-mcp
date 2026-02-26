@@ -156,6 +156,14 @@ describe("ObservationStore", () => {
       const score = store.score("future-pattern");
       expect(score).toBeGreaterThan(0);
     });
+
+    it("returns 0 instead of NaN when last_seen is malformed", () => {
+      store.record("corrupted", "ctx");
+      store.get("corrupted")!.last_seen = "not-a-date";
+      const score = store.score("corrupted");
+      expect(score).not.toBeNaN();
+      expect(score).toBe(0);
+    });
   });
 
   describe("promotion check", () => {
@@ -223,6 +231,15 @@ describe("ObservationStore", () => {
       const pruned = store.pruneStale(30);
       expect(pruned).toBe(0);
       expect(store.get("promoted-once")).toBeDefined();
+    });
+
+    it("prunes single-recall concepts with malformed dates", () => {
+      store.record("corrupted", "ctx");
+      store.get("corrupted")!.last_seen = "garbage-date";
+
+      const pruned = store.pruneStale(30);
+      expect(pruned).toBe(1);
+      expect(store.get("corrupted")).toBeUndefined();
     });
   });
 
@@ -309,6 +326,22 @@ describe("ObservationStore", () => {
 
       const backup = JSON.parse(readFileSync(backupPath, "utf-8"));
       expect(backup["concept"]).toBeDefined();
+    });
+
+    it("save succeeds even when primary file is deleted before backup", () => {
+      store.record("concept", "ctx");
+      store.save();
+
+      // Delete the primary file to simulate race condition
+      rmSync(storePath);
+
+      // Second save should NOT throw — it should skip backup gracefully
+      store.record("concept2", "ctx2");
+      expect(() => store.save()).not.toThrow();
+
+      // Data should still be written
+      const reloaded = new ObservationStore(storePath);
+      expect(reloaded.get("concept2")).toBeDefined();
     });
   });
 });

@@ -79,9 +79,11 @@ export class ObservationStore {
       1 + 0.5 * Math.log2(Math.max(1, obs.contexts.length));
 
     // Recency weight: decay over 90 days
+    const lastSeenMs = new Date(obs.last_seen).getTime();
+    if (Number.isNaN(lastSeenMs)) return 0;
     const daysSinceLastSeen = Math.max(
       0,
-      (Date.now() - new Date(obs.last_seen).getTime()) / (1000 * 60 * 60 * 24),
+      (Date.now() - lastSeenMs) / (1000 * 60 * 60 * 24),
     );
     const recencyWeight = Math.max(0.1, 1 - daysSinceLastSeen / 90);
 
@@ -122,7 +124,8 @@ export class ObservationStore {
     for (const [concept, obs] of Object.entries(this.data)) {
       if (obs.promoted) continue;
       if (obs.total_recalls > 1) continue;
-      const age = now - new Date(obs.last_seen).getTime();
+      const lastSeenMs = new Date(obs.last_seen).getTime();
+      const age = Number.isNaN(lastSeenMs) ? Infinity : now - lastSeenMs;
       if (age > cutoff) {
         delete this.data[concept];
         pruned++;
