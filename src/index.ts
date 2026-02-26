@@ -178,7 +178,7 @@ if (isMainModule) {
     });
   } else if (subcommand === "anchor") {
     const target = process.argv[3];
-    const content = process.argv[4];
+    const content = process.argv.slice(4).join(" ");
     if (!target || !content) {
       console.error(
         "Usage: memory-mcp anchor <soul|self-state|anchors> <content>",

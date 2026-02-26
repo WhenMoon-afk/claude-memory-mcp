@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import {
   getSetupInstructions,
   runReflectCli,
@@ -92,6 +93,33 @@ describe("cli", () => {
       ).rejects.toThrow();
     });
 
+    it("skips concepts with missing context field instead of storing undefined", async () => {
+      const storePath = join(dir, "observations.json");
+      const identityDir = join(dir, "identity");
+      const identity = new IdentityManager(identityDir);
+      identity.ensureFiles();
+
+      // Concept missing "context" — should be skipped, not store undefined
+      const input = JSON.stringify({
+        concepts: [
+          { name: "good-pattern", context: "real-context" },
+          { name: "bad-pattern" },
+        ],
+      });
+
+      await runReflectCli(input, storePath, identityDir);
+
+      const store = new ObservationStore(storePath);
+      expect(store.get("good-pattern")).toBeDefined();
+      expect(store.get("good-pattern")!.contexts).toEqual(["real-context"]);
+      // bad-pattern should either not exist or have no undefined in contexts
+      const bad = store.get("bad-pattern");
+      if (bad) {
+        expect(bad.contexts).not.toContain(undefined);
+        expect(bad.contexts).not.toContain(null);
+      }
+    });
+
     it("throws on missing concepts field", async () => {
       const storePath = join(dir, "observations.json");
       const identityDir = join(dir, "identity");
@@ -166,6 +194,41 @@ describe("cli", () => {
       await expect(
         runAnchorCli("invalid", "content", identityDir),
       ).rejects.toThrow(/invalid target/i);
+    });
+  });
+
+  describe("CLI entry point argument parsing", () => {
+    it("anchor subcommand captures multi-word content from separate args", () => {
+      const identityDir = join(dir, "identity");
+      const identity = new IdentityManager(identityDir);
+      identity.ensureFiles();
+
+      // Simulate: memory-mcp anchor soul I am a persistent identity
+      // Each word is a separate argv element (unquoted shell input)
+      const output = execFileSync(
+        "npx",
+        [
+          "tsx",
+          "src/index.ts",
+          "anchor",
+          "soul",
+          "I",
+          "am",
+          "a",
+          "persistent",
+          "identity",
+        ],
+        {
+          cwd: join(import.meta.dirname!, ".."),
+          env: { ...process.env, IDENTITY_DATA_DIR: dir },
+          encoding: "utf-8",
+          timeout: 10000,
+        },
+      );
+
+      expect(output).toContain("Updated soul.md");
+      const freshIdentity = new IdentityManager(identityDir);
+      expect(freshIdentity.readSoul()).toContain("I am a persistent identity");
     });
   });
 });
