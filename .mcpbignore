@@ -57,5 +57,12 @@ vitest.config.ts
 # Internal reports
 UX-REPORT.md
 
+# Claude Code plugin (not needed in Desktop Extension)
+.claude-plugin/
+hooks/
+commands/
+skills/
+cli/
+
 # The mcpb output itself
 *.mcpb
