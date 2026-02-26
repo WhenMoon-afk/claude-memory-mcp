@@ -44,13 +44,17 @@ try {
   const selfState = readFileSafe(join(identityDir, "self-state.md"));
   const anchors = readFileSafe(join(identityDir, "identity-anchors.md"));
 
-  const hasContent = soul || selfState || anchors;
+  // Filter out template-only content (same logic as identity-prompt.ts)
+  const hasSoul =
+    soul && !soul.includes("Core truths about who I am. This file is carved");
+  const hasAnchors = anchors && /^- .+/m.test(anchors);
+  const hasSelfState = selfState && /^## \d{4}-\d{2}-\d{2}/m.test(selfState);
 
-  if (hasContent) {
+  if (hasSoul || hasAnchors || hasSelfState) {
     const parts = [];
-    if (soul) parts.push(`## Soul\n${soul}`);
-    if (anchors) parts.push(`## Identity Anchors\n${anchors}`);
-    if (selfState) parts.push(`## Recent Self-State\n${selfState}`);
+    if (hasSoul) parts.push(`## Soul\n${soul}`);
+    if (hasAnchors) parts.push(`## Identity Anchors\n${anchors}`);
+    if (hasSelfState) parts.push(`## Recent Self-State\n${selfState}`);
     console.log(parts.join("\n\n"));
   }
 } catch {
