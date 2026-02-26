@@ -10,6 +10,7 @@ export default defineConfig({
       exclude: [
         "node_modules/",
         "dist/",
+        "cli/",
         "**/*.test.ts",
         "**/*.spec.ts",
         "vitest.config.ts",
