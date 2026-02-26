@@ -93,9 +93,13 @@ export class IdentityManager {
     // Strip leading whitespace/newlines, then strip leading "- " if present
     const cleaned = anchor.replace(/^\s+/, "").replace(/^- /, "");
     if (!cleaned) return;
-    // Skip if anchor already exists in the file
+    // Skip if anchor already exists (exact line match, not substring)
     const existing = this.readAnchors();
-    if (existing.includes(cleaned)) return;
+    const anchorLines = existing
+      .split("\n")
+      .map((line) => line.replace(/^- /, "").trim())
+      .filter(Boolean);
+    if (anchorLines.includes(cleaned)) return;
     appendFileSync(join(this.dir, ANCHORS_FILE), `\n- ${cleaned}\n`);
   }
 

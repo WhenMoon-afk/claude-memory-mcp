@@ -120,6 +120,29 @@ describe("cli", () => {
       }
     });
 
+    it("skips concepts with non-string name or context values", async () => {
+      const storePath = join(dir, "observations.json");
+      const identityDir = join(dir, "identity");
+      const identity = new IdentityManager(identityDir);
+      identity.ensureFiles();
+
+      const input = JSON.stringify({
+        concepts: [
+          { name: 123, context: "number-name" },
+          { name: "valid", context: true },
+          { name: "good", context: "real" },
+        ],
+      });
+
+      await runReflectCli(input, storePath, identityDir);
+
+      const store = new ObservationStore(storePath);
+      expect(store.get("good")).toBeDefined();
+      // Non-string name/context should be filtered out
+      expect(store.get("123" as string)).toBeUndefined();
+      expect(store.get("valid")).toBeUndefined();
+    });
+
     it("throws on missing concepts field", async () => {
       const storePath = join(dir, "observations.json");
       const identityDir = join(dir, "identity");

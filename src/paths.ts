@@ -1,7 +1,6 @@
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { existsSync, cpSync, mkdirSync } from "node:fs";
-import { dirname } from "node:path";
 
 const APP_NAME = "claude-memory";
 

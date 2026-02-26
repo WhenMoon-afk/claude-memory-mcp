@@ -42,7 +42,11 @@ export async function runReflectCli(
     throw new Error("Missing required field: concepts (must be an array)");
   }
   parsed.concepts = parsed.concepts.filter(
-    (c: { name?: string; context?: string }) => c.name && c.context,
+    (c: { name?: unknown; context?: unknown }) =>
+      typeof c.name === "string" &&
+      c.name.trim() !== "" &&
+      typeof c.context === "string" &&
+      c.context.trim() !== "",
   );
   const store = new ObservationStore(storePath);
   const identity = new IdentityManager(identityDir);

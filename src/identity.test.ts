@@ -136,6 +136,15 @@ describe("IdentityManager", () => {
       expect(matches).toHaveLength(1);
     });
 
+    it("allows anchors that are substrings of existing anchors", () => {
+      mgr.ensureFiles();
+      mgr.appendAnchor("root-cause-analysis");
+      mgr.appendAnchor("root-cause");
+      const content = readFileSync(join(dir, "identity-anchors.md"), "utf-8");
+      expect(content).toContain("- root-cause-analysis\n");
+      expect(content).toContain("- root-cause\n");
+    });
+
     it("does not append empty or whitespace-only anchors", () => {
       mgr.ensureFiles();
       const before = readFileSync(join(dir, "identity-anchors.md"), "utf-8");
