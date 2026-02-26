@@ -225,6 +225,27 @@ describe("handleReflect", () => {
     expect(text).not.toContain(": 0.0");
   });
 
+  it("does not list the same concept twice when it appears multiple times in input", async () => {
+    const result = await handleReflect(
+      {
+        concepts: [
+          { name: "debugging", context: "auth-bug" },
+          { name: "debugging", context: "api-error" },
+        ],
+      },
+      store,
+      identity,
+    );
+
+    const text = result.content[0]!.text;
+    // Should show concept only once in score output
+    const matches = text.match(/debugging/g);
+    expect(matches).toHaveLength(1);
+    // Should count as 1 new concept, not 1 new + 1 updated
+    expect(text).toContain("1 new");
+    expect(text).not.toContain("updated");
+  });
+
   it("does not claim session summary saved when it was whitespace-only", async () => {
     const result = await handleReflect(
       {

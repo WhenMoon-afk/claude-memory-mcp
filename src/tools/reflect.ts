@@ -21,16 +21,20 @@ export async function handleReflect(
   identity: IdentityManager,
 ): Promise<ToolResult> {
   try {
-    // Track which concepts are new vs updated
-    const newConcepts: string[] = [];
-    const updatedConcepts: string[] = [];
+    // Track which concepts are new vs updated (deduplicated)
+    const newConcepts = new Set<string>();
+    const updatedConcepts = new Set<string>();
+    const seen = new Set<string>();
     for (const concept of input.concepts) {
       if (!concept.name.trim()) continue;
-      const existing = store.get(concept.name);
-      if (existing) {
-        updatedConcepts.push(concept.name);
-      } else {
-        newConcepts.push(concept.name);
+      if (!seen.has(concept.name)) {
+        seen.add(concept.name);
+        const existing = store.get(concept.name);
+        if (existing) {
+          updatedConcepts.add(concept.name);
+        } else {
+          newConcepts.add(concept.name);
+        }
       }
       store.record(concept.name, concept.context);
     }
@@ -44,7 +48,7 @@ export async function handleReflect(
 
     const promotable = store.getPromotable(PROMOTION_THRESHOLD);
 
-    const recordedCount = newConcepts.length + updatedConcepts.length;
+    const recordedCount = newConcepts.size + updatedConcepts.size;
     const lines: string[] = [];
 
     // Summary line
@@ -52,9 +56,9 @@ export async function handleReflect(
       lines.push("Recorded 0 concepts.");
     } else {
       const parts: string[] = [];
-      if (newConcepts.length > 0) parts.push(`${newConcepts.length} new`);
-      if (updatedConcepts.length > 0)
-        parts.push(`${updatedConcepts.length} updated`);
+      if (newConcepts.size > 0) parts.push(`${newConcepts.size} new`);
+      if (updatedConcepts.size > 0)
+        parts.push(`${updatedConcepts.size} updated`);
       lines.push(`Recorded ${parts.join(", ")} concept(s).`);
 
       // Show scores for recorded concepts only (skip empty names that were filtered)
