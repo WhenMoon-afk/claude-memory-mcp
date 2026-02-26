@@ -44,10 +44,11 @@ export async function handleReflect(
 
     const promotable = store.getPromotable(PROMOTION_THRESHOLD);
 
+    const recordedCount = newConcepts.length + updatedConcepts.length;
     const lines: string[] = [];
 
     // Summary line
-    if (input.concepts.length === 0) {
+    if (recordedCount === 0) {
       lines.push("Recorded 0 concepts.");
     } else {
       const parts: string[] = [];
@@ -55,16 +56,15 @@ export async function handleReflect(
       if (updatedConcepts.length > 0)
         parts.push(`${updatedConcepts.length} updated`);
       lines.push(`Recorded ${parts.join(", ")} concept(s).`);
-    }
 
-    // Show scores for recorded concepts
-    const scored = input.concepts.map((c) => ({
-      name: c.name,
-      score: store.score(c.name),
-    }));
-    lines.push(
-      scored.map((s) => `  ${s.name}: ${s.score.toFixed(1)}`).join("\n"),
-    );
+      // Show scores for recorded concepts only (skip empty names that were filtered)
+      const recorded = [...newConcepts, ...updatedConcepts];
+      lines.push(
+        recorded
+          .map((name) => `  ${name}: ${store.score(name).toFixed(1)}`)
+          .join("\n"),
+      );
+    }
 
     if (input.auto_promote && promotable.length > 0) {
       const promoted: string[] = [];
@@ -98,7 +98,7 @@ export async function handleReflect(
       lines.push(`Pruned ${pruned} stale concept(s).`);
     }
 
-    if (input.session_summary) {
+    if (input.session_summary?.trim()) {
       lines.push("Session summary saved to self-state.");
     }
 

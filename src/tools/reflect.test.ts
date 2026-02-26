@@ -207,6 +207,38 @@ describe("handleReflect", () => {
     expect(store.get("stale-pattern")).toBeUndefined();
   });
 
+  it("reports 0 concepts when all names are empty", async () => {
+    const result = await handleReflect(
+      {
+        concepts: [
+          { name: "", context: "test" },
+          { name: "   ", context: "test" },
+        ],
+      },
+      store,
+      identity,
+    );
+
+    const text = result.content[0]!.text;
+    expect(text).toContain("Recorded 0 concepts");
+    // Should not contain score lines for empty names
+    expect(text).not.toContain(": 0.0");
+  });
+
+  it("does not claim session summary saved when it was whitespace-only", async () => {
+    const result = await handleReflect(
+      {
+        concepts: [{ name: "test", context: "ctx" }],
+        session_summary: "   \n  ",
+      },
+      store,
+      identity,
+    );
+
+    const text = result.content[0]!.text;
+    expect(text).not.toContain("Session summary saved");
+  });
+
   it("returns isError when store save fails", async () => {
     // Make the store path unwritable by pointing to a non-existent deep path
     const badStore = new ObservationStore("/nonexistent/path/obs.json");
