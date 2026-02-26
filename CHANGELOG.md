@@ -23,6 +23,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Prototype chain poisoning**: Concept names like `"constructor"` or `"toString"` would crash the server — `Object.hasOwn()` now used for all property lookups on the observation store
 - **All-empty concepts garbled output**: `reflect` with all-empty concept names produced `"Recorded  concept(s)."` with blank score lines — now correctly reports "Recorded 0 concepts."
 - **False session summary save claim**: `reflect` with whitespace-only `session_summary` printed "Session summary saved" even though it wasn't — now checks trimmed value consistently
+- **CLI null contexts**: `runReflectCli` stored `null` in observation contexts array when concept objects were missing the `context` field — now filters invalid concepts before processing
+- **CLI anchor multi-word truncation**: `memory-mcp anchor soul I am a test` only captured "I" — now joins all remaining argv elements
+- **NaN scores from malformed dates**: `score()` returned `NaN` when `last_seen` was an invalid date string — now returns 0
+- **Silent stale concept retention**: `pruneStale()` silently kept single-recall concepts with malformed `last_seen` dates — now treats them as infinitely old and prunes them
+- **Duplicate anchor entries**: `appendAnchor()` could write the same anchor to `identity-anchors.md` multiple times (e.g., after crash recovery during auto-promote) — now skips if anchor text already exists
 
 ### Added
 
@@ -32,7 +37,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Desktop Extension packaging (MCPB): `manifest.json` + `.mcpbignore` for one-click install via Claude Desktop Connectors Directory
 - `npm run pack:mcpb` script for building `.mcpb` bundles (2.8MB vs 34MB unfiltered)
 - Edge case tests: future `last_seen` dates, double-corruption recovery, empty input validation, array corruption, empty anchor content, prototype chain safety
-- 123 tests across 12 files (up from 107)
+- CLI entry point argument parsing test (subprocess-level)
+- 129 tests across 12 files (up from 107)
 
 ---
 
