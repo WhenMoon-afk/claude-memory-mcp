@@ -34,6 +34,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Anchor substring false positive**: `appendAnchor()` used string substring matching to check for duplicates — `"root-cause"` in file blocked `"root-cause-analysis"` from being added. Now parses anchors line-by-line for exact match
 - **CLI non-string type crash**: `runReflectCli` accepted non-string truthy values (numbers, booleans) for concept names/contexts — `.trim()` call on non-strings crashed the handler. Now validates `typeof === 'string'`
 - **Plugin manifest format**: `plugin.json` now uses path references for `mcpServers`, `hooks`, `commands`, `skills` per official Claude Code plugin spec
+- **Misleading anchor append response**: `handleAnchor` returned "Appended" even when the anchor was a duplicate and nothing was written — now reports "already exists". `appendAnchor()` returns boolean to indicate success
+- **Self tool template leakage**: `handleSelf` showed template boilerplate from fresh-install identity files — now applies same template filtering as `identity-prompt.ts` and `identity-context.js`
 
 ### Added
 
@@ -46,7 +48,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - CLI entry point argument parsing test (subprocess-level)
 - `migrateIfNeeded()` — detects and copies legacy data to new platform-correct path
 - Installable via substratia-marketplace: `claude plugin install identity@substratia-marketplace`
-- 136 tests across 12 files (up from 107)
+- 138 tests across 12 files (up from 107)
 
 ---
 
