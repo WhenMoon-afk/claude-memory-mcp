@@ -31,6 +31,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Duplicate concept names in reflect output**: Same concept with different contexts in one `reflect` call was listed twice in scores (once as "new", once as "updated") — now deduplicated
 - **Windows data orphaned after APPDATA path change**: v4.1.x used `HOME/.local/share/claude-memory` on Windows; v4.2.0 uses `APPDATA/claude-memory`. Now auto-migrates legacy data on first run after upgrade
 - **SessionStart hook template leakage**: `identity-context.js` output default template content on fresh installs — now filters out templates like `identity-prompt.ts` does
+- **Anchor substring false positive**: `appendAnchor()` used string substring matching to check for duplicates — `"root-cause"` in file blocked `"root-cause-analysis"` from being added. Now parses anchors line-by-line for exact match
+- **CLI non-string type crash**: `runReflectCli` accepted non-string truthy values (numbers, booleans) for concept names/contexts — `.trim()` call on non-strings crashed the handler. Now validates `typeof === 'string'`
+- **Plugin manifest format**: `plugin.json` now uses path references for `mcpServers`, `hooks`, `commands`, `skills` per official Claude Code plugin spec
 
 ### Added
 
@@ -42,7 +45,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Edge case tests: future `last_seen` dates, double-corruption recovery, empty input validation, array corruption, empty anchor content, prototype chain safety
 - CLI entry point argument parsing test (subprocess-level)
 - `migrateIfNeeded()` — detects and copies legacy data to new platform-correct path
-- 134 tests across 12 files (up from 107)
+- Installable via substratia-marketplace: `claude plugin install identity@substratia-marketplace`
+- 136 tests across 12 files (up from 107)
 
 ---
 
