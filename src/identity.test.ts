@@ -127,6 +127,15 @@ describe("IdentityManager", () => {
       expect(content).toContain("- newline then dash");
     });
 
+    it("does not duplicate an anchor that already exists in the file", () => {
+      mgr.ensureFiles();
+      mgr.appendAnchor("root-cause-analysis");
+      mgr.appendAnchor("root-cause-analysis");
+      const content = readFileSync(join(dir, "identity-anchors.md"), "utf-8");
+      const matches = content.match(/root-cause-analysis/g);
+      expect(matches).toHaveLength(1);
+    });
+
     it("does not append empty or whitespace-only anchors", () => {
       mgr.ensureFiles();
       const before = readFileSync(join(dir, "identity-anchors.md"), "utf-8");
