@@ -12,7 +12,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || join(__dirname, "..");
 
-// Resolve data directory (same logic as paths.ts)
+// Resolve data directory — duplicated from src/paths.ts because this script
+// must work without dist/ (hooks run before MCP server builds).
+// KEEP IN SYNC: if paths.ts changes data dir resolution, update here too.
 function getDataDir() {
   if (process.env.IDENTITY_DATA_DIR) return process.env.IDENTITY_DATA_DIR;
 
