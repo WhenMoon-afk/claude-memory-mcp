@@ -4,9 +4,10 @@
  * Called by hooks.json on session startup/resume.
  */
 
-import { existsSync, readFileSync } from "fs";
+import { existsSync, readFileSync, cpSync, mkdirSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { homedir } from "os";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -36,8 +37,24 @@ function readFileSafe(path) {
   }
 }
 
+// KEEP IN SYNC with src/paths.ts migrateIfNeeded()
+function migrateIfNeeded(dataDir) {
+  if (process.env.IDENTITY_DATA_DIR) return;
+  if (existsSync(dataDir)) return;
+  const home = process.env.HOME || process.env.USERPROFILE || homedir();
+  const legacyDir = join(home, ".local", "share", "claude-memory");
+  if (legacyDir === dataDir || !existsSync(legacyDir)) return;
+  try {
+    mkdirSync(dirname(dataDir), { recursive: true });
+    cpSync(legacyDir, dataDir, { recursive: true });
+  } catch {
+    // Best-effort — don't block session start
+  }
+}
+
 try {
   const dataDir = getDataDir();
+  migrateIfNeeded(dataDir);
   const identityDir = join(dataDir, "identity");
 
   const soul = readFileSafe(join(identityDir, "soul.md"));
