@@ -21,6 +21,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Misleading "below threshold" text**: `self` tool output now says "not shown" instead of "below threshold" for patterns past the top-10 display limit
 - **MCPB bundle cleanup**: Excluded `vitest.config.ts` and `UX-REPORT.md` from Desktop Extension bundle
 - **Prototype chain poisoning**: Concept names like `"constructor"` or `"toString"` would crash the server — `Object.hasOwn()` now used for all property lookups on the observation store
+- **All-empty concepts garbled output**: `reflect` with all-empty concept names produced `"Recorded  concept(s)."` with blank score lines — now correctly reports "Recorded 0 concepts."
+- **False session summary save claim**: `reflect` with whitespace-only `session_summary` printed "Session summary saved" even though it wasn't — now checks trimmed value consistently
 
 ### Added
 
@@ -30,7 +32,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Desktop Extension packaging (MCPB): `manifest.json` + `.mcpbignore` for one-click install via Claude Desktop Connectors Directory
 - `npm run pack:mcpb` script for building `.mcpb` bundles (2.8MB vs 34MB unfiltered)
 - Edge case tests: future `last_seen` dates, double-corruption recovery, empty input validation, array corruption, empty anchor content, prototype chain safety
-- 121 tests across 12 files (up from 107)
+- 123 tests across 12 files (up from 107)
 
 ---
 
