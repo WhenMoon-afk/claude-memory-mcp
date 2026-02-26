@@ -40,6 +40,22 @@ More observations increase the score. Multi-day patterns promote faster. Context
 
 ## Installation
 
+### Claude Code — Plugin (Recommended)
+
+Install via the Substratia marketplace for the best experience — MCP server, hooks, skills, and commands bundled together:
+
+```
+/plugin marketplace add whenmoon-afk/substratia-marketplace
+/plugin install identity@substratia-marketplace
+```
+
+This gives you:
+
+- **MCP server** — `identity:reflect`, `identity:anchor`, `identity:self` tools available in every session
+- **SessionStart hook** — loads identity context automatically
+- **Skills** — guides Claude on when and how to use identity tools
+- **Commands** — `/reflect` and `/identity` slash commands
+
 ### Claude Desktop
 
 The primary install target. Desktop has no built-in memory features, making this the only identity persistence layer available.

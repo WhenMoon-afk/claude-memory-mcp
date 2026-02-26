@@ -24,6 +24,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ### Added
 
+- **Claude Code plugin**: `.claude-plugin/plugin.json` manifest with MCP server registration, SessionStart hook for identity context injection, `/reflect` and `/identity` commands, and identity-persistence skill
+- `cli/plugin-server.js` — bootstrap wrapper that auto-installs deps and builds before starting MCP server
+- `cli/identity-context.js` — SessionStart hook script that outputs identity context (soul, anchors, self-state)
 - Desktop Extension packaging (MCPB): `manifest.json` + `.mcpbignore` for one-click install via Claude Desktop Connectors Directory
 - `npm run pack:mcpb` script for building `.mcpb` bundles (2.8MB vs 34MB unfiltered)
 - Edge case tests: future `last_seen` dates, double-corruption recovery, empty input validation, array corruption, empty anchor content, prototype chain safety
