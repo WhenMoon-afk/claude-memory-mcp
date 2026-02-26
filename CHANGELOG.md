@@ -29,6 +29,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - **Silent stale concept retention**: `pruneStale()` silently kept single-recall concepts with malformed `last_seen` dates — now treats them as infinitely old and prunes them
 - **Duplicate anchor entries**: `appendAnchor()` could write the same anchor to `identity-anchors.md` multiple times (e.g., after crash recovery during auto-promote) — now skips if anchor text already exists
 - **Duplicate concept names in reflect output**: Same concept with different contexts in one `reflect` call was listed twice in scores (once as "new", once as "updated") — now deduplicated
+- **Windows data orphaned after APPDATA path change**: v4.1.x used `HOME/.local/share/claude-memory` on Windows; v4.2.0 uses `APPDATA/claude-memory`. Now auto-migrates legacy data on first run after upgrade
+- **SessionStart hook template leakage**: `identity-context.js` output default template content on fresh installs — now filters out templates like `identity-prompt.ts` does
 
 ### Added
 
@@ -39,7 +41,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - `npm run pack:mcpb` script for building `.mcpb` bundles (2.8MB vs 34MB unfiltered)
 - Edge case tests: future `last_seen` dates, double-corruption recovery, empty input validation, array corruption, empty anchor content, prototype chain safety
 - CLI entry point argument parsing test (subprocess-level)
-- 130 tests across 12 files (up from 107)
+- `migrateIfNeeded()` — detects and copies legacy data to new platform-correct path
+- 134 tests across 12 files (up from 107)
 
 ---
 
