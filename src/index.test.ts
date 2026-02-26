@@ -10,11 +10,12 @@ describe("createServer", () => {
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "server-test-"));
-    process.env["XDG_DATA_HOME"] = dir;
+    // Use IDENTITY_DATA_DIR to fully isolate from real data (avoids migration)
+    process.env["IDENTITY_DATA_DIR"] = join(dir, "claude-memory");
   });
 
   afterEach(() => {
-    delete process.env["XDG_DATA_HOME"];
+    delete process.env["IDENTITY_DATA_DIR"];
     rmSync(dir, { recursive: true, force: true });
   });
 

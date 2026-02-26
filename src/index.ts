@@ -8,7 +8,12 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ObservationStore } from "./observations.js";
 import { IdentityManager } from "./identity.js";
-import { getDataDir, getObservationsPath, getIdentityDir } from "./paths.js";
+import {
+  getDataDir,
+  getObservationsPath,
+  getIdentityDir,
+  migrateIfNeeded,
+} from "./paths.js";
 import { handleReflect } from "./tools/reflect.js";
 import { handleAnchor } from "./tools/anchor.js";
 import { handleSelf } from "./tools/self.js";
@@ -29,6 +34,7 @@ export const TOOL_DESCRIPTIONS = {
 } as const;
 
 export function createServer(): McpServer {
+  migrateIfNeeded();
   const store = new ObservationStore(getObservationsPath());
   const identity = new IdentityManager(getIdentityDir());
   identity.ensureFiles();
@@ -137,6 +143,7 @@ const isMainModule =
   entryScript.endsWith("index.ts") ||
   entryScript.endsWith("memory-mcp");
 if (isMainModule) {
+  migrateIfNeeded();
   const subcommand = process.argv[2];
   if (subcommand === "setup") {
     import("./cli.js").then(({ getSetupInstructions }) => {
