@@ -1,50 +1,67 @@
 # CLAUDE.md
 
-## What This Is
+## What This Repo Ships
 
-Identity persistence MCP server for AI agents. Published to npm as `@whenmoon-afk/memory-mcp`. Three MCP tools: `reflect` (session-end concept extraction + promotion scoring), `anchor` (explicit identity file writing), `self` (query current identity state).
+`@whenmoon-afk/memory-mcp` is a local-first continuity MCP server. The supported public surface is:
+
+- one MCP tool: `continuity`
+- one supported CLI: `claude-memory-mcp`
+- one local SQLite database: `continuity.db`
+
+The product is a basic local memory database and continuity journal. It stores snapshots, decisions, state records, bundles, and meta-snapshots so an agent can resume work with compact, relevant context.
+
+## Architecture
+
+```text
+MCP client / CLI
+  -> continuityActionSchema
+  -> dispatchContinuityAction()
+  -> ContinuityStore
+  -> SQLite
+  -> compact list/search/get/neighbor renderers
+```
+
+Important modules:
+
+- `src/index.ts`: stdio MCP entrypoint and CLI routing
+- `src/cli.ts`: supported CLI commands and setup instructions
+- `src/continuity/schema.ts`: action dispatch schema
+- `src/continuity/actions.ts`: public continuity dispatcher
+- `src/continuity/store.ts`: persistence, search, neighbors, renders, merge behavior
+- `src/continuity/render.ts`: raw, prompt, bridge, and bundle render modes
+- `src/continuity/config.ts`: default data and database paths
 
 ## Commands
 
 ```bash
-npm test               # Run vitest tests (45 tests)
-npm run test:watch     # Vitest in watch mode
-npm run typecheck      # TypeScript strict mode check
-npm run build          # Compile TypeScript → dist/
-npm run dev            # Watch mode with tsx
-npm start              # Run MCP server (stdio transport)
+npm run check
+npm run test:coverage
+npm test
+npm run build
+npm run dev
+npx @whenmoon-afk/memory-mcp setup
+claude-memory-mcp serve
 ```
 
-## Architecture
+## Verification Contract
 
-```
-MCP Client → index.ts (registerTool + Zod) → tools/*.ts → observations.ts + identity.ts
-```
+- `npm run check` is the baseline verifier for local work, pre-commit, and CI
+- `npm run test:coverage` is the full coverage pass
+- `npm run test:smoke` validates the built entrypoint without touching real user data
 
-- **Entry** (`src/index.ts`): McpServer from `@modelcontextprotocol/sdk/server/mcp.js`, three tools registered via `registerTool()`
-- **Tools** (`src/tools/`): `reflect.ts` records concepts + runs promotion, `anchor.ts` writes to identity files, `self.ts` reads all identity state
-- **Observation store** (`src/observations.ts`): JSON file tracking concept frequency. Promotion formula: `score = total_recalls * log2(distinct_days + 1) * context_diversity * recency_weight`
-- **Identity files** (`src/identity.ts`): Manages `soul.md` (carved), `self-state.md` (written), `identity-anchors.md` (grown)
-- **Paths** (`src/paths.ts`): XDG-compliant data directory resolution
+Do not claim work is complete without a fresh verification run.
 
-## Key Constraints
+## Storage Rules
 
-- **MCP uses stdout** — logging must use `console.error`, never `console.log`
-- **TypeScript strict mode** with `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
-- **ESM only** — `"type": "module"`, use `.js` extensions in imports
-- **No database** — JSON observation store + markdown identity files
-- **Pre-commit hook** runs typecheck + tests + secret scanning
+- Default database path: `~/.local/share/claude-memory/continuity.db` on Unix-like systems, `%APPDATA%\claude-memory\continuity.db` on Windows
+- Override with `CLAUDE_MEMORY_DATA_DIR` or `CLAUDE_MEMORY_DB_PATH`
+- Keep storage local-first and inspectable
+- Progressive disclosure is intentional: list/search/neighbors stay compact, full expansion is explicit
 
-## Development Practices
+## Constraints
 
-- **TDD**: Test first, watch it fail, minimal implementation, verify green
-- **Systematic debugging**: Root cause investigation before fixes. No guessing.
-- **No over-engineering**: Ship what's needed, nothing more
-
-## Environment
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `XDG_DATA_HOME` | `~/.local/share` | Base data directory |
-
-Data stored at `$XDG_DATA_HOME/claude-memory/` (observations.json + identity/).
+- MCP uses stdout for protocol traffic, so operational logs must go to stderr
+- TypeScript runs in strict mode
+- ESM-only project; use `.js` extensions in TypeScript imports
+- Public docs must reflect the continuity product, not the removed identity server
+- Plugin, hook, marketplace, and MCPB packaging paths are not part of the supported product surface

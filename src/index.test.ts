@@ -1,21 +1,29 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { createServer, TOOL_DESCRIPTIONS, VERSION } from "./index.js";
+import { ContinuityStore } from "./continuity/store.js";
+import {
+  createServer,
+  runContinuityTool,
+  TOOL_ANNOTATIONS,
+  TOOL_DESCRIPTIONS,
+  VERSION,
+} from "./index.js";
 
 describe("createServer", () => {
   let dir: string;
+  let dbPath: string;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "server-test-"));
-    // Use IDENTITY_DATA_DIR to fully isolate from real data (avoids migration)
-    process.env["IDENTITY_DATA_DIR"] = join(dir, "claude-memory");
+    dbPath = join(dir, "continuity.db");
+    process.env["CLAUDE_MEMORY_DB_PATH"] = dbPath;
   });
 
   afterEach(() => {
-    delete process.env["IDENTITY_DATA_DIR"];
+    delete process.env["CLAUDE_MEMORY_DB_PATH"];
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -25,30 +33,43 @@ describe("createServer", () => {
     expect(typeof server.connect).toBe("function");
   });
 
-  it("creates identity files on startup", () => {
+  it("opens the continuity database on startup", () => {
     createServer();
-    const { readFileSync } = require("node:fs");
-    const identityDir = join(dir, "claude-memory", "identity");
-    expect(readFileSync(join(identityDir, "soul.md"), "utf-8")).toContain(
-      "# Soul",
-    );
+    expect(existsSync(dbPath)).toBe(true);
+  });
+
+  it("runs the continuity tool handler directly", async () => {
+    const store = new ContinuityStore(dbPath);
+
+    const response = await runContinuityTool(store, { action: "doctor" });
+
+    expect(response.content).toEqual([
+      {
+        type: "text",
+        text: expect.stringContaining("\"schema_version\": 1"),
+      },
+    ]);
+
+    store.close();
   });
 });
 
 describe("TOOL_DESCRIPTIONS", () => {
-  it("reflect description guides when to use", () => {
-    expect(TOOL_DESCRIPTIONS.reflect).toMatch(/session.end|end.of.session/i);
-    expect(TOOL_DESCRIPTIONS.reflect).toMatch(
-      /NOT.*project.*facts|identity.*patterns/i,
-    );
+  it("continuity description guides the action surface", () => {
+    expect(TOOL_DESCRIPTIONS.continuity).toMatch(/save|list|search|get/i);
+    expect(TOOL_DESCRIPTIONS.continuity).toMatch(/node|related|doctor/i);
+    expect(TOOL_DESCRIPTIONS.continuity).toMatch(/bundle|merge|delete/i);
   });
+});
 
-  it("self description guides when to use", () => {
-    expect(TOOL_DESCRIPTIONS.self).toMatch(/session.start|anytime/i);
-  });
-
-  it("anchor description guides when to use", () => {
-    expect(TOOL_DESCRIPTIONS.anchor).toMatch(/permanent|persist|core/i);
+describe("TOOL_ANNOTATIONS", () => {
+  it("conservatively describes the continuity dispatch tool side effects", () => {
+    expect(TOOL_ANNOTATIONS.continuity).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    });
   });
 });
 

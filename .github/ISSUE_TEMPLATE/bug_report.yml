@@ -1,0 +1,92 @@
+name: Bug report
+description: Report a reproducible problem in the MCP server or CLI.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this template for reproducible problems in the local-first MCP server, CLI, package, or documentation. Please remove private memory contents, secrets, usernames, paths, and client logs that are not needed to reproduce the issue.
+
+  - type: checkboxes
+    id: preparation
+    attributes:
+      label: Pre-flight checks
+      options:
+        - label: I searched existing issues and did not find a matching report.
+          required: true
+        - label: I removed secrets and sensitive local memory contents from this report.
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Package version
+      description: Run `claude-memory-mcp --version` or check your installed package version.
+      placeholder: "3.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: Run `node --version`. v3 supports Node 20 and newer.
+      placeholder: "v20.19.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Affected surface
+      options:
+        - MCP server
+        - CLI
+        - SQLite storage
+        - Import/export/backup
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include the smallest commands, MCP tool calls, or fixture data that reproduce the issue.
+      placeholder: |
+        1. Run `claude-memory-mcp doctor`
+        2. Run `claude-memory-mcp list --limit 5`
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What should have happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include sanitized error output when useful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: If possible, paste sanitized output from `claude-memory-mcp doctor`.
+      render: shell
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment notes
+      description: Include OS, MCP client, package manager, install method, and any relevant SQLite or filesystem details.

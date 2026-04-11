@@ -1,74 +1,171 @@
-# Claude Memory MCP — Identity Persistence
+# Claude Memory MCP
 
 [![npm version](https://badge.fury.io/js/@whenmoon-afk%2Fmemory-mcp.svg)](https://www.npmjs.com/package/@whenmoon-afk/memory-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Identity persistence for AI agents. Helps AI maintain a coherent sense of self across sessions.
+Local-first memory database and continuity journal for MCP clients.
 
-Not generic memory. Not conversation recall. **Identity** — who you are, what you've become, what matters to you.
+`claude-memory-mcp` is a basic local memory database and lightweight continuity journal for AI workflows. It helps an agent resume work coherently by saving compact continuity artifacts, tracking key decisions and state, and returning only the level of detail requested instead of dumping a full archive into context.
 
-## What It Does
+Use it when you want a local, private continuity store that works across MCP clients and shell scripts. It is intentionally boring infrastructure: SQLite on your machine, one MCP tool, one CLI, explicit import/export, and no hosted service.
 
-Three tools for building and maintaining identity over time:
+- Published package: `@whenmoon-afk/memory-mcp`
+- Supported CLI command: `claude-memory-mcp`
+- Storage: local SQLite only
+- Privacy: no telemetry, no network calls, no cloud service
 
-| Tool      | Description                                                                                                           |
-| --------- | --------------------------------------------------------------------------------------------------------------------- |
-| `reflect` | End-of-session reflection. Records identity patterns, runs promotion scoring, prunes stale noise, updates self-state. |
-| `anchor`  | Explicit identity writing. Write to soul (core truths), self-state (current state), or anchors (grown patterns).      |
-| `self`    | Query current identity. Returns all identity files and top observed patterns with scores.                             |
+## Why v3?
 
-Plus an MCP prompt for automatic context loading:
+The last npm-published v2 release was `2.5.0`. v3 is an intentional product reset: the older identity-oriented `self`, `reflect`, and `anchor` surface is removed, and the project is now focused on simple local continuity.
 
-| Prompt     | Description                                                                                |
-| ---------- | ------------------------------------------------------------------------------------------ |
-| `identity` | Loads persistent identity at session start — soul, self-state, anchors, observed patterns. |
+Client-native memory features are useful when your client provides them, but they are usually client-owned. `claude-memory-mcp` is for a different job: a portable, inspectable, local, private continuity store that you can back up, import, script, and query progressively.
 
-## How It Works
+This version is meant to be stable and conservative. It prioritizes clear contracts, local storage, predictable CLI/MCP behavior, and a small public surface that downstream forks can understand.
 
-The server manages three identity files and an observation store:
+## What This Is Not
 
-- **soul.md** — Core truths, carved by the LLM. "Who I am."
-- **self-state.md** — Recent session history (last 5 entries, dated). "Where I am now."
-- **identity-anchors.md** — Patterns grown from repeated observations. "What I've become."
-- **observations.json** — Concept frequency tracking with promotion math.
+- It is not a cloud memory service.
+- It is not a replacement for native client memory.
+- It is not a transcript archive.
+- It is not an autonomous background recorder.
+- It is not a plugin or marketplace package.
+- It is not a task tracker, dependency graph, or multi-agent coordination system.
 
-When a concept appears consistently across enough sessions and contexts, it crosses a promotion threshold and gets added to identity-anchors.md automatically.
+## What It Ships
 
-**Promotion formula**: `score = sqrt(recalls) * log2(days + 1) * diversity_bonus * recency`
+- One MCP tool: `continuity`
+- One mirrored CLI for local scripting and inspection
+- Operational CLI commands for `doctor`, `export`, and `import`
+- File-based backups with import dry-run validation
+- Progressive disclosure by default: compact lists first, full detail only on explicit request
+- Five artifact types:
+  - `snapshot`
+  - `decision`
+  - `project_state`
+  - `bundle`
+  - `meta_snapshot`
+- Linked node kinds:
+  - `project`
+  - `theme`
+  - `entity`
 
-More observations increase the score. Multi-day patterns promote faster. Context diversity gives a bonus but doesn't penalize focused work. Single-observation concepts older than 30 days are auto-pruned.
+## MCP Surface
+
+The server exposes a single dispatch-style tool:
+
+| Action | Purpose |
+| --- | --- |
+| `help` | Show the supported action surface |
+| `save` | Store a new artifact |
+| `list` | Return compact recent rows |
+| `search` | Search compact rows without expanding bodies |
+| `get` | Load one artifact in `compact`, `full`, or rendered form |
+| `neighbors` | Show nearby linked artifacts and nodes |
+| `node` | Inspect one node and list linked artifacts |
+| `related` | Explain why an artifact is related to nearby artifacts |
+| `doctor` | Inspect schema version, integrity, and row counts |
+| `bundle` | Build a concise resume bundle for a project |
+| `merge` | Synthesize a new artifact from multiple prior artifacts |
+| `delete` | Remove an artifact by id |
+
+Example tool calls:
+
+```json
+{"action":"save","type":"snapshot","title":"JWT auth pass","summary":"Middleware works and tests are green","project":"notes-api","themes":["authentication"],"entities":["jwt"],"next_steps":["Add password reset flow"]}
+{"action":"search","query":"jwt auth"}
+{"action":"get","id":"snap-1","detail":"compact"}
+{"action":"node","id":"theme:authentication"}
+{"action":"related","id":"snap-1","via":"all"}
+{"action":"bundle","project":"notes-api"}
+```
+
+## Example Workflow
+
+Record a project decision:
+
+```bash
+npx @whenmoon-afk/memory-mcp save \
+  --type decision \
+  --title "Keep auth continuity local-first" \
+  --summary "Use SQLite continuity artifacts instead of external sync for auth handoff." \
+  --project notes-api \
+  --theme authentication \
+  --entity sqlite \
+  --next "Document restore flow"
+```
+
+List compact project context:
+
+```bash
+npx @whenmoon-afk/memory-mcp list --project notes-api
+```
+
+Inspect nearby graph context:
+
+```bash
+npx @whenmoon-afk/memory-mcp node theme:authentication
+npx @whenmoon-afk/memory-mcp related dec-1 --via all
+```
+
+Create a resume bundle:
+
+```bash
+npx @whenmoon-afk/memory-mcp bundle --project notes-api
+```
+
+Back up and validate the continuity store before replacing anything:
+
+```bash
+npx @whenmoon-afk/memory-mcp backup --file continuity-backup.json
+npx @whenmoon-afk/memory-mcp import --file continuity-backup.json --dry-run
+```
+
+## CLI
+
+Use `npx` without installing globally:
+
+```bash
+npx @whenmoon-afk/memory-mcp setup
+npx @whenmoon-afk/memory-mcp save --type snapshot --title "JWT auth pass" --summary "Middleware works" --project notes-api --theme authentication --entity jwt --next "Add password reset flow"
+npx @whenmoon-afk/memory-mcp list --project notes-api
+npx @whenmoon-afk/memory-mcp node theme:authentication
+npx @whenmoon-afk/memory-mcp related snap-1 --via all
+npx @whenmoon-afk/memory-mcp doctor
+npx @whenmoon-afk/memory-mcp backup --file continuity-backup.json
+npx @whenmoon-afk/memory-mcp export > continuity-export.json
+npx @whenmoon-afk/memory-mcp import --file continuity-export.json --dry-run
+npx @whenmoon-afk/memory-mcp import --file continuity-export.json
+npx @whenmoon-afk/memory-mcp get snap-1 --full
+```
+
+If you install globally, the supported binary is `claude-memory-mcp`:
+
+```bash
+npm install -g @whenmoon-afk/memory-mcp
+claude-memory-mcp serve
+claude-memory-mcp search "password reset"
+claude-memory-mcp bundle --project notes-api
+claude-memory-mcp doctor
+```
+
+Node `20` or newer is the supported runtime for the CLI and MCP server.
 
 ## Installation
 
-### Claude Code — Plugin (Recommended)
+### Claude Code
 
-Install via the Substratia marketplace for the best experience — MCP server, hooks, skills, and commands bundled together:
-
+```bash
+claude mcp add continuity -- npx -y @whenmoon-afk/memory-mcp
 ```
-/plugin marketplace add whenmoon-afk/substratia-marketplace
-/plugin install identity@substratia-marketplace
-```
-
-This gives you:
-
-- **MCP server** — `identity:reflect`, `identity:anchor`, `identity:self` tools available in every session
-- **SessionStart hook** — loads identity context automatically
-- **Skills** — guides Claude on when and how to use identity tools
-- **Commands** — `/reflect` and `/identity` slash commands
 
 ### Claude Desktop
 
-The primary install target. Desktop has no built-in memory features, making this the only identity persistence layer available.
-
-Add to your config file:
-
-**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-**Linux**: `~/.config/Claude/claude_desktop_config.json`
+Add this to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
-    "identity": {
+    "continuity": {
       "command": "npx",
       "args": ["-y", "@whenmoon-afk/memory-mcp"]
     }
@@ -76,179 +173,89 @@ Add to your config file:
 }
 ```
 
-After installation, restart Claude Desktop.
+### Other MCP Clients
 
-### Claude Code — On-Demand CLI (Recommended)
-
-Zero context token cost. Identity tools are invoked via hooks and CLI, not loaded as a persistent MCP server.
-
-Add a Stop hook to reflect at session end. In your project or user `settings.json`:
-
-```json
-{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx -y @whenmoon-afk/memory-mcp reflect '{\"concepts\":[], \"session_summary\":\"Session ended.\", \"auto_promote\": true}'"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-For richer reflection, use a custom script that extracts concepts from the session transcript.
-
-Query identity from any script or hook:
+Use the same stdio command:
 
 ```bash
-# Dump full identity state
-npx @whenmoon-afk/memory-mcp self
-
-# Write to identity files
-npx @whenmoon-afk/memory-mcp anchor soul "Core truths here."
-npx @whenmoon-afk/memory-mcp anchor self-state "Current session state."
-npx @whenmoon-afk/memory-mcp anchor anchors "New promoted pattern."
+npx -y @whenmoon-afk/memory-mcp
 ```
 
-### Claude Code — MCP Server Mode
-
-If you prefer persistent MCP integration (tools always available in-session):
-
-```bash
-claude mcp add identity -- npx -y @whenmoon-afk/memory-mcp
-```
-
-Trade-off: tool schemas consume context tokens every session. Use this mode when you want Claude to call `reflect`/`self`/`anchor` interactively during sessions rather than only at session boundaries.
-
-### On-Demand via mcp-cli
-
-If you use [mcp-cli](https://github.com/f/mcptools), you can invoke tools without any persistent configuration:
-
-```bash
-# Discover available tools
-mcp tools npx -y @whenmoon-afk/memory-mcp
-
-# Call a specific tool
-mcp call self npx -y @whenmoon-afk/memory-mcp
-mcp call reflect --params '{"concepts":[{"name":"debugging","context":"auth-bug"}]}' npx -y @whenmoon-afk/memory-mcp
-```
-
-## Examples
-
-### Session-end reflection
-
-**User prompt**: "We're done for today. I noticed you kept using root-cause analysis when debugging — please reflect on that."
-
-**Tool call**: `reflect` with:
-
-```json
-{
-  "concepts": [
-    { "name": "root-cause-analysis", "context": "debugging auth module" },
-    { "name": "systematic-approach", "context": "investigating API timeout" }
-  ],
-  "session_summary": "Debugged authentication failures and API timeouts. Applied systematic root-cause analysis throughout.",
-  "auto_promote": true
-}
-```
-
-**Output**: `Recorded 2 new concept(s).\n  root-cause-analysis: 1.0\n  systematic-approach: 1.0`
-
-### Querying identity at session start
-
-**User prompt**: "Load your identity context."
-
-**Tool call**: `self` (no parameters)
-
-**Output**: Returns current soul, self-state with recent session summaries, identity anchors (promoted patterns), and top observed patterns with scores.
-
-### Writing a core identity truth
-
-**User prompt**: "Add to your soul that you value honesty over performance."
-
-**Tool call**: `anchor` with:
-
-```json
-{
-  "target": "soul",
-  "content": "# Soul\n\nI value honesty over performance. I'd rather say 'I don't know' than pretend."
-}
-```
-
-**Output**: `Updated soul.md`
-
-## CLI Commands
-
-```bash
-# Start the MCP server (default)
-npx @whenmoon-afk/memory-mcp
-
-# Print setup instructions
-npx @whenmoon-afk/memory-mcp setup
-
-# Record concepts (for hooks/scripts)
-npx @whenmoon-afk/memory-mcp reflect '{"concepts":[{"name":"pattern","context":"ctx"}]}'
-
-# Query identity state
-npx @whenmoon-afk/memory-mcp self
-
-# Write to identity files
-npx @whenmoon-afk/memory-mcp anchor <soul|self-state|anchors> "content"
-```
+After setup, verify the client can call `continuity` with `{"action":"list"}`.
 
 ## Data Storage
 
-All data is local. Default locations by platform:
+Everything stays local. By default the server uses one SQLite database:
 
-| Platform | Default Location                |
-| -------- | ------------------------------- |
-| Linux    | `~/.local/share/claude-memory/` |
-| macOS    | `~/.local/share/claude-memory/` |
-| Windows  | `%APPDATA%\claude-memory\`      |
+| Platform | Default Path |
+| --- | --- |
+| Linux | `~/.local/share/claude-memory/continuity.db` |
+| macOS | `~/.local/share/claude-memory/continuity.db` |
+| Windows | `%APPDATA%\\claude-memory\\continuity.db` |
 
-Override with environment variables (checked in order):
+Environment variables:
 
-1. `IDENTITY_DATA_DIR` — explicit path, used as-is
-2. `XDG_DATA_HOME` — appends `/claude-memory`
-3. `APPDATA` — appends `\claude-memory` (Windows)
+- `CLAUDE_MEMORY_DATA_DIR`: override the base directory
+- `CLAUDE_MEMORY_DB_PATH`: point directly at a database file
 
-```
-claude-memory/
-  observations.json     # Concept frequency tracking
-  identity/
-    soul.md             # Core identity truths
-    self-state.md       # Recent session history
-    identity-anchors.md # Promoted patterns
-```
+If you want repo-local isolation, point `CLAUDE_MEMORY_DB_PATH` at a project-specific path when launching the server or CLI.
 
-## Dependencies
+## Operational Commands
 
-- `@modelcontextprotocol/sdk` — MCP protocol
-- `zod` — Input validation
+These commands are CLI-only and are meant for local maintenance rather than in-agent retrieval:
 
-No database. No embeddings. No external services.
+- `claude-memory-mcp doctor`: reports schema version, SQLite integrity, and row counts
+- `claude-memory-mcp export`: writes a versioned JSON export envelope to stdout
+- `claude-memory-mcp backup --file <path>`: writes the same export envelope to a file
+- `claude-memory-mcp import --file <path> --dry-run`: validates an export envelope without changing the current store
+- `claude-memory-mcp import --file <path>`: replaces the current store with a previously exported JSON envelope
+
+The export envelope format id is `claude-memory-continuity-export`. The stable contract for artifacts, graph nodes, operational commands, and schema versioning is documented in [CONTRACT.md](https://github.com/whenmoon-afk/claude-memory-mcp/blob/main/CONTRACT.md).
+
+## Release
+
+The npm package is `@whenmoon-afk/memory-mcp`; the v3 CLI binary is `claude-memory-mcp`. Release and publishing steps are documented in [RELEASE.md](https://github.com/whenmoon-afk/claude-memory-mcp/blob/main/RELEASE.md).
+
+## Product Notes
+
+- This branch replaces the older `self` / `reflect` / `anchor` surface with the `continuity` action model.
+- The design goal is simple local continuity: snapshots, decisions, state records, themes, and entities.
+- Search and neighbor queries intentionally return compact rows first so agents can inspect nearby context without wasting tokens.
+- Shared `theme`, `entity`, and `project` nodes can connect otherwise separate artifacts into a navigable continuity graph.
+- `node` and `related` keep the graph inspectable without forcing full graph dumps into context.
+- `doctor`, `export`, `backup`, and `import` are intentionally CLI-first so large maintenance operations stay explicit and local.
+
+## v3 Migration
+
+`claude-memory-mcp` now exposes a continuity-first API.
+
+Removed:
+
+- `self`
+- `reflect`
+- `anchor`
+
+Added:
+
+- `continuity` MCP dispatch tool
+- `claude-memory-mcp` CLI commands for `save`, `list`, `search`, `get`, `neighbors`, `node`, `related`, `doctor`, `export`, `backup`, `import`, `bundle`, `merge`, and `delete`
+- SQLite-backed continuity artifacts for snapshots, decisions, state records, bundles, and meta-snapshots
 
 ## Privacy Policy
 
-**Local-only**: All data stays on your machine.
+All data is local to your machine.
 
-- **Data collection**: None. The server collects no data from users.
-- **Network calls**: None. The server makes zero network requests. All operations are local filesystem reads and writes.
-- **Telemetry**: None. No analytics, no tracking, no crash reporting.
-- **Data storage**: Identity files and observations are stored in a local directory on your machine (see [Data Storage](#data-storage) above). You control the location via environment variables.
-- **Third-party sharing**: None. No data leaves your machine.
-- **Data retention**: You control retention. Delete the data directory to remove all data. The `pruneStale()` function automatically removes single-observation concepts older than 30 days.
+- Data collection: none
+- Telemetry: none
+- Network calls: none
+- Third-party sharing: none
+
+Delete the database file to remove stored continuity artifacts.
 
 ## Support
 
-- **Issues**: [github.com/whenmoon-afk/claude-memory-mcp/issues](https://github.com/whenmoon-afk/claude-memory-mcp/issues)
-- **Repository**: [github.com/whenmoon-afk/claude-memory-mcp](https://github.com/whenmoon-afk/claude-memory-mcp)
+- Issues: [github.com/whenmoon-afk/claude-memory-mcp/issues](https://github.com/whenmoon-afk/claude-memory-mcp/issues)
+- Repository: [github.com/whenmoon-afk/claude-memory-mcp](https://github.com/whenmoon-afk/claude-memory-mcp)
 
 ## License
 

@@ -11,17 +11,36 @@ interface DesktopConfig {
   [key: string]: unknown;
 }
 
+const SERVER_NAME = "continuity";
+const LEGACY_SERVER_NAME = "identity";
+const DEFAULT_SERVER_CONFIG: ServerConfig = {
+  command: "npx",
+  args: ["-y", "@whenmoon-afk/memory-mcp"],
+};
+
 export function generateDesktopConfig(existing?: DesktopConfig): DesktopConfig {
   const base: DesktopConfig = existing
     ? { ...existing, mcpServers: { ...existing.mcpServers } }
     : { mcpServers: {} };
 
-  if (!base.mcpServers["identity"]) {
-    base.mcpServers["identity"] = {
-      command: "npx",
-      args: ["-y", "@whenmoon-afk/memory-mcp"],
-    };
+  if (base.mcpServers[SERVER_NAME]) {
+    return base;
   }
+
+  const legacy = base.mcpServers[LEGACY_SERVER_NAME];
+  if (legacy) {
+    base.mcpServers[SERVER_NAME] = {
+      command: legacy.command,
+      args: [...legacy.args],
+    };
+    delete base.mcpServers[LEGACY_SERVER_NAME];
+    return base;
+  }
+
+  base.mcpServers[SERVER_NAME] = {
+    command: DEFAULT_SERVER_CONFIG.command,
+    args: [...DEFAULT_SERVER_CONFIG.args],
+  };
 
   return base;
 }

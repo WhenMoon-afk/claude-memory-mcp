@@ -1,25 +1,24 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
-import {
-  getSetupInstructions,
-  runReflectCli,
-  runSelfCli,
-  runAnchorCli,
-} from "./cli.js";
-import { ObservationStore } from "./observations.js";
-import { IdentityManager } from "./identity.js";
+import { execFileSync, spawnSync } from "node:child_process";
+import { getSetupInstructions, runContinuityCli } from "./cli.js";
+import { ContinuityStore } from "./continuity/store.js";
 
 describe("cli", () => {
   let dir: string;
+  let store: ContinuityStore;
+  let dbPath: string;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "cli-test-"));
+    dbPath = join(dir, "continuity.db");
+    store = new ContinuityStore(dbPath);
   });
 
   afterEach(() => {
+    store.close();
     rmSync(dir, { recursive: true, force: true });
   });
 
@@ -27,231 +26,274 @@ describe("cli", () => {
     it("includes Claude Code setup command", () => {
       const output = getSetupInstructions();
       expect(output).toContain("claude mcp add");
+      expect(output).toContain("continuity");
       expect(output).toContain("@whenmoon-afk/memory-mcp");
+      expect(output).toContain("claude-memory-mcp");
     });
 
     it("includes Desktop config example", () => {
       const output = getSetupInstructions();
       expect(output).toContain("claude_desktop_config.json");
-      expect(output).toContain("identity");
+      expect(output).toContain("continuity");
     });
 
     it("includes npx command in Desktop config", () => {
       const output = getSetupInstructions();
       expect(output).toContain("npx");
     });
-  });
 
-  describe("runReflectCli", () => {
-    it("records concepts from JSON input", async () => {
-      const storePath = join(dir, "observations.json");
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-
-      const input = JSON.stringify({
-        concepts: [
-          { name: "testing", context: "development" },
-          { name: "persistence", context: "identity" },
-        ],
-        session_summary: "Built and tested features.",
-      });
-
-      await runReflectCli(input, storePath, identityDir);
-
-      const store = new ObservationStore(storePath);
-      expect(store.get("testing")).toBeDefined();
-      expect(store.get("persistence")).toBeDefined();
-      expect(store.get("testing")!.total_recalls).toBe(1);
-    });
-
-    it("updates self-state with session summary", async () => {
-      const storePath = join(dir, "observations.json");
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-
-      const input = JSON.stringify({
-        concepts: [{ name: "focus", context: "work" }],
-        session_summary: "Productive session on infrastructure.",
-      });
-
-      await runReflectCli(input, storePath, identityDir);
-
-      const freshIdentity = new IdentityManager(identityDir);
-      expect(freshIdentity.readSelfState()).toContain(
-        "Productive session on infrastructure.",
-      );
-    });
-
-    it("throws on invalid JSON input", async () => {
-      const storePath = join(dir, "observations.json");
-      const identityDir = join(dir, "identity");
-
-      await expect(
-        runReflectCli("not-json", storePath, identityDir),
-      ).rejects.toThrow();
-    });
-
-    it("skips concepts with missing context field instead of storing undefined", async () => {
-      const storePath = join(dir, "observations.json");
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-
-      // Concept missing "context" — should be skipped, not store undefined
-      const input = JSON.stringify({
-        concepts: [
-          { name: "good-pattern", context: "real-context" },
-          { name: "bad-pattern" },
-        ],
-      });
-
-      await runReflectCli(input, storePath, identityDir);
-
-      const store = new ObservationStore(storePath);
-      expect(store.get("good-pattern")).toBeDefined();
-      expect(store.get("good-pattern")!.contexts).toEqual(["real-context"]);
-      // bad-pattern should either not exist or have no undefined in contexts
-      const bad = store.get("bad-pattern");
-      if (bad) {
-        expect(bad.contexts).not.toContain(undefined);
-        expect(bad.contexts).not.toContain(null);
-      }
-    });
-
-    it("skips concepts with non-string name or context values", async () => {
-      const storePath = join(dir, "observations.json");
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-
-      const input = JSON.stringify({
-        concepts: [
-          { name: 123, context: "number-name" },
-          { name: "valid", context: true },
-          { name: "good", context: "real" },
-        ],
-      });
-
-      await runReflectCli(input, storePath, identityDir);
-
-      const store = new ObservationStore(storePath);
-      expect(store.get("good")).toBeDefined();
-      // Non-string name/context should be filtered out
-      expect(store.get("123" as string)).toBeUndefined();
-      expect(store.get("valid")).toBeUndefined();
-    });
-
-    it("throws on missing concepts field", async () => {
-      const storePath = join(dir, "observations.json");
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-
-      await expect(runReflectCli("{}", storePath, identityDir)).rejects.toThrow(
-        /concepts/i,
-      );
+    it("leads with a generic stdio command for any MCP client", () => {
+      const output = getSetupInstructions();
+      expect(output).toContain("## Any MCP Client");
+      expect(output).toContain("stdio command");
+      expect(output).toContain("npx -y @whenmoon-afk/memory-mcp");
     });
   });
 
-  describe("runSelfCli", () => {
-    it("returns identity state", async () => {
-      const storePath = join(dir, "observations.json");
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-      identity.writeSoul("I am a test agent.");
-
-      const output = await runSelfCli(storePath, identityDir);
-      expect(output).toContain("I am a test agent");
-    });
-
-    it("includes observation scores when present", async () => {
-      const storePath = join(dir, "observations.json");
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-
-      const store = new ObservationStore(storePath);
-      store.record("debugging", "auth-bug");
-      store.save();
-
-      const output = await runSelfCli(storePath, identityDir);
-      expect(output).toContain("debugging");
-      expect(output).toContain("score:");
-    });
-  });
-
-  describe("runAnchorCli", () => {
-    it("writes to soul file", async () => {
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-
-      const output = await runAnchorCli(
-        "soul",
-        "I am a new soul.",
-        identityDir,
+  describe("runContinuityCli", () => {
+    it("supports save, list, search, get, and neighbors", async () => {
+      const saved = await runContinuityCli(
+        [
+          "save",
+          "--type",
+          "snapshot",
+          "--title",
+          "JWT auth pass",
+          "--summary",
+          "Middleware works",
+          "--project",
+          "notes-api",
+          "--next",
+          "Document refresh flow",
+        ],
+        store,
       );
-      expect(output).toContain("Updated soul.md");
-      expect(identity.readSoul()).toContain("I am a new soul");
-    });
+      expect(saved).toContain("snap-1");
 
-    it("appends to anchors file", async () => {
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-
-      const output = await runAnchorCli(
-        "anchors",
-        "root-cause-analysis",
-        identityDir,
+      await runContinuityCli(
+        [
+          "save",
+          "--type",
+          "decision",
+          "--title",
+          "Keep SQLite local-first",
+          "--summary",
+          "SQLite keeps the continuity graph inspectable.",
+          "--project",
+          "notes-api",
+        ],
+        store,
       );
-      expect(output).toContain("Appended");
-      expect(identity.readAnchors()).toContain("root-cause-analysis");
+
+      expect(await runContinuityCli(["list"], store)).toContain("JWT auth pass");
+      expect(await runContinuityCli(["search", "auth"], store)).toContain("snap-1");
+      expect(await runContinuityCli(["get", "snap-1", "--full"], store)).toContain(
+        "Document refresh flow",
+      );
+      expect(await runContinuityCli(["neighbors", "snap-1"], store)).toContain(
+        "dec-2",
+      );
     });
 
-    it("rejects invalid target", async () => {
-      const identityDir = join(dir, "identity");
-      await expect(
-        runAnchorCli("invalid", "content", identityDir),
-      ).rejects.toThrow(/invalid target/i);
+    it("accepts theme and entity flags for graph-aware saves", async () => {
+      await runContinuityCli(
+        [
+          "save",
+          "--type",
+          "snapshot",
+          "--title",
+          "Token rollout handoff",
+          "--summary",
+          "Middleware is green and rollout is staged.",
+          "--theme",
+          "authentication",
+          "--entity",
+          "jwt",
+        ],
+        store,
+      );
+      await runContinuityCli(
+        [
+          "save",
+          "--type",
+          "decision",
+          "--title",
+          "JWT refresh policy",
+          "--summary",
+          "Refresh tokens rotate after re-authentication.",
+          "--theme",
+          "authentication",
+          "--entity",
+          "jwt",
+        ],
+        store,
+      );
+
+      expect(await runContinuityCli(["search", "jwt"], store)).toContain("snap-1");
+      expect(await runContinuityCli(["search", "authentication"], store)).toContain(
+        "snap-1",
+      );
+      expect(
+        await runContinuityCli(["node", "theme:authentication"], store),
+      ).toContain("Node: theme:authentication");
+      expect(
+        await runContinuityCli(["related", "snap-1", "--via", "nodes"], store),
+      ).toContain("shared theme:authentication");
+    });
+
+    it("supports doctor, export, and import operational commands", async () => {
+      await runContinuityCli(
+        [
+          "save",
+          "--type",
+          "snapshot",
+          "--title",
+          "JWT auth pass",
+          "--summary",
+          "Middleware works",
+          "--project",
+          "notes-api",
+          "--theme",
+          "authentication",
+        ],
+        store,
+      );
+
+      const doctor = await runContinuityCli(["doctor"], store);
+      expect(doctor).toContain("schema_version");
+
+      const exported = await runContinuityCli(["export"], store);
+      expect(exported).toContain("\"format\": \"claude-memory-continuity-export\"");
+
+      const exportPath = join(dir, "continuity-export.json");
+      writeFileSync(exportPath, exported);
+
+      const importedStore = new ContinuityStore(join(dir, "imported.db"));
+      const imported = await runContinuityCli(
+        ["import", "--file", exportPath],
+        importedStore,
+      );
+
+      expect(imported).toContain("Imported 1 artifacts");
+      expect(await runContinuityCli(["list"], importedStore)).toContain("snap-1");
+      expect(readFileSync(exportPath, "utf8")).toContain("JWT auth pass");
+
+      importedStore.close();
+    });
+
+    it("supports file backups and import dry runs", async () => {
+      await runContinuityCli(
+        [
+          "save",
+          "--type",
+          "decision",
+          "--title",
+          "Publish contract",
+          "--summary",
+          "Document the continuity contract before release.",
+        ],
+        store,
+      );
+      const backupPath = join(dir, "backup.json");
+
+      const backedUp = await runContinuityCli(
+        ["backup", "--file", backupPath],
+        store,
+      );
+      expect(backedUp).toContain("Backed up 1 artifacts");
+      expect(readFileSync(backupPath, "utf8")).toContain(
+        "\"format\": \"claude-memory-continuity-export\"",
+      );
+
+      const dryRun = await runContinuityCli(
+        ["import", "--file", backupPath, "--dry-run"],
+        store,
+      );
+      expect(dryRun).toContain("Validated 1 artifacts");
+      expect(await runContinuityCli(["list"], store)).toContain("dec-1");
+    });
+
+    it("returns help for unknown commands", async () => {
+      const output = await runContinuityCli(["wat"], store);
+      expect(output).toContain("Commands:");
+      expect(output).toContain("save");
+      expect(output).toContain("merge");
+      expect(output).toContain("doctor");
+      expect(output).toContain("export");
+      expect(output).toContain("backup");
+      expect(output).toContain("import");
+    });
+
+    it("keeps the save graph surface to project, theme, and entity nodes", async () => {
+      await runContinuityCli(
+        [
+          "save",
+          "--type",
+          "snapshot",
+          "--title",
+          "Simple local memory",
+          "--summary",
+          "Store the handoff as a local continuity artifact.",
+          "--project",
+          "notes-api",
+          "--theme",
+          "handoff",
+          "--entity",
+          "sqlite",
+        ],
+        store,
+      );
+
+      expect(store.getNode("project:notes-api")).not.toBeNull();
+      expect(store.getNode("theme:handoff")).not.toBeNull();
+      expect(store.getNode("entity:sqlite")).not.toBeNull();
     });
   });
 
   describe("CLI entry point argument parsing", () => {
-    it("anchor subcommand captures multi-word content from separate args", () => {
-      const identityDir = join(dir, "identity");
-      const identity = new IdentityManager(identityDir);
-      identity.ensureFiles();
-
-      // Simulate: memory-mcp anchor soul I am a persistent identity
-      // Each word is a separate argv element (unquoted shell input)
+    it("save subcommand captures multi-word title and summary from flags", () => {
       const output = execFileSync(
         "npx",
         [
           "tsx",
           "src/index.ts",
-          "anchor",
-          "soul",
-          "I",
-          "am",
-          "a",
-          "persistent",
-          "identity",
+          "save",
+          "--type",
+          "snapshot",
+          "--title",
+          "JWT auth pass",
+          "--summary",
+          "Middleware works",
+          "--project",
+          "notes-api",
         ],
         {
           cwd: join(import.meta.dirname!, ".."),
-          env: { ...process.env, IDENTITY_DATA_DIR: dir },
+          env: { ...process.env, CLAUDE_MEMORY_DB_PATH: dbPath },
           encoding: "utf-8",
           timeout: 10000,
         },
       );
 
-      expect(output).toContain("Updated soul.md");
-      const freshIdentity = new IdentityManager(identityDir);
-      expect(freshIdentity.readSoul()).toContain("I am a persistent identity");
+      expect(output).toContain("Saved snap-1");
+    });
+
+    it("rejects deprecated identity subcommands", () => {
+      const result = spawnSync(
+        "npx",
+        ["tsx", "src/index.ts", "reflect", "{}"],
+        {
+          cwd: join(import.meta.dirname!, ".."),
+          env: { ...process.env, CLAUDE_MEMORY_DB_PATH: dbPath },
+          encoding: "utf-8",
+          timeout: 10000,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "replaces self/reflect/anchor with the continuity surface",
+      );
     });
   });
 });

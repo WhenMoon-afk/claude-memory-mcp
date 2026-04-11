@@ -1,142 +1,149 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { dispatchContinuityAction } from "./continuity/actions.js";
+import { ContinuityStore } from "./continuity/store.js";
 import { createServer } from "./index.js";
 
-describe("integration: full workflow", () => {
+describe("integration: continuity workflow", () => {
   let dir: string;
+  let dbPath: string;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "integration-test-"));
-    // Use IDENTITY_DATA_DIR to fully isolate from real data (avoids migration)
-    process.env["IDENTITY_DATA_DIR"] = join(dir, "claude-memory");
+    dbPath = join(dir, "continuity.db");
+    process.env["CLAUDE_MEMORY_DB_PATH"] = dbPath;
   });
 
   afterEach(() => {
-    delete process.env["IDENTITY_DATA_DIR"];
+    delete process.env["CLAUDE_MEMORY_DB_PATH"];
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it("creates identity files on server creation", () => {
+  it("opens the continuity database on server creation", () => {
     createServer();
-    const identityDir = join(dir, "claude-memory", "identity");
-    expect(existsSync(join(identityDir, "soul.md"))).toBe(true);
-    expect(existsSync(join(identityDir, "self-state.md"))).toBe(true);
-    expect(existsSync(join(identityDir, "identity-anchors.md"))).toBe(true);
+    expect(existsSync(dbPath)).toBe(true);
   });
 
-  it("reflect → self roundtrip works", async () => {
-    // Import handlers directly for integration test
-    const { ObservationStore } = await import("./observations.js");
-    const { IdentityManager } = await import("./identity.js");
+  it("save → get roundtrip works", async () => {
+    const store = new ContinuityStore(dbPath);
 
-    const store = new ObservationStore(
-      join(dir, "claude-memory", "observations.json"),
-    );
-    const identity = new IdentityManager(
-      join(dir, "claude-memory", "identity"),
-    );
-    identity.ensureFiles();
+    try {
+      await dispatchContinuityAction(store, {
+        action: "save",
+        type: "snapshot",
+        title: "JWT auth handoff",
+        summary: "JWT middleware is green and password reset is next.",
+        project: "notes-api",
+        next_steps: ["Implement password reset"],
+      });
 
-    // Simulate reflect
-    const { handleReflect } = await import("./tools/reflect.js");
-    await handleReflect(
-      {
-        concepts: [
-          { name: "infrastructure-building", context: "development" },
-          { name: "honesty", context: "values" },
-        ],
-        session_summary: "Built identity persistence infrastructure.",
-      },
-      store,
-      identity,
-    );
+      const detail = await dispatchContinuityAction(store, {
+        action: "get",
+        id: "snap-1",
+        detail: "full",
+      });
 
-    // Simulate self
-    const { handleSelf } = await import("./tools/self.js");
-    const selfResult = await handleSelf({}, store, identity);
-    const text = selfResult.content[0]!.text;
-
-    expect(text).toContain("infrastructure-building");
-    expect(text).toContain("honesty");
-    expect(text).toContain("Built identity persistence infrastructure");
-  });
-
-  it("anchor writes are readable by self", async () => {
-    const { ObservationStore } = await import("./observations.js");
-    const { IdentityManager } = await import("./identity.js");
-    const { handleAnchor } = await import("./tools/anchor.js");
-    const { handleSelf } = await import("./tools/self.js");
-
-    const store = new ObservationStore(
-      join(dir, "claude-memory", "observations.json"),
-    );
-    const identity = new IdentityManager(
-      join(dir, "claude-memory", "identity"),
-    );
-    identity.ensureFiles();
-
-    // Write soul
-    await handleAnchor(
-      { target: "soul", content: "# Soul\n\nI value honesty above all." },
-      identity,
-    );
-
-    // Read via self
-    const selfResult = await handleSelf({}, store, identity);
-    expect(selfResult.content[0]!.text).toContain("I value honesty above all");
-  });
-
-  it("observations persist across store instances", async () => {
-    const { ObservationStore } = await import("./observations.js");
-
-    const storePath = join(dir, "claude-memory", "observations.json");
-
-    // Session 1: record concepts
-    const store1 = new ObservationStore(storePath);
-    store1.record("debugging", "problem-solving");
-    store1.record("debugging", "architecture");
-    store1.save();
-
-    // Session 2: load and verify
-    const store2 = new ObservationStore(storePath);
-    const obs = store2.get("debugging");
-    expect(obs).toBeDefined();
-    expect(obs!.total_recalls).toBe(2);
-    expect(obs!.contexts).toEqual(["problem-solving", "architecture"]);
-  });
-
-  it("promotion lifecycle: record → score → promote → anchor", async () => {
-    const { ObservationStore } = await import("./observations.js");
-    const { IdentityManager } = await import("./identity.js");
-
-    const store = new ObservationStore(
-      join(dir, "claude-memory", "observations.json"),
-    );
-    const identity = new IdentityManager(
-      join(dir, "claude-memory", "identity"),
-    );
-    identity.ensureFiles();
-
-    // Build up a strong pattern
-    for (let i = 0; i < 15; i++) {
-      store.record("root-cause-analysis", `ctx-${i % 5}`);
+      expect(detail.text).toContain("JWT auth handoff");
+      expect(detail.text).toContain("Implement password reset");
+    } finally {
+      store.close();
     }
-    store.get("root-cause-analysis")!.distinct_days = 10;
+  });
 
-    // Check it's promotable
-    const promotable = store.getPromotable(5.0);
-    expect(promotable.length).toBeGreaterThan(0);
-    expect(promotable[0]!.concept).toBe("root-cause-analysis");
+  it("search and bundle expose compact continuity", async () => {
+    const store = new ContinuityStore(dbPath);
 
-    // Promote it
-    store.markPromoted("root-cause-analysis");
-    identity.appendAnchor("root-cause-analysis");
+    try {
+      await dispatchContinuityAction(store, {
+        action: "save",
+        type: "snapshot",
+        title: "JWT auth handoff",
+        summary: "JWT middleware is green and password reset is next.",
+        project: "notes-api",
+      });
+      await dispatchContinuityAction(store, {
+        action: "save",
+        type: "decision",
+        title: "Keep SQLite local-first",
+        summary: "SQLite keeps the continuity graph inspectable.",
+        project: "notes-api",
+      });
 
-    // Verify it's in anchors and no longer promotable
-    const anchors = identity.readAnchors();
-    expect(anchors).toContain("root-cause-analysis");
-    expect(store.getPromotable(5.0)).toHaveLength(0);
+      const search = await dispatchContinuityAction(store, {
+        action: "search",
+        query: "auth",
+      });
+      const bundle = await dispatchContinuityAction(store, {
+        action: "bundle",
+        project: "notes-api",
+      });
+
+      expect(search.text).toContain("snap-1");
+      expect(bundle.text).toContain("Bundle for project: notes-api");
+      expect(bundle.text).toContain("snapshot: JWT auth handoff");
+      expect(bundle.text).toContain("Keep SQLite local-first");
+    } finally {
+      store.close();
+    }
+  });
+
+  it("artifacts persist across store instances", () => {
+    const store1 = new ContinuityStore(dbPath);
+    store1.saveArtifact({
+      type: "snapshot",
+      title: "JWT auth handoff",
+      summary: "JWT middleware is green and password reset is next.",
+      project: "notes-api",
+    });
+    store1.close();
+
+    const store2 = new ContinuityStore(dbPath);
+    try {
+      const artifact = store2.getArtifact("snap-1");
+      expect(artifact).toBeDefined();
+      expect(artifact!.summary).toContain("password reset");
+    } finally {
+      store2.close();
+    }
+  });
+
+  it("merge lifecycle: save → merge → delete", async () => {
+    const store = new ContinuityStore(dbPath);
+
+    try {
+      await dispatchContinuityAction(store, {
+        action: "save",
+        type: "snapshot",
+        title: "JWT auth handoff",
+        summary: "JWT middleware is green and password reset is next.",
+        project: "notes-api",
+      });
+      await dispatchContinuityAction(store, {
+        action: "save",
+        type: "decision",
+        title: "Keep SQLite local-first",
+        summary: "SQLite keeps the continuity graph inspectable.",
+        project: "notes-api",
+      });
+
+      const merged = await dispatchContinuityAction(store, {
+        action: "merge",
+        ids: ["snap-1", "dec-2"],
+        type: "meta_snapshot",
+        title: "Auth continuity merge",
+      });
+      expect(merged.text).toContain("meta-3");
+
+      const deleted = await dispatchContinuityAction(store, {
+        action: "delete",
+        id: "meta-3",
+      });
+      expect(deleted.text).toContain("Deleted meta-3");
+      expect(store.getArtifact("meta-3")).toBeNull();
+    } finally {
+      store.close();
+    }
   });
 });

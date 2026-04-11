@@ -2,22 +2,14 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { z } from "zod";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ObservationStore } from "./observations.js";
-import { IdentityManager } from "./identity.js";
-import {
-  getDataDir,
-  getObservationsPath,
-  getIdentityDir,
-  migrateIfNeeded,
-} from "./paths.js";
-import { handleReflect } from "./tools/reflect.js";
-import { handleAnchor } from "./tools/anchor.js";
-import { handleSelf } from "./tools/self.js";
-import { generateIdentityPrompt } from "./tools/identity-prompt.js";
+import { dispatchContinuityAction } from "./continuity/actions.js";
+import { getContinuityDbPath } from "./continuity/config.js";
+import { continuityActionSchema } from "./continuity/schema.js";
+import type { ContinuityActionInput } from "./continuity/schema.js";
+import { ContinuityStore } from "./continuity/store.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(
@@ -26,178 +18,80 @@ const pkg = JSON.parse(
 export const VERSION: string = pkg.version;
 
 export const TOOL_DESCRIPTIONS = {
-  reflect:
-    "End-of-session reflection. Records identity-relevant patterns (values, tendencies, recurring behaviors) — NOT project facts or one-time tasks. Concepts that recur across sessions get promoted to identity anchors. Stale single-observation concepts are auto-pruned. Call this at the end of each session.",
-  anchor:
-    'Write to a permanent identity file. Use "soul" for core truths, "self-state" for current state, "anchors" to append a grown identity pattern. Use sparingly for insights that should persist across all future sessions.',
-  self: "Query current identity state. Returns all three identity files (soul, self-state, anchors) and top observed patterns with scores. Use at session start to load context, or anytime to check current state.",
+  continuity:
+    "Local continuity memory database. Dispatch read and write actions for save, list, search, get, neighbors, node, related, doctor, bundle, merge, and delete against local storage.",
 } as const;
 
+export const TOOL_ANNOTATIONS = {
+  continuity: {
+    readOnlyHint: false,
+    destructiveHint: true,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
+} as const;
+
+export async function runContinuityTool(
+  store: ContinuityStore,
+  args: ContinuityActionInput,
+): Promise<{ content: Array<{ type: "text"; text: string }> }> {
+  const result = await dispatchContinuityAction(store, args);
+  return {
+    content: [{ type: "text", text: result.text }],
+  };
+}
+
 export function createServer(): McpServer {
-  migrateIfNeeded();
-  const store = new ObservationStore(getObservationsPath());
-  const identity = new IdentityManager(getIdentityDir());
-  identity.ensureFiles();
+  const store = new ContinuityStore(getContinuityDbPath());
 
   const server = new McpServer({
-    name: "identity",
+    name: "continuity",
     version: VERSION,
   });
 
   server.registerTool(
-    "reflect",
+    "continuity",
     {
-      title: "Reflect",
-      description: TOOL_DESCRIPTIONS.reflect,
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-      },
-      inputSchema: z.object({
-        concepts: z.array(
-          z.object({
-            name: z
-              .string()
-              .describe(
-                "An identity pattern (e.g. 'root-cause-analysis', 'tdd-discipline', 'honest-communication'). Use kebab-case. Avoid project-specific task names.",
-              ),
-            context: z
-              .string()
-              .describe(
-                "The context in which it was observed (e.g. 'debugging auth module', 'code review feedback')",
-              ),
-          }),
-        ),
-        session_summary: z
-          .string()
-          .optional()
-          .describe("Brief summary of the session to save as self-state"),
-        auto_promote: z
-          .boolean()
-          .optional()
-          .describe(
-            "If true, automatically promote concepts above threshold to identity anchors",
-          ),
-      }),
+      title: "Continuity",
+      description: TOOL_DESCRIPTIONS.continuity,
+      annotations: TOOL_ANNOTATIONS.continuity,
+      inputSchema: continuityActionSchema,
     },
-    async (args) => handleReflect(args, store, identity),
-  );
-
-  server.registerTool(
-    "anchor",
-    {
-      title: "Anchor",
-      description: TOOL_DESCRIPTIONS.anchor,
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: false,
-      },
-      inputSchema: z.object({
-        target: z
-          .enum(["soul", "self-state", "anchors"])
-          .describe("Which identity file to write to"),
-        content: z
-          .string()
-          .describe(
-            "The content to write (soul/self-state: full replacement, anchors: appended)",
-          ),
-      }),
-    },
-    async (args) => handleAnchor(args, identity),
-  );
-
-  server.registerTool(
-    "self",
-    {
-      title: "Self",
-      description: TOOL_DESCRIPTIONS.self,
-      annotations: {
-        readOnlyHint: true,
-        destructiveHint: false,
-        idempotentHint: true,
-      },
-      inputSchema: z.object({}),
-    },
-    async () => handleSelf({}, store, identity),
-  );
-
-  server.registerPrompt(
-    "identity",
-    {
-      title: "Identity Context",
-      description:
-        "Load your persistent identity — soul, self-state, anchors, and observed patterns. Use at session start.",
-    },
-    () => generateIdentityPrompt(store, identity),
+    runContinuityTool.bind(undefined, store),
   );
 
   return server;
 }
 
-// Auto-start when run directly (via node dist/index.js, npx memory-mcp, or tsx)
+// Auto-start when run directly (via node dist/index.js, claude-memory-mcp, or tsx)
+/* v8 ignore start */
 const entryScript = process.argv[1] ?? "";
 const isMainModule =
   entryScript.endsWith("index.js") ||
   entryScript.endsWith("index.ts") ||
-  entryScript.endsWith("memory-mcp");
+  entryScript.endsWith("memory-mcp") ||
+  entryScript.endsWith("claude-memory-mcp");
 if (isMainModule) {
-  migrateIfNeeded();
   const subcommand = process.argv[2];
   if (subcommand === "setup") {
     import("./cli.js").then(({ getSetupInstructions }) => {
       console.log(getSetupInstructions());
     });
-  } else if (subcommand === "reflect") {
-    const jsonArg = process.argv[3];
-    if (!jsonArg) {
-      console.error(
-        'Usage: memory-mcp reflect \'{"concepts":[{"name":"...","context":"..."}]}\' ',
-      );
-      process.exit(1);
-    }
-    import("./cli.js").then(async ({ runReflectCli }) => {
+  } else if (["self", "reflect", "anchor"].includes(subcommand ?? "")) {
+    console.error(
+      "This release replaces self/reflect/anchor with the continuity surface. See --help for save/list/search/get/neighbors/node/related/doctor/export/import/bundle/merge/delete.",
+    );
+    process.exit(1);
+  } else if (subcommand && subcommand !== "serve") {
+    import("./cli.js").then(async ({ runContinuityCli }) => {
       try {
-        const output = await runReflectCli(
-          jsonArg,
-          getObservationsPath(),
-          getIdentityDir(),
+        const output = await runContinuityCli(
+          process.argv.slice(2),
+          new ContinuityStore(getContinuityDbPath()),
         );
         console.log(output);
       } catch (err) {
-        console.error("Reflect failed:", err);
-        process.exit(1);
-      }
-    });
-  } else if (subcommand === "self") {
-    import("./cli.js").then(async ({ runSelfCli }) => {
-      try {
-        const output = await runSelfCli(
-          getObservationsPath(),
-          getIdentityDir(),
-        );
-        console.log(output);
-      } catch (err) {
-        console.error("Self failed:", err);
-        process.exit(1);
-      }
-    });
-  } else if (subcommand === "anchor") {
-    const target = process.argv[3];
-    const content = process.argv.slice(4).join(" ");
-    if (!target || !content) {
-      console.error(
-        "Usage: memory-mcp anchor <soul|self-state|anchors> <content>",
-      );
-      process.exit(1);
-    }
-    import("./cli.js").then(async ({ runAnchorCli }) => {
-      try {
-        const output = await runAnchorCli(target, content, getIdentityDir());
-        console.log(output);
-      } catch (err) {
-        console.error("Anchor failed:", err);
+        console.error("Continuity command failed:", err);
         process.exit(1);
       }
     });
@@ -207,11 +101,14 @@ if (isMainModule) {
     server
       .connect(transport)
       .then(() => {
-        console.error(`identity v${VERSION} ready (data: ${getDataDir()})`);
+        console.error(
+          `continuity v${VERSION} ready (db: ${getContinuityDbPath()})`,
+        );
       })
       .catch((err: unknown) => {
-        console.error("Failed to start identity server:", err);
+        console.error("Failed to start continuity server:", err);
         process.exit(1);
       });
   }
 }
+/* v8 ignore stop */

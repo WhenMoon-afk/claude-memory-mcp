@@ -23,12 +23,12 @@ describe("setup", () => {
   });
 
   describe("generateDesktopConfig", () => {
-    it("creates config with memory-mcp server entry", () => {
+    it("creates config with continuity server entry", () => {
       const config = generateDesktopConfig();
       expect(config.mcpServers).toBeDefined();
-      expect(config.mcpServers["identity"]).toBeDefined();
-      expect(config.mcpServers["identity"].command).toBe("npx");
-      expect(config.mcpServers["identity"].args).toContain(
+      expect(config.mcpServers["continuity"]).toBeDefined();
+      expect(config.mcpServers["continuity"].command).toBe("npx");
+      expect(config.mcpServers["continuity"].args).toContain(
         "@whenmoon-afk/memory-mcp",
       );
     });
@@ -44,20 +44,20 @@ describe("setup", () => {
       };
       const config = generateDesktopConfig(existing);
       expect(config.mcpServers["other-server"]).toBeDefined();
-      expect(config.mcpServers["identity"]).toBeDefined();
+      expect(config.mcpServers["continuity"]).toBeDefined();
     });
 
-    it("does not overwrite existing memory-mcp entry", () => {
+    it("does not overwrite an existing continuity entry", () => {
       const existing = {
         mcpServers: {
-          identity: {
+          continuity: {
             command: "custom",
             args: ["custom-path"],
           },
         },
       };
       const config = generateDesktopConfig(existing);
-      expect(config.mcpServers["identity"].command).toBe("custom");
+      expect(config.mcpServers["continuity"].command).toBe("custom");
     });
   });
 
