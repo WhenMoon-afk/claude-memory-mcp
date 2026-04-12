@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
 import { getSetupInstructions, runContinuityCli } from "./cli.js";
 import { ContinuityStore } from "./continuity/store.js";
+
+const NPX_BIN = platform() === "win32" ? "npx.cmd" : "npx";
 
 describe("cli", () => {
   let dir: string;
@@ -253,7 +255,7 @@ describe("cli", () => {
   describe("CLI entry point argument parsing", () => {
     it("save subcommand captures multi-word title and summary from flags", () => {
       const output = execFileSync(
-        "npx",
+        NPX_BIN,
         [
           "tsx",
           "src/index.ts",
@@ -280,7 +282,7 @@ describe("cli", () => {
 
     it("rejects deprecated identity subcommands", () => {
       const result = spawnSync(
-        "npx",
+        NPX_BIN,
         ["tsx", "src/index.ts", "reflect", "{}"],
         {
           cwd: join(import.meta.dirname!, ".."),

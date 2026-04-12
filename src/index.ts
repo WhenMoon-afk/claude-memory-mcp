@@ -48,6 +48,14 @@ export function createServer(): McpServer {
     name: "continuity",
     version: VERSION,
   });
+  const closeServer = server.close.bind(server);
+  server.close = async () => {
+    try {
+      await closeServer();
+    } finally {
+      store.close();
+    }
+  };
 
   server.registerTool(
     "continuity",

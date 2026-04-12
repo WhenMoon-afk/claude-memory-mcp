@@ -9,6 +9,7 @@ import { createServer } from "./index.js";
 describe("integration: continuity workflow", () => {
   let dir: string;
   let dbPath: string;
+  let server: ReturnType<typeof createServer> | undefined;
 
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "integration-test-"));
@@ -16,13 +17,15 @@ describe("integration: continuity workflow", () => {
     process.env["CLAUDE_MEMORY_DB_PATH"] = dbPath;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await server?.close();
+    server = undefined;
     delete process.env["CLAUDE_MEMORY_DB_PATH"];
     rmSync(dir, { recursive: true, force: true });
   });
 
   it("opens the continuity database on server creation", () => {
-    createServer();
+    server = createServer();
     expect(existsSync(dbPath)).toBe(true);
   });
 

@@ -42,10 +42,9 @@ describe("continuity config", () => {
     delete process.env["APPDATA"];
     process.env["XDG_DATA_HOME"] = "/tmp/xdg-data";
 
-    expect(getContinuityDataDir()).toBe("/tmp/xdg-data/claude-memory");
-    expect(getContinuityDbPath()).toBe(
-      "/tmp/xdg-data/claude-memory/continuity.db",
-    );
+    const expectedDataDir = join("/tmp/xdg-data", "claude-memory");
+    expect(getContinuityDataDir()).toBe(expectedDataDir);
+    expect(getContinuityDbPath()).toBe(join(expectedDataDir, "continuity.db"));
   });
 });
 
