@@ -46,6 +46,38 @@ describe("continuity config", () => {
     expect(getContinuityDataDir()).toBe(expectedDataDir);
     expect(getContinuityDbPath()).toBe(join(expectedDataDir, "continuity.db"));
   });
+
+  it("uses repo-local db_path when env path overrides are absent", () => {
+    const dir = mkdtempSync(join(tmpdir(), "continuity-project-config-"));
+    delete process.env["CLAUDE_MEMORY_DATA_DIR"];
+    delete process.env["CLAUDE_MEMORY_DB_PATH"];
+    writeFileSync(
+      join(dir, ".claude-memory.json"),
+      JSON.stringify({ db_path: ".claude-memory/continuity.db" }),
+    );
+
+    expect(getContinuityDbPath(dir)).toBe(
+      join(dir, ".claude-memory", "continuity.db"),
+    );
+
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("lets env path settings override repo-local db_path", () => {
+    const dir = mkdtempSync(join(tmpdir(), "continuity-project-config-"));
+    writeFileSync(
+      join(dir, ".claude-memory.json"),
+      JSON.stringify({ db_path: ".claude-memory/continuity.db" }),
+    );
+
+    process.env["CLAUDE_MEMORY_DATA_DIR"] = join(dir, "env-data");
+    expect(getContinuityDbPath(dir)).toBe(join(dir, "env-data", "continuity.db"));
+
+    process.env["CLAUDE_MEMORY_DB_PATH"] = join(dir, "direct.db");
+    expect(getContinuityDbPath(dir)).toBe(join(dir, "direct.db"));
+
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
 
 describe("readProjectConfig", () => {

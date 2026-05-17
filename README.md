@@ -203,10 +203,17 @@ Environment variables:
 - `CLAUDE_MEMORY_DB_PATH`: point directly at a database file
 
 When `CLAUDE_MEMORY_DB_PATH` is set, it wins over every directory setting. When
-only directory settings are present, `CLAUDE_MEMORY_DATA_DIR` wins first, then
-`XDG_DATA_HOME`, then `APPDATA`, then the home-directory fallback.
+only directory settings are present, `CLAUDE_MEMORY_DATA_DIR` wins first, then a
+repo-local `.claude-memory.json` `db_path`, then `XDG_DATA_HOME`, then
+`APPDATA`, then the home-directory fallback.
 
-If you want repo-local isolation, point `CLAUDE_MEMORY_DB_PATH` at a project-specific path when launching the server or CLI.
+If you want repo-local isolation, either point `CLAUDE_MEMORY_DB_PATH` at a
+project-specific path when launching the server or CLI, or add a
+`.claude-memory.json` file to the project root:
+
+```json
+{"db_path": ".claude-memory/continuity.db"}
+```
 
 ## Operational Commands
 
