@@ -66,6 +66,9 @@ describe("public docs and metadata", () => {
     expect(readFileSync("scripts/package-smoke.mjs", "utf-8")).toContain(
       "claude-memory-mcp\", \"--version",
     );
+    expect(readFileSync("scripts/package-smoke.mjs", "utf-8")).toContain(
+      "package\\/CLAUDE",
+    );
   });
 
   it("documents the v3 migration to the continuity surface", () => {

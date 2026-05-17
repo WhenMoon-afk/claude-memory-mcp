@@ -24,9 +24,11 @@ const forbiddenPatterns = [
   /^package\/dist\/.*\.fixtures\./,
   /^package\/dist\/tools\//,
   /^package\/\.github\//,
+  /^package\/CLAUDE\.md$/,
   /^package\/manifest\.json$/,
   /^package\/mcp-servers\.json$/,
   /^package\/CODEX-CRASH-NOTE-/,
+  /^package\/(RECOVERY|SESSION).*\.md$/,
   /^package\/.*\.mcpb$/,
 ];
 
