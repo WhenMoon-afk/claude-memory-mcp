@@ -94,6 +94,9 @@ describe("public docs and metadata", () => {
     expect(readme).toContain("npx -y @whenmoon-afk/memory-mcp save");
     expect(readme).toContain("npx -y @whenmoon-afk/memory-mcp setup");
     expect(readme).toContain("repo-local `.claude-memory.json` `db_path`");
+    expect(readFileSync("CLAUDE.md", "utf-8")).toContain(
+      "npx -y @whenmoon-afk/memory-mcp setup",
+    );
     expect(readme).toContain("Inspect nearby graph context");
     expect(readme).toContain("Create a resume bundle");
     expect(readme).toContain("## What This Is Not");

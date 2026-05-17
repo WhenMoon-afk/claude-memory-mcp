@@ -39,7 +39,7 @@ npm run test:coverage
 npm test
 npm run build
 npm run dev
-npx @whenmoon-afk/memory-mcp setup
+npx -y @whenmoon-afk/memory-mcp setup
 claude-memory-mcp serve
 ```
 
