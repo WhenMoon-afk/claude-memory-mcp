@@ -98,20 +98,26 @@ if (isDirectEntrypoint()) {
   if (subcommand === "--version" || subcommand === "-v") {
     console.log(VERSION);
   } else if (!subcommand || subcommand === "serve") {
-    const server = createServer();
-    const transport = new StdioServerTransport();
-    server
-      .connect(transport)
-      .then(() => {
-        console.error(
-          `continuity v${VERSION} ready (db: ${getContinuityDbPath()})`,
-        );
-      })
-      .catch(async (err: unknown) => {
-        console.error("Failed to start continuity server:", err);
-        await server.close();
-        process.exit(1);
-      });
+    try {
+      const server = createServer();
+      const transport = new StdioServerTransport();
+      server
+        .connect(transport)
+        .then(() => {
+          console.error(
+            `continuity v${VERSION} ready (db: ${getContinuityDbPath()})`,
+          );
+        })
+        .catch(async (err: unknown) => {
+          console.error("Failed to start continuity server:", err);
+          await server.close();
+          process.exit(1);
+        });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Failed to start continuity server: ${message}`);
+      process.exit(1);
+    }
   } else if (subcommand === "setup") {
     import("./cli.js").then(({ getSetupInstructions }) => {
       console.log(getSetupInstructions());
@@ -127,8 +133,9 @@ if (isDirectEntrypoint()) {
     process.exit(1);
   } else {
     import("./cli.js").then(async ({ runContinuityCli }) => {
-      const store = new ContinuityStore(getContinuityDbPath());
+      let store: ContinuityStore | undefined;
       try {
+        store = new ContinuityStore(getContinuityDbPath());
         const output = await runContinuityCli(process.argv.slice(2), store);
         console.log(output);
       } catch (err) {
@@ -136,7 +143,7 @@ if (isDirectEntrypoint()) {
         console.error(`Continuity command failed: ${message}`);
         process.exit(1);
       } finally {
-        store.close();
+        store?.close();
       }
     });
   }

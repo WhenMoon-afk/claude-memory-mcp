@@ -11,7 +11,12 @@ export function readProjectConfig(cwd: string): ProjectConfig | null {
   const path = join(cwd, ".claude-memory.json");
   if (!existsSync(path)) return null;
 
-  const parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf-8")) as unknown;
+  } catch {
+    throw new Error(`Invalid project config: ${path} must contain valid JSON.`);
+  }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
     return null;
   }

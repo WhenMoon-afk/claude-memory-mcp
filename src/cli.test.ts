@@ -482,6 +482,39 @@ describe("cli", () => {
       expect(existsSync(join(dir, "import-only.db"))).toBe(false);
     });
 
+    it("prints concise failures for malformed project-local config", () => {
+      const configDir = mkdtempSync(join(tmpdir(), "cli-project-config-"));
+      writeFileSync(join(configDir, ".claude-memory.json"), "{not json");
+
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--import",
+          pathToFileURL(
+            join(import.meta.dirname!, "..", "node_modules", "tsx", "dist", "loader.mjs"),
+          ).href,
+          join(import.meta.dirname!, "index.ts"),
+          "doctor",
+        ],
+        {
+          cwd: configDir,
+          env: {
+            ...process.env,
+            CLAUDE_MEMORY_DB_PATH: undefined,
+            CLAUDE_MEMORY_DATA_DIR: undefined,
+          },
+          encoding: "utf-8",
+          timeout: 10000,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain("Invalid project config:");
+      expect(result.stderr).not.toContain("SyntaxError");
+
+      rmSync(configDir, { recursive: true, force: true });
+    });
+
     it("exits non-zero for unknown entry point subcommands", () => {
       const result = spawnSync(
         process.execPath,

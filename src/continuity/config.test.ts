@@ -117,4 +117,15 @@ describe("readProjectConfig", () => {
 
     rmSync(dir, { recursive: true, force: true });
   });
+
+  it("reports malformed repo-local config with a concise error", () => {
+    const dir = mkdtempSync(join(tmpdir(), "continuity-project-config-"));
+    writeFileSync(join(dir, ".claude-memory.json"), "{not json");
+
+    expect(() => readProjectConfig(dir)).toThrow(
+      "Invalid project config:",
+    );
+
+    rmSync(dir, { recursive: true, force: true });
+  });
 });
