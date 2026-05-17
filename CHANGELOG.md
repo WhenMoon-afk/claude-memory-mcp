@@ -36,6 +36,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Tightened import validation for artifact id conventions, graph node id/key consistency, node kind prefixes, and export timestamps
 - Wired repo-local `.claude-memory.json` `db_path` into runtime database path resolution while preserving environment override precedence
 - Closed the MCP server and underlying SQLite store on SIGINT and SIGTERM shutdown
+- Made README `npx` examples non-interactive with `-y`
 
 ### Added
 

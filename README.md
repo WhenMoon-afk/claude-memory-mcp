@@ -86,7 +86,7 @@ Example tool calls:
 Record a project decision:
 
 ```bash
-npx @whenmoon-afk/memory-mcp save \
+npx -y @whenmoon-afk/memory-mcp save \
   --type decision \
   --title "Keep auth continuity local-first" \
   --summary "Use SQLite continuity artifacts instead of external sync for auth handoff." \
@@ -99,27 +99,27 @@ npx @whenmoon-afk/memory-mcp save \
 List compact project context:
 
 ```bash
-npx @whenmoon-afk/memory-mcp list --project notes-api
+npx -y @whenmoon-afk/memory-mcp list --project notes-api
 ```
 
 Inspect nearby graph context:
 
 ```bash
-npx @whenmoon-afk/memory-mcp node theme:authentication
-npx @whenmoon-afk/memory-mcp related dec-1 --via all
+npx -y @whenmoon-afk/memory-mcp node theme:authentication
+npx -y @whenmoon-afk/memory-mcp related dec-1 --via all
 ```
 
 Create a resume bundle:
 
 ```bash
-npx @whenmoon-afk/memory-mcp bundle --project notes-api
+npx -y @whenmoon-afk/memory-mcp bundle --project notes-api
 ```
 
 Back up and validate the continuity store before replacing anything:
 
 ```bash
-npx @whenmoon-afk/memory-mcp backup --file continuity-backup.json
-npx @whenmoon-afk/memory-mcp import --file continuity-backup.json --dry-run
+npx -y @whenmoon-afk/memory-mcp backup --file continuity-backup.json
+npx -y @whenmoon-afk/memory-mcp import --file continuity-backup.json --dry-run
 ```
 
 ## CLI
@@ -127,17 +127,17 @@ npx @whenmoon-afk/memory-mcp import --file continuity-backup.json --dry-run
 Use `npx` without installing globally:
 
 ```bash
-npx @whenmoon-afk/memory-mcp setup
-npx @whenmoon-afk/memory-mcp save --type snapshot --title "JWT auth pass" --summary "Middleware works" --project notes-api --theme authentication --entity jwt --next "Add password reset flow"
-npx @whenmoon-afk/memory-mcp list --project notes-api
-npx @whenmoon-afk/memory-mcp node theme:authentication
-npx @whenmoon-afk/memory-mcp related snap-1 --via all
-npx @whenmoon-afk/memory-mcp doctor
-npx @whenmoon-afk/memory-mcp backup --file continuity-backup.json
-npx @whenmoon-afk/memory-mcp export > continuity-export.json
-npx @whenmoon-afk/memory-mcp import --file continuity-export.json --dry-run
-npx @whenmoon-afk/memory-mcp import --file continuity-export.json
-npx @whenmoon-afk/memory-mcp get snap-1 --full
+npx -y @whenmoon-afk/memory-mcp setup
+npx -y @whenmoon-afk/memory-mcp save --type snapshot --title "JWT auth pass" --summary "Middleware works" --project notes-api --theme authentication --entity jwt --next "Add password reset flow"
+npx -y @whenmoon-afk/memory-mcp list --project notes-api
+npx -y @whenmoon-afk/memory-mcp node theme:authentication
+npx -y @whenmoon-afk/memory-mcp related snap-1 --via all
+npx -y @whenmoon-afk/memory-mcp doctor
+npx -y @whenmoon-afk/memory-mcp backup --file continuity-backup.json
+npx -y @whenmoon-afk/memory-mcp export > continuity-export.json
+npx -y @whenmoon-afk/memory-mcp import --file continuity-export.json --dry-run
+npx -y @whenmoon-afk/memory-mcp import --file continuity-export.json
+npx -y @whenmoon-afk/memory-mcp get snap-1 --full
 ```
 
 The CLI fails closed: unknown commands, unknown flags, missing or extra fixed-arity positionals, and ambiguous `--compact` / `--full` usage exit non-zero with concise help context.
