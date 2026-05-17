@@ -102,6 +102,23 @@ function assertKnownFlags(
   }
 }
 
+function assertNoPositionals(command: string, positionals: string[]): void {
+  if (positionals.length > 0) {
+    throw new Error(`${command} does not accept positional arguments`);
+  }
+}
+
+function getRequiredPositional(
+  command: string,
+  positionals: string[],
+  label: string,
+): string {
+  if (positionals.length !== 1) {
+    throw new Error(`${command} requires exactly one <${label}>`);
+  }
+  return positionals[0]!;
+}
+
 function renderCliHelp(): string {
   return [
     "Commands:",
@@ -146,6 +163,7 @@ export async function runContinuityCli(
       ["type", "title", "summary", "project", "theme", "entity", "next"],
       command,
     );
+    assertNoPositionals(command, positionals);
     const parsed = continuityActionSchema.parse({
       action: "save",
       type: getSingleValue(values, "type"),
@@ -161,6 +179,7 @@ export async function runContinuityCli(
 
   if (command === "list") {
     assertKnownFlags(values, ["project"], command);
+    assertNoPositionals(command, positionals);
     const parsed = continuityActionSchema.parse({
       action: "list",
       project: getSingleValue(values, "project"),
@@ -170,6 +189,9 @@ export async function runContinuityCli(
 
   if (command === "search") {
     assertKnownFlags(values, [], command);
+    if (positionals.length === 0) {
+      throw new Error("search requires <query>");
+    }
     const parsed = continuityActionSchema.parse({
       action: "search",
       query: positionals.join(" "),
@@ -179,9 +201,13 @@ export async function runContinuityCli(
 
   if (command === "get") {
     assertKnownFlags(values, ["compact", "full"], command);
+    if (values["compact"] && values["full"]) {
+      throw new Error("get accepts only one of --compact or --full");
+    }
+    const id = getRequiredPositional(command, positionals, "id");
     const parsed = continuityActionSchema.parse({
       action: "get",
-      id: positionals[0],
+      id,
       detail: values["full"] ? "full" : values["compact"] ? "compact" : undefined,
     });
     return (await dispatchContinuityAction(store, parsed)).text;
@@ -189,27 +215,30 @@ export async function runContinuityCli(
 
   if (command === "neighbors") {
     assertKnownFlags(values, [], command);
+    const id = getRequiredPositional(command, positionals, "id");
     const parsed = continuityActionSchema.parse({
       action: "neighbors",
-      id: positionals[0],
+      id,
     });
     return (await dispatchContinuityAction(store, parsed)).text;
   }
 
   if (command === "node") {
     assertKnownFlags(values, [], command);
+    const id = getRequiredPositional(command, positionals, "node-id");
     const parsed = continuityActionSchema.parse({
       action: "node",
-      id: positionals[0],
+      id,
     });
     return (await dispatchContinuityAction(store, parsed)).text;
   }
 
   if (command === "related") {
     assertKnownFlags(values, ["via"], command);
+    const id = getRequiredPositional(command, positionals, "id");
     const parsed = continuityActionSchema.parse({
       action: "related",
-      id: positionals[0],
+      id,
       via: getSingleValue(values, "via"),
     });
     return (await dispatchContinuityAction(store, parsed)).text;
@@ -217,6 +246,7 @@ export async function runContinuityCli(
 
   if (command === "doctor") {
     assertKnownFlags(values, [], command);
+    assertNoPositionals(command, positionals);
     const parsed = continuityActionSchema.parse({
       action: "doctor",
     });
@@ -225,11 +255,13 @@ export async function runContinuityCli(
 
   if (command === "export") {
     assertKnownFlags(values, [], command);
+    assertNoPositionals(command, positionals);
     return JSON.stringify(store.exportData(), null, 2);
   }
 
   if (command === "backup") {
     assertKnownFlags(values, ["file"], command);
+    assertNoPositionals(command, positionals);
     const file = getSingleValue(values, "file");
     if (!file) {
       throw new Error("backup requires --file <path>");
@@ -242,6 +274,7 @@ export async function runContinuityCli(
 
   if (command === "import") {
     assertKnownFlags(values, ["file", "dry-run"], command);
+    assertNoPositionals(command, positionals);
     const file = getSingleValue(values, "file");
     if (!file) {
       throw new Error("import requires --file <path>");
@@ -261,6 +294,7 @@ export async function runContinuityCli(
 
   if (command === "bundle") {
     assertKnownFlags(values, ["project"], command);
+    assertNoPositionals(command, positionals);
     const parsed = continuityActionSchema.parse({
       action: "bundle",
       project: getSingleValue(values, "project"),
@@ -281,9 +315,10 @@ export async function runContinuityCli(
 
   if (command === "delete") {
     assertKnownFlags(values, [], command);
+    const id = getRequiredPositional(command, positionals, "id");
     const parsed = continuityActionSchema.parse({
       action: "delete",
-      id: positionals[0],
+      id,
     });
     return (await dispatchContinuityAction(store, parsed)).text;
   }

@@ -206,9 +206,12 @@ If you want repo-local isolation, point `CLAUDE_MEMORY_DB_PATH` at a project-spe
 
 ## Operational Commands
 
-These commands are CLI-only and are meant for local maintenance rather than in-agent retrieval:
+These commands are meant for local maintenance rather than routine in-agent retrieval:
 
 - `claude-memory-mcp doctor`: reports schema version, SQLite integrity, and row counts
+
+These data-transfer commands are CLI-only:
+
 - `claude-memory-mcp export`: writes a versioned JSON export envelope to stdout
 - `claude-memory-mcp backup --file <path>`: writes the same export envelope to a file
 - `claude-memory-mcp import --file <path> --dry-run`: validates an export envelope without changing the current store

@@ -19,6 +19,7 @@ describe("public docs and metadata", () => {
       scripts: Record<string, string>;
       files: string[];
       keywords: string[];
+      overrides: Record<string, string>;
     };
 
     expect(pkg.bin["claude-memory-mcp"]).toBe("dist/index.js");
@@ -31,6 +32,8 @@ describe("public docs and metadata", () => {
     expect(pkg.keywords).toContain("local-first");
     expect(pkg.keywords).toContain("local-memory");
     expect(pkg.keywords).toContain("ai-memory");
+    expect(pkg.overrides["express-rate-limit"]).toBe("^8.5.2");
+    expect(pkg.overrides["hono"]).toBe("^4.12.19");
     expect(pkg.scripts["release:check"]).toContain("npm audit --omit=dev");
     expect(pkg.scripts["release:check"]).toContain("npm run check");
     expect(pkg.scripts["release:check"]).toContain("npm run test:coverage");
@@ -40,6 +43,7 @@ describe("public docs and metadata", () => {
     expect(pkg.scripts["prepublishOnly"]).toBe("npm run clean && npm run release:check");
     expect(pkg.scripts["test:package-smoke"]).toBe("node scripts/package-smoke.mjs");
     expect(pkg.scripts["clean"]).toBe("node scripts/clean.mjs");
+    expect(pkg.scripts["release"]).toBeUndefined();
     expect(pkg.files).toContain("CONTRACT.md");
     expect(pkg.files).toContain("CHANGELOG.md");
     expect(pkg.files).toContain("RELEASE.md");
@@ -77,12 +81,14 @@ describe("public docs and metadata", () => {
     expect(readme).toContain("backup");
     expect(readme).toContain("--dry-run");
     expect(readme).toContain("import");
+    expect(readme).toContain("These data-transfer commands are CLI-only");
     expect(readme).toContain("`get` | Load one artifact in `compact` or `full` form");
     expect(readme).not.toContain("or rendered form");
     expect(contract).toContain("Schema Version");
     expect(contract).toContain("Stable Surface");
     expect(contract).toContain("claude-memory-continuity-export");
     expect(contract).toContain("dry-run import validation");
+    expect(contract).toContain("Operational data-transfer commands are CLI-only");
     expect(contract).toContain("- `project`");
     expect(contract).toContain("- `theme`");
     expect(contract).toContain("- `entity`");

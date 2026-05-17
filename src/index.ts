@@ -7,7 +7,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dispatchContinuityAction } from "./continuity/actions.js";
 import { getContinuityDbPath } from "./continuity/config.js";
-import { continuityActionSchema } from "./continuity/schema.js";
+import {
+  continuityActionSchema,
+  continuityToolInputSchema,
+} from "./continuity/schema.js";
 import type { ContinuityActionInput } from "./continuity/schema.js";
 import { ContinuityStore } from "./continuity/store.js";
 
@@ -63,9 +66,9 @@ export function createServer(): McpServer {
       title: "Continuity",
       description: TOOL_DESCRIPTIONS.continuity,
       annotations: TOOL_ANNOTATIONS.continuity,
-      inputSchema: continuityActionSchema,
+      inputSchema: continuityToolInputSchema,
     },
-    runContinuityTool.bind(undefined, store),
+    async (args) => runContinuityTool(store, continuityActionSchema.parse(args)),
   );
 
   return server;

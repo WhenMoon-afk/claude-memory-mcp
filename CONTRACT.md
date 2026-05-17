@@ -24,9 +24,12 @@ The continuity MCP tool is intentionally compact and dispatch-style. Supported a
 - `merge`
 - `delete`
 
-Operational data-transfer commands are CLI-only:
+Operational maintenance commands:
 
 - `doctor`
+
+Operational data-transfer commands are CLI-only:
+
 - `export`
 - `backup --file <path>`
 - `import --file <path>`

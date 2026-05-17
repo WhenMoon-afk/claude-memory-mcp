@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
 import { runNpm } from "./npm-invocation.mjs";
@@ -117,6 +117,32 @@ try {
 
   if (!packageJson.keywords?.includes("local-memory")) {
     fail("Expected package keywords to include local-memory");
+  }
+
+  const installDir = mkdtempSync(join(tmpdir(), "memory-mcp-package-install-"));
+  try {
+    writeFileSync(join(installDir, "package.json"), '{"private":true}\n');
+    runNpm(["install", "--ignore-scripts", "--no-audit", "--no-fund", archivePath], {
+      execFileSync,
+      cwd: installDir,
+      stdio: "inherit",
+    });
+
+    const setupOutput = runNpm(["exec", "--", "claude-memory-mcp", "setup"], {
+      execFileSync,
+      cwd: installDir,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CLAUDE_MEMORY_DATA_DIR: join(installDir, "data"),
+      },
+    });
+
+    if (!setupOutput.includes("Continuity MCP")) {
+      fail("Installed claude-memory-mcp binary did not print setup instructions");
+    }
+  } finally {
+    rmSync(installDir, { recursive: true, force: true });
   }
 } finally {
   rmSync(packDir, { recursive: true, force: true });

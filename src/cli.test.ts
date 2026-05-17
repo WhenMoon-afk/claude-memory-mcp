@@ -130,6 +130,37 @@ describe("cli", () => {
       ).rejects.toThrow("Unknown flag --titel for save");
     });
 
+    it("rejects ambiguous get detail flags", async () => {
+      await runContinuityCli(
+        [
+          "save",
+          "--type",
+          "snapshot",
+          "--title",
+          "JWT auth pass",
+          "--summary",
+          "Middleware works",
+        ],
+        store,
+      );
+
+      await expect(
+        runContinuityCli(["get", "snap-1", "--compact", "--full"], store),
+      ).rejects.toThrow("get accepts only one of --compact or --full");
+    });
+
+    it("rejects missing or extra positional arguments for fixed-arity commands", async () => {
+      await expect(runContinuityCli(["search"], store)).rejects.toThrow(
+        "search requires <query>",
+      );
+      await expect(runContinuityCli(["get", "snap-1", "extra"], store)).rejects.toThrow(
+        "get requires exactly one <id>",
+      );
+      await expect(
+        runContinuityCli(["delete", "snap-1", "extra"], store),
+      ).rejects.toThrow("delete requires exactly one <id>");
+    });
+
     it("accepts theme and entity flags for graph-aware saves", async () => {
       await runContinuityCli(
         [

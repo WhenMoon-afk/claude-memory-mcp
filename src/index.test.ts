@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
@@ -54,6 +56,40 @@ describe("createServer", () => {
     ]);
 
     store.close();
+  });
+
+  it("advertises the continuity action schema to MCP clients", async () => {
+    server = createServer();
+    const client = new Client({ name: "schema-test-client", version: "1.0.0" });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+
+    const tools = await client.listTools();
+    const continuity = tools.tools.find((tool) => tool.name === "continuity");
+
+    expect(continuity?.inputSchema.properties).toMatchObject({
+      action: expect.objectContaining({
+        enum: expect.arrayContaining(["save", "list", "search", "get", "doctor"]),
+      }),
+      id: expect.any(Object),
+      query: expect.any(Object),
+      title: expect.any(Object),
+    });
+    expect(continuity?.inputSchema.required).toEqual(["action"]);
+
+    const result = await client.callTool({
+      name: "continuity",
+      arguments: { action: "doctor" },
+    });
+    expect(result.content).toEqual([
+      {
+        type: "text",
+        text: expect.stringContaining("\"schema_version\": 1"),
+      },
+    ]);
+
+    await client.close();
   });
 });
 
