@@ -29,7 +29,7 @@ Run the release verification command:
 npm run release:check
 ```
 
-This runs runtime dependency audit, typecheck, tests, build, smoke setup, coverage thresholds, and package smoke verification.
+This runs runtime dependency audit, typecheck, tests, build, smoke setup, coverage thresholds, and package smoke verification, including installing the generated tarball into a temporary project with normal dependency lifecycle scripts and running the packaged `claude-memory-mcp` binary.
 
 ## Schema and Contract Changes
 

@@ -39,7 +39,7 @@ This runs:
 - build
 - setup smoke test
 - coverage thresholds
-- package smoke test
+- package smoke test, including a generated tarball install with normal dependency lifecycle scripts and packaged binary execution
 
 Inspect the package contents without publishing:
 
@@ -64,6 +64,8 @@ The GitHub Actions publish workflow validates that the tag matches `package.json
 ```bash
 npm publish --provenance --access public
 ```
+
+The publish job uses the `npm-publish` GitHub Environment. Configure that environment with required reviewers so a tag push can validate the release without publishing to npm until the approval gate is satisfied.
 
 After publishing, verify the registry:
 

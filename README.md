@@ -68,6 +68,8 @@ The server exposes a single dispatch-style tool:
 | `merge` | Synthesize a new artifact from multiple prior artifacts |
 | `delete` | Remove an artifact by id |
 
+The tool advertises an SDK input schema so clients can discover the required `action` field. Action-specific fields stay optional at listing time, and the server validates the selected action before dispatch.
+
 Example tool calls:
 
 ```json
@@ -137,6 +139,8 @@ npx @whenmoon-afk/memory-mcp import --file continuity-export.json --dry-run
 npx @whenmoon-afk/memory-mcp import --file continuity-export.json
 npx @whenmoon-afk/memory-mcp get snap-1 --full
 ```
+
+The CLI fails closed: unknown commands, unknown flags, missing or extra fixed-arity positionals, and ambiguous `--compact` / `--full` usage exit non-zero with concise help context.
 
 If you install globally, the supported binary is `claude-memory-mcp`:
 

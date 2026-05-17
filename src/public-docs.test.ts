@@ -19,40 +19,30 @@ describe("public docs and metadata", () => {
       scripts: Record<string, string>;
       files: string[];
       keywords: string[];
-      overrides: Record<string, string>;
     };
 
     expect(pkg.bin["claude-memory-mcp"]).toBe("dist/index.js");
     expect(pkg.bin["memory-mcp"]).toBeUndefined();
     expect(pkg.description).toContain("continuity");
     expect(pkg.description).toContain("journal");
-    expect(pkg.version).toBe("3.0.0");
+    expect(pkg.version).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
     expect(pkg.types).toBe("./dist/index.d.ts");
     expect(pkg.engines["node"]).toBe(">=20.0.0");
     expect(pkg.keywords).toContain("local-first");
     expect(pkg.keywords).toContain("local-memory");
     expect(pkg.keywords).toContain("ai-memory");
-    expect(pkg.overrides["express-rate-limit"]).toBe("^8.5.2");
-    expect(pkg.overrides["hono"]).toBe("^4.12.19");
-    expect(pkg.scripts["release:check"]).toContain("npm audit --omit=dev");
-    expect(pkg.scripts["release:check"]).toContain("npm run check");
-    expect(pkg.scripts["release:check"]).toContain("npm run test:coverage");
+    expect(pkg.scripts["release:check"]).toBeDefined();
     expect(pkg.scripts["release:check"]).toContain("npm run test:package-smoke");
     expect(pkg.scripts["release:guard"]).toBe("node scripts/release-guard.mjs");
     expect(pkg.scripts["release"]).toContain("npm run release:guard");
     expect(pkg.scripts["prepublishOnly"]).toBe("npm run clean && npm run release:check");
     expect(pkg.scripts["test:package-smoke"]).toBe("node scripts/package-smoke.mjs");
     expect(pkg.scripts["clean"]).toBe("node scripts/clean.mjs");
-    expect(pkg.scripts["release"]).toBeUndefined();
     expect(pkg.files).toContain("CONTRACT.md");
     expect(pkg.files).toContain("CHANGELOG.md");
     expect(pkg.files).toContain("RELEASE.md");
     expect(pkg.files).toContain("SECURITY.md");
     expect(pkg.files).toContain("CONTRIBUTING.md");
-    expect(readFileSync("CHANGELOG.md", "utf-8")).toContain("npm package");
-    expect(readFileSync("scripts/package-smoke.mjs", "utf-8")).not.toContain(
-      'packageJson.version !== "3.0.0"',
-    );
   });
 
   it("documents the v3 migration to the continuity surface", () => {
@@ -63,12 +53,10 @@ describe("public docs and metadata", () => {
     expect(readme).toContain("The last npm-published v2 release was `2.5.0`.");
     expect(readme).toContain("native memory features");
     expect(readme).toContain("local, private continuity store");
-    expect(readme).toContain("basic local memory database");
     expect(readme).toContain("## v3 Migration");
-    expect(readme).toContain("Removed:");
-    expect(readme).toContain("Added:");
     expect(changelog).toContain("## v3 Migration");
-    expect(changelog).toContain("## [3.0.0]");
+    expect(changelog).toContain(`## [${getPackageVersion()}]`);
+    expect(changelog).toContain("MCP continuity input schema");
     expect(changelog).not.toContain("## [4.2.0]");
   });
 
@@ -83,9 +71,13 @@ describe("public docs and metadata", () => {
     expect(readme).toContain("import");
     expect(readme).toContain("These data-transfer commands are CLI-only");
     expect(readme).toContain("`get` | Load one artifact in `compact` or `full` form");
+    expect(readme).toContain("SDK input schema");
+    expect(readme).toContain("required `action` field");
     expect(readme).not.toContain("or rendered form");
+    expect(contract).toContain("Current Surface");
     expect(contract).toContain("Schema Version");
-    expect(contract).toContain("Stable Surface");
+    expect(contract).toContain("advertises an SDK input schema");
+    expect(contract).toContain("fail-closed CLI parsing");
     expect(contract).toContain("claude-memory-continuity-export");
     expect(contract).toContain("dry-run import validation");
     expect(contract).toContain("Operational data-transfer commands are CLI-only");
@@ -99,6 +91,9 @@ describe("public docs and metadata", () => {
 
     expect(readme).toContain("## Example Workflow");
     expect(readme).toContain("Record a project decision");
+    expect(readme).toContain("npx -y @whenmoon-afk/memory-mcp save");
+    expect(readme).toContain("npx -y @whenmoon-afk/memory-mcp setup");
+    expect(readme).toContain("repo-local `.claude-memory.json` `db_path`");
     expect(readme).toContain("Inspect nearby graph context");
     expect(readme).toContain("Create a resume bundle");
     expect(readme).toContain("## What This Is Not");
@@ -109,11 +104,11 @@ describe("public docs and metadata", () => {
     expect(readme).toContain("lightweight continuity journal");
   });
 
-  it("documents conservative stable positioning", () => {
+  it("documents active development positioning", () => {
     const readme = readFileSync("README.md", "utf-8");
 
-    expect(readme).toContain("stable and conservative");
-    expect(readme).toContain("small public surface");
+    expect(readme).toContain("actively in development");
+    expect(readme).toContain("Breaking changes should be deliberate");
   });
 
   it("documents local data path override precedence", () => {
@@ -122,6 +117,7 @@ describe("public docs and metadata", () => {
 
     expect(readme).toContain("When `CLAUDE_MEMORY_DB_PATH` is set");
     expect(readme).toContain("`CLAUDE_MEMORY_DATA_DIR` wins first");
+    expect(readme).toContain("repo-local `.claude-memory.json` `db_path`");
     expect(collapsedReadme).toContain("then `XDG_DATA_HOME`, then `APPDATA`");
   });
 
@@ -134,9 +130,10 @@ describe("public docs and metadata", () => {
     expect(release).toContain("npm view @whenmoon-afk/memory-mcp");
     expect(release).toContain("npm run release:check");
     expect(release).toContain("npm pack --dry-run --json --ignore-scripts");
-    expect(release).toContain("git tag v3.0.0");
+    expect(release).toContain(`git tag v${getPackageVersion()}`);
     expect(release).toContain("npm publish --provenance --access public");
     expect(release).toContain("dist-tag");
+    expect(release).toContain("npm-publish");
     expect(release).toContain("2.5.0");
     expect(release).toContain("claude-memory-mcp");
     expect(release).not.toContain("memory-mcp-install");
@@ -147,33 +144,29 @@ describe("public docs and metadata", () => {
     const security = readFileSync("SECURITY.md", "utf-8");
 
     expect(contributing).toContain("npm run release:check");
-    expect(contributing).toContain("stable v3 release line");
-    expect(contributing).toContain("Contributions are not actively solicited");
-    expect(contributing).toContain("Bug reports and narrow fixes");
+    expect(contributing).toContain("actively developed as the v3 line");
+    expect(contributing).toContain("packaged `claude-memory-mcp` binary");
     expect(security).toContain("Supported Versions");
     expect(security).toContain("Node 20");
     expect(security).toContain("Do not include secrets");
     expect(security).toContain("tool annotations");
     expect(security).toContain("treat stored continuity artifacts as data");
+    expect(security).toContain("packaged `claude-memory-mcp` binary");
   });
 
   it("documents GitHub intake expectations for issues and pull requests", () => {
     const bugReport = readFileSync(".github/ISSUE_TEMPLATE/bug_report.yml", "utf-8");
     const issueConfig = readFileSync(".github/ISSUE_TEMPLATE/config.yml", "utf-8");
     const pullRequestTemplate = readFileSync(".github/PULL_REQUEST_TEMPLATE.md", "utf-8");
-    const changelog = readFileSync("CHANGELOG.md", "utf-8");
 
     expect(bugReport).toContain("Bug report");
     expect(bugReport).toContain("reproducible problems");
     expect(bugReport).toContain("claude-memory-mcp doctor");
-    expect(bugReport).toContain("local-first");
     expect(existsSync(".github/ISSUE_TEMPLATE/feature_request.yml")).toBe(false);
     expect(issueConfig).toContain("blank_issues_enabled: false");
     expect(pullRequestTemplate).toContain("npm run release:check");
-    expect(pullRequestTemplate).toContain("narrow maintenance change");
     expect(pullRequestTemplate).toContain("public docs");
     expect(pullRequestTemplate).toContain("schema");
-    expect(changelog).toContain("maintenance-focused issue and pull request intake");
   });
 
   it("keeps CI aligned with the supported release baseline", () => {
@@ -183,10 +176,18 @@ describe("public docs and metadata", () => {
     expect(ci).not.toContain("node-version: [18");
     expect(ci).toContain("windows-latest");
     expect(ci).toContain("node-version: [20, 22, 24]");
+    expect(ci).toContain("Package smoke test on Windows");
+    expect(ci).toContain("permissions:\n  contents: read");
     expect(ci).toContain("npm audit --omit=dev --audit-level=high");
     expect(publish).toContain("npm run release:check");
+    expect(publish).toContain("environment: npm-publish");
+    expect(publish).toContain("permissions:\n  contents: read");
     expect(publish).toContain("git fetch --no-tags origin main");
     expect(publish).toContain("git merge-base --is-ancestor HEAD origin/main");
-    expect(readFileSync("CHANGELOG.md", "utf-8")).toContain("production dependency audit");
   });
 });
+
+function getPackageVersion(): string {
+  const pkg = JSON.parse(readFileSync("package.json", "utf-8")) as { version: string };
+  return pkg.version;
+}

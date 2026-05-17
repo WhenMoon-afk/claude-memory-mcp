@@ -122,7 +122,7 @@ try {
   const installDir = mkdtempSync(join(tmpdir(), "memory-mcp-package-install-"));
   try {
     writeFileSync(join(installDir, "package.json"), '{"private":true}\n');
-    runNpm(["install", "--ignore-scripts", "--no-audit", "--no-fund", archivePath], {
+    runNpm(["install", "--no-audit", "--no-fund", archivePath], {
       execFileSync,
       cwd: installDir,
       stdio: "inherit",

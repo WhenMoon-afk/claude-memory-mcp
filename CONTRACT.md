@@ -24,6 +24,8 @@ The continuity MCP tool is intentionally compact and dispatch-style. Supported a
 - `merge`
 - `delete`
 
+The `continuity` tool advertises an SDK input schema for client and tool-listing discovery. `action` is required at the schema boundary, action-specific fields remain optional at listing time, and runtime validation still enforces the discriminated action contract before dispatch.
+
 Operational maintenance commands:
 
 - `doctor`
@@ -127,6 +129,7 @@ The following are intended to be stable within `v3`:
 - MCP action names
 - export envelope format id and versioning behavior
 - dry-run import validation before data replacement
+- fail-closed CLI parsing for unknown commands, unknown flags, missing or extra fixed-arity positionals, and ambiguous compact/full retrieval flags
 
 The following may evolve without being considered a breaking schema change:
 

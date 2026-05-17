@@ -32,6 +32,8 @@ Out of scope:
 
 The project keeps runtime dependencies small and uses `npm audit --omit=dev --audit-level=high` as part of `npm run release:check`.
 
+The release gate also installs the generated npm tarball into a temporary project with normal dependency lifecycle scripts and runs the packaged `claude-memory-mcp` binary, so packaging regressions are checked before publish.
+
 When a transitive dependency has a fix but the direct dependency has not adopted it yet, the preferred order is:
 
 - upgrade the direct dependency
