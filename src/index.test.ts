@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { ContinuityStore } from "./continuity/store.js";
 import {
+  createShutdownHandler,
   createServer,
   isDirectEntrypoint,
   runContinuityTool,
@@ -119,6 +120,29 @@ describe("isDirectEntrypoint", () => {
 
     expect(isDirectEntrypoint(modulePath, modulePath)).toBe(true);
     expect(isDirectEntrypoint(join(dirForEntrypoint(), "app", "index.js"), modulePath)).toBe(false);
+  });
+});
+
+describe("createShutdownHandler", () => {
+  it("closes the server once before exiting", async () => {
+    let closeCount = 0;
+    let exitCode: number | undefined;
+    const shutdown = createShutdownHandler(
+      {
+        close: async () => {
+          closeCount++;
+        },
+      },
+      (code) => {
+        exitCode = code;
+      },
+    );
+
+    await shutdown();
+    await shutdown();
+
+    expect(closeCount).toBe(1);
+    expect(exitCode).toBe(0);
   });
 });
 

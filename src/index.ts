@@ -91,6 +91,24 @@ export function isDirectEntrypoint(
   }
 }
 
+export function createShutdownHandler(
+  server: Pick<McpServer, "close">,
+  exit: (code: number) => never | void = process.exit,
+): () => Promise<void> {
+  let closing = false;
+  return async () => {
+    if (closing) {
+      return;
+    }
+    closing = true;
+    try {
+      await server.close();
+    } finally {
+      exit(0);
+    }
+  };
+}
+
 // Auto-start when run directly (via node dist/index.js, claude-memory-mcp, or tsx)
 /* v8 ignore start */
 if (isDirectEntrypoint()) {
@@ -101,6 +119,9 @@ if (isDirectEntrypoint()) {
     try {
       const server = createServer();
       const transport = new StdioServerTransport();
+      const shutdown = createShutdownHandler(server);
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
       server
         .connect(transport)
         .then(() => {
