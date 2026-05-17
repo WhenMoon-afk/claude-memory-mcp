@@ -7,6 +7,7 @@ import { runNpm } from "./npm-invocation.mjs";
 
 const requiredFiles = [
   "package/dist/index.js",
+  "package/dist/index.d.ts",
   "package/README.md",
   "package/CONTRACT.md",
   "package/CHANGELOG.md",

@@ -43,6 +43,26 @@ describe("public docs and metadata", () => {
     expect(pkg.files).toContain("RELEASE.md");
     expect(pkg.files).toContain("SECURITY.md");
     expect(pkg.files).toContain("CONTRIBUTING.md");
+    expect(readFileSync("CHANGELOG.md", "utf-8")).toContain("npm package");
+    expect(readFileSync("CHANGELOG.md", "utf-8")).toContain(
+      "MCP continuity input schema",
+    );
+    expect(readFileSync("CHANGELOG.md", "utf-8")).toContain("unknown flags");
+    expect(readFileSync("CHANGELOG.md", "utf-8")).toContain(
+      "install the generated tarball",
+    );
+    expect(readFileSync("CHANGELOG.md", "utf-8")).toContain(
+      "normal dependency lifecycle scripts",
+    );
+    expect(readFileSync("scripts/package-smoke.mjs", "utf-8")).not.toContain(
+      'packageJson.version !== "3.0.0"',
+    );
+    expect(readFileSync("scripts/package-smoke.mjs", "utf-8")).not.toContain(
+      '"install", "--ignore-scripts"',
+    );
+    expect(readFileSync("scripts/package-smoke.mjs", "utf-8")).toContain(
+      "package/dist/index.d.ts",
+    );
   });
 
   it("documents the v3 migration to the continuity surface", () => {

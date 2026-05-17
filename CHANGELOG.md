@@ -39,6 +39,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Made README and CLAUDE setup `npx` examples non-interactive with `-y`
 - Limited default GitHub workflow permissions to read-only, with publish permissions scoped to the release job
 - Ensured CLI command failures set an exit code after the local store cleanup path can run
+- Required generated TypeScript declarations in the npm package smoke check
 
 ### Added
 
