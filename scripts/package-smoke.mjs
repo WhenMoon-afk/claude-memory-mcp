@@ -142,6 +142,18 @@ try {
     if (!setupOutput.includes("Continuity MCP")) {
       fail("Installed claude-memory-mcp binary did not print setup instructions");
     }
+
+    const versionOutput = runNpm(["exec", "--", "claude-memory-mcp", "--version"], {
+      execFileSync,
+      cwd: installDir,
+      encoding: "utf8",
+    }).trim();
+
+    if (versionOutput !== expectedPackageJson.version) {
+      fail(
+        `Installed claude-memory-mcp binary reported version ${versionOutput}, expected ${expectedPackageJson.version}`,
+      );
+    }
   } finally {
     rmSync(installDir, { recursive: true, force: true });
   }
