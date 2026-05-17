@@ -54,7 +54,7 @@ Do not claim work is complete without a fresh verification run.
 ## Storage Rules
 
 - Default database path: `~/.local/share/claude-memory/continuity.db` on Unix-like systems, `%APPDATA%\claude-memory\continuity.db` on Windows
-- Override with `CLAUDE_MEMORY_DATA_DIR` or `CLAUDE_MEMORY_DB_PATH`
+- Override with `CLAUDE_MEMORY_DB_PATH`, `CLAUDE_MEMORY_DATA_DIR`, or repo-local `.claude-memory.json` `db_path`
 - Keep storage local-first and inspectable
 - Progressive disclosure is intentional: list/search/neighbors stay compact, full expansion is explicit
 

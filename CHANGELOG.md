@@ -41,6 +41,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Ensured CLI command failures set an exit code after the local store cleanup path can run
 - Required generated TypeScript declarations in the npm package smoke check
 - Exercised the installed package binary `--version` path during package smoke
+- Updated CLAUDE storage guidance for repo-local `.claude-memory.json` `db_path`
 
 ### Added
 
