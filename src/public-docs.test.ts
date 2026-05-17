@@ -184,6 +184,7 @@ describe("public docs and metadata", () => {
     expect(publish).toContain("permissions:\n  contents: read");
     expect(publish).toContain("git fetch --no-tags origin main");
     expect(publish).toContain("git merge-base --is-ancestor HEAD origin/main");
+    expect(readFileSync("CHANGELOG.md", "utf-8")).toContain("production dependency audit");
   });
 });
 
