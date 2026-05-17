@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { ContinuityStore } from "./continuity/store.js";
 import {
   createServer,
+  isDirectEntrypoint,
   runContinuityTool,
   TOOL_ANNOTATIONS,
   TOOL_DESCRIPTIONS,
@@ -111,6 +112,19 @@ describe("TOOL_ANNOTATIONS", () => {
     });
   });
 });
+
+describe("isDirectEntrypoint", () => {
+  it("only treats the actual module path as direct execution", () => {
+    const modulePath = join(dirForEntrypoint(), "dist", "index.js");
+
+    expect(isDirectEntrypoint(modulePath, modulePath)).toBe(true);
+    expect(isDirectEntrypoint(join(dirForEntrypoint(), "app", "index.js"), modulePath)).toBe(false);
+  });
+});
+
+function dirForEntrypoint(): string {
+  return dirname(fileURLToPath(import.meta.url));
+}
 
 describe("VERSION", () => {
   it("matches package.json version", () => {

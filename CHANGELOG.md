@@ -30,6 +30,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Tightened CLI argument validation for unknown flags, missing positional ids, ambiguous compact/full modes, and unknown commands
 - Hardened package smoke verification to install the generated tarball in a temporary project with normal dependency lifecycle scripts and execute the packaged binary
 - Refreshed maintenance dependencies and kept release verification on the supported Node 20 and TypeScript 5 lines
+- Fixed direct-entrypoint detection so importing the package from another `index.js` file cannot accidentally start the CLI or stdio server
+- Kept CLI help side-effect free by printing help before opening the local SQLite store
+- Tightened import validation for artifact id conventions, graph node id/key consistency, node kind prefixes, and export timestamps
 
 ### Added
 

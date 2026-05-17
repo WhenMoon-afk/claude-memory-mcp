@@ -248,6 +248,26 @@ describe("ContinuityStore", () => {
     ]);
   });
 
+  it("rejects imports with artifact ids that do not match type and seq", () => {
+    store.saveArtifact({
+      type: "snapshot",
+      title: "Existing continuity",
+      summary: "Keep this data intact",
+    });
+    const incoming = store.exportData();
+    incoming.artifacts[0] = {
+      ...incoming.artifacts[0]!,
+      id: "snap-3",
+    };
+
+    expect(() => store.importData(incoming)).toThrow(
+      "Invalid continuity export: artifacts[0].id does not match type and seq.",
+    );
+    expect(store.listArtifacts()).toEqual([
+      expect.objectContaining({ id: "snap-1", label: "Existing continuity" }),
+    ]);
+  });
+
   it("rejects imports with dangling graph references before replacement", () => {
     store.saveArtifact({
       type: "snapshot",
@@ -290,6 +310,65 @@ describe("ContinuityStore", () => {
 
     expect(() => store.importData(incoming)).toThrow(
       "Invalid continuity export: nodes[1].kind",
+    );
+    expect(store.listArtifacts()).toEqual([
+      expect.objectContaining({ id: "snap-1", label: "Existing continuity" }),
+    ]);
+  });
+
+  it("rejects imports with graph node ids that do not match their keys", () => {
+    store.saveArtifact({
+      type: "snapshot",
+      title: "Existing continuity",
+      summary: "Keep this data intact",
+      themes: ["auth"],
+    });
+    const incoming = store.exportData();
+    incoming.nodes[0] = {
+      ...incoming.nodes[0]!,
+      id: "theme:stored",
+    };
+
+    expect(() => store.importData(incoming)).toThrow(
+      "Invalid continuity export: nodes[0].id must match nodes[0].key.",
+    );
+    expect(store.listArtifacts()).toEqual([
+      expect.objectContaining({ id: "snap-1", label: "Existing continuity" }),
+    ]);
+  });
+
+  it("rejects imports with graph node ids that do not match their kind prefix", () => {
+    store.saveArtifact({
+      type: "snapshot",
+      title: "Existing continuity",
+      summary: "Keep this data intact",
+      themes: ["auth"],
+    });
+    const incoming = store.exportData();
+    incoming.nodes[0] = {
+      ...incoming.nodes[0]!,
+      kind: "entity",
+    };
+
+    expect(() => store.importData(incoming)).toThrow(
+      "Invalid continuity export: nodes[0].id must start with entity:.",
+    );
+    expect(store.listArtifacts()).toEqual([
+      expect.objectContaining({ id: "snap-1", label: "Existing continuity" }),
+    ]);
+  });
+
+  it("rejects imports with missing export timestamps", () => {
+    store.saveArtifact({
+      type: "snapshot",
+      title: "Existing continuity",
+      summary: "Keep this data intact",
+    });
+    const incoming = store.exportData();
+    delete (incoming as Partial<typeof incoming>).exported_at;
+
+    expect(() => store.importData(incoming)).toThrow(
+      "Invalid continuity export: exported_at must be a string.",
     );
     expect(store.listArtifacts()).toEqual([
       expect.objectContaining({ id: "snap-1", label: "Existing continuity" }),

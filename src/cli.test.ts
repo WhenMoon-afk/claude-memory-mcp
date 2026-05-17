@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync, spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { getSetupInstructions, runContinuityCli } from "./cli.js";
 import { ContinuityStore } from "./continuity/store.js";
 
@@ -412,6 +413,44 @@ describe("cli", () => {
 
       expect(result.status).toBe(0);
       expect(result.stdout.trim()).toBe("3.0.0");
+    });
+
+    it("prints help without opening the continuity database", () => {
+      const helpDbPath = join(dir, "help-only.db");
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "src/index.ts", "--help"],
+        {
+          cwd: join(import.meta.dirname!, ".."),
+          env: { ...process.env, CLAUDE_MEMORY_DB_PATH: helpDbPath },
+          encoding: "utf-8",
+          timeout: 10000,
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("Commands:");
+      expect(existsSync(helpDbPath)).toBe(false);
+    });
+
+    it("does not auto-start when imported by another index.js entry script", () => {
+      const importOnlyPath = join(dir, "index.js");
+      writeFileSync(
+        importOnlyPath,
+        `import ${JSON.stringify(pathToFileURL(join(import.meta.dirname!, "index.ts")).href)};\nconsole.log("import-only");\n`,
+      );
+
+      const result = spawnSync(process.execPath, ["--import", "tsx", importOnlyPath], {
+        cwd: join(import.meta.dirname!, ".."),
+        env: { ...process.env, CLAUDE_MEMORY_DB_PATH: join(dir, "import-only.db") },
+        encoding: "utf-8",
+        timeout: 10000,
+      });
+
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe("import-only");
+      expect(result.stderr).not.toContain("continuity v");
+      expect(existsSync(join(dir, "import-only.db"))).toBe(false);
     });
 
     it("exits non-zero for unknown entry point subcommands", () => {

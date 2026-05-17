@@ -1,5 +1,7 @@
 import { CONTINUITY_SCHEMA_VERSION } from "./db.js";
+import { makeArtifactId } from "./ids.js";
 import type { ContinuityExportEnvelope } from "./types.js";
+import type { ArtifactType, NodeKind } from "./types.js";
 
 const ARTIFACT_TYPES = new Set<string>([
   "snapshot",
@@ -106,6 +108,7 @@ export function validateExportContents(input: ContinuityExportEnvelope): void {
   if (input.schema_version !== CONTINUITY_SCHEMA_VERSION) {
     throw new Error("Unsupported continuity schema version.");
   }
+  assertString(input.exported_at, "exported_at");
 
   const artifactIds = new Set<string>();
   const artifactSeqs = new Set<number>();
@@ -120,7 +123,7 @@ export function validateExportContents(input: ContinuityExportEnvelope): void {
     assertRecord(artifact, path);
     const seq = assertPositiveInteger(artifact.seq, `${path}.seq`);
     const id = assertNonEmptyString(artifact.id, `${path}.id`);
-    assertEnum(artifact.type, `${path}.type`, ARTIFACT_TYPES);
+    const type = assertEnum(artifact.type, `${path}.type`, ARTIFACT_TYPES) as ArtifactType;
     assertString(artifact.title, `${path}.title`);
     assertString(artifact.label, `${path}.label`);
     assertString(artifact.preview, `${path}.preview`);
@@ -131,6 +134,9 @@ export function validateExportContents(input: ContinuityExportEnvelope): void {
     assertStringArray(artifact.source_refs, `${path}.source_refs`);
     assertString(artifact.created_at, `${path}.created_at`);
     assertString(artifact.updated_at, `${path}.updated_at`);
+    if (id !== makeArtifactId(type, seq)) {
+      throw new Error(`Invalid continuity export: ${path}.id does not match type and seq.`);
+    }
     assertUnique(seq, artifactSeqs, `${path}.seq`);
     assertUnique(id, artifactIds, `${path}.id`);
   });
@@ -139,11 +145,17 @@ export function validateExportContents(input: ContinuityExportEnvelope): void {
     const path = `nodes[${index}]`;
     assertRecord(node, path);
     const id = assertNonEmptyString(node.id, `${path}.id`);
-    assertEnum(node.kind, `${path}.kind`, NODE_KINDS);
+    const kind = assertEnum(node.kind, `${path}.kind`, NODE_KINDS) as NodeKind;
     const key = assertNonEmptyString(node.key, `${path}.key`);
     assertString(node.label, `${path}.label`);
     assertString(node.preview, `${path}.preview`);
     assertRecord(node.metadata, `${path}.metadata`);
+    if (id !== key) {
+      throw new Error(`Invalid continuity export: ${path}.id must match ${path}.key.`);
+    }
+    if (!id.startsWith(`${kind}:`)) {
+      throw new Error(`Invalid continuity export: ${path}.id must start with ${kind}:.`);
+    }
     assertUnique(id, nodeIds, `${path}.id`);
     assertUnique(key, nodeKeys, `${path}.key`);
   });

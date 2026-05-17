@@ -2,8 +2,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { readFileSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dispatchContinuityAction } from "./continuity/actions.js";
 import { getContinuityDbPath } from "./continuity/config.js";
@@ -74,28 +74,58 @@ export function createServer(): McpServer {
   return server;
 }
 
+export function isDirectEntrypoint(
+  entryScript = process.argv[1],
+  modulePath = fileURLToPath(import.meta.url),
+): boolean {
+  if (!entryScript) {
+    return false;
+  }
+
+  const resolvedEntry = resolve(entryScript);
+  const resolvedModule = resolve(modulePath);
+  try {
+    return realpathSync.native(resolvedEntry) === realpathSync.native(resolvedModule);
+  } catch {
+    return resolvedEntry === resolvedModule;
+  }
+}
+
 // Auto-start when run directly (via node dist/index.js, claude-memory-mcp, or tsx)
 /* v8 ignore start */
-const entryScript = process.argv[1] ?? "";
-const isMainModule =
-  entryScript.endsWith("index.js") ||
-  entryScript.endsWith("index.ts") ||
-  entryScript.endsWith("memory-mcp") ||
-  entryScript.endsWith("claude-memory-mcp");
-if (isMainModule) {
+if (isDirectEntrypoint()) {
   const subcommand = process.argv[2];
   if (subcommand === "--version" || subcommand === "-v") {
     console.log(VERSION);
+  } else if (!subcommand || subcommand === "serve") {
+    const server = createServer();
+    const transport = new StdioServerTransport();
+    server
+      .connect(transport)
+      .then(() => {
+        console.error(
+          `continuity v${VERSION} ready (db: ${getContinuityDbPath()})`,
+        );
+      })
+      .catch(async (err: unknown) => {
+        console.error("Failed to start continuity server:", err);
+        await server.close();
+        process.exit(1);
+      });
   } else if (subcommand === "setup") {
     import("./cli.js").then(({ getSetupInstructions }) => {
       console.log(getSetupInstructions());
+    });
+  } else if (subcommand === "help" || subcommand === "--help" || subcommand === "-h") {
+    import("./cli.js").then(async ({ runContinuityCli }) => {
+      console.log(await runContinuityCli([subcommand], undefined));
     });
   } else if (["self", "reflect", "anchor"].includes(subcommand ?? "")) {
     console.error(
       "This release replaces self/reflect/anchor with the continuity surface. See --help for save/list/search/get/neighbors/node/related/doctor/export/import/bundle/merge/delete.",
     );
     process.exit(1);
-  } else if (subcommand && subcommand !== "serve") {
+  } else {
     import("./cli.js").then(async ({ runContinuityCli }) => {
       const store = new ContinuityStore(getContinuityDbPath());
       try {
@@ -109,20 +139,6 @@ if (isMainModule) {
         store.close();
       }
     });
-  } else {
-    const server = createServer();
-    const transport = new StdioServerTransport();
-    server
-      .connect(transport)
-      .then(() => {
-        console.error(
-          `continuity v${VERSION} ready (db: ${getContinuityDbPath()})`,
-        );
-      })
-      .catch((err: unknown) => {
-        console.error("Failed to start continuity server:", err);
-        process.exit(1);
-      });
   }
 }
 /* v8 ignore stop */

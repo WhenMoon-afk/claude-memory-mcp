@@ -119,7 +119,7 @@ function getRequiredPositional(
   return positionals[0]!;
 }
 
-function renderCliHelp(): string {
+export function renderCliHelp(): string {
   return [
     "Commands:",
     "  save --type <type> --title <title> --summary <summary> [--project <project>] [--theme <theme>] [--entity <entity>] [--next <step>]",
@@ -148,14 +148,20 @@ function getSingleValue(
 
 export async function runContinuityCli(
   argv: string[],
-  store: ContinuityStore,
+  store?: ContinuityStore,
 ): Promise<string> {
   const [command, ...rest] = argv;
-  if (!command || command === "help" || command === "--help") {
+  if (!command || command === "help" || command === "--help" || command === "-h") {
     return renderCliHelp();
   }
 
   const { positionals, values } = parseFlags(rest);
+  const requireStore = (): ContinuityStore => {
+    if (!store) {
+      throw new Error(`${command} requires a continuity store`);
+    }
+    return store;
+  };
 
   if (command === "save") {
     assertKnownFlags(
@@ -174,7 +180,7 @@ export async function runContinuityCli(
       entities: values["entity"],
       next_steps: values["next"],
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "list") {
@@ -184,7 +190,7 @@ export async function runContinuityCli(
       action: "list",
       project: getSingleValue(values, "project"),
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "search") {
@@ -196,7 +202,7 @@ export async function runContinuityCli(
       action: "search",
       query: positionals.join(" "),
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "get") {
@@ -210,7 +216,7 @@ export async function runContinuityCli(
       id,
       detail: values["full"] ? "full" : values["compact"] ? "compact" : undefined,
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "neighbors") {
@@ -220,7 +226,7 @@ export async function runContinuityCli(
       action: "neighbors",
       id,
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "node") {
@@ -230,7 +236,7 @@ export async function runContinuityCli(
       action: "node",
       id,
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "related") {
@@ -241,7 +247,7 @@ export async function runContinuityCli(
       id,
       via: getSingleValue(values, "via"),
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "doctor") {
@@ -250,13 +256,13 @@ export async function runContinuityCli(
     const parsed = continuityActionSchema.parse({
       action: "doctor",
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "export") {
     assertKnownFlags(values, [], command);
     assertNoPositionals(command, positionals);
-    return JSON.stringify(store.exportData(), null, 2);
+    return JSON.stringify(requireStore().exportData(), null, 2);
   }
 
   if (command === "backup") {
@@ -267,7 +273,7 @@ export async function runContinuityCli(
       throw new Error("backup requires --file <path>");
     }
 
-    const data = store.exportData();
+    const data = requireStore().exportData();
     writeFileSync(file, `${JSON.stringify(data, null, 2)}\n`);
     return `Backed up ${data.artifacts.length} artifacts to ${file}`;
   }
@@ -287,7 +293,7 @@ export async function runContinuityCli(
       throw new Error("Invalid continuity export: file must contain valid JSON.");
     }
 
-    const result = store.importData(parsed, { dryRun: values["dry-run"] !== undefined });
+    const result = requireStore().importData(parsed, { dryRun: values["dry-run"] !== undefined });
     const verb = result.dry_run ? "Validated" : "Imported";
     return `${verb} ${result.artifact_count} artifacts from ${file}`;
   }
@@ -299,7 +305,7 @@ export async function runContinuityCli(
       action: "bundle",
       project: getSingleValue(values, "project"),
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "merge") {
@@ -310,7 +316,7 @@ export async function runContinuityCli(
       type: getSingleValue(values, "type"),
       title: getSingleValue(values, "title"),
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   if (command === "delete") {
@@ -320,7 +326,7 @@ export async function runContinuityCli(
       action: "delete",
       id,
     });
-    return (await dispatchContinuityAction(store, parsed)).text;
+    return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
 
   throw new Error(`Unknown command: ${command}\n\n${renderCliHelp()}`);
