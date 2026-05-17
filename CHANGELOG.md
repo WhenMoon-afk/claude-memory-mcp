@@ -28,6 +28,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Switched to maintenance-focused issue and pull request intake for the stable v3 line
 - Exposed the MCP continuity input schema through the SDK tool listing while keeping runtime validation centralized
 - Tightened CLI argument validation for unknown flags, missing positional ids, ambiguous compact/full modes, and unknown commands
+- Rejected duplicate singleton CLI flags instead of silently using the first value
 - Hardened package smoke verification to install the generated tarball in a temporary project with normal dependency lifecycle scripts and execute the packaged binary
 - Refreshed maintenance dependencies and kept release verification on the supported Node 20 and TypeScript 5 lines
 - Fixed direct-entrypoint detection so importing the package from another `index.js` file cannot accidentally start the CLI or stdio server

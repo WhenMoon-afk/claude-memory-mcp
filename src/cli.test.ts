@@ -131,6 +131,29 @@ describe("cli", () => {
       ).rejects.toThrow("Unknown flag --titel for save");
     });
 
+    it("rejects duplicate singleton flags instead of silently using the first value", async () => {
+      await expect(
+        runContinuityCli(
+          [
+            "save",
+            "--type",
+            "snapshot",
+            "--type",
+            "decision",
+            "--title",
+            "JWT auth pass",
+            "--summary",
+            "Middleware works",
+          ],
+          store,
+        ),
+      ).rejects.toThrow("save accepts --type only once");
+
+      await expect(
+        runContinuityCli(["list", "--project", "notes-api", "--project", "admin"], store),
+      ).rejects.toThrow("list accepts --project only once");
+    });
+
     it("rejects ambiguous get detail flags", async () => {
       await runContinuityCli(
         [
@@ -148,6 +171,12 @@ describe("cli", () => {
       await expect(
         runContinuityCli(["get", "snap-1", "--compact", "--full"], store),
       ).rejects.toThrow("get accepts only one of --compact or --full");
+    });
+
+    it("rejects repeated boolean flags", async () => {
+      await expect(
+        runContinuityCli(["get", "snap-1", "--compact", "--compact"], store),
+      ).rejects.toThrow("get accepts --compact only once");
     });
 
     it("rejects missing or extra positional arguments for fixed-arity commands", async () => {

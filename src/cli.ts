@@ -77,7 +77,8 @@ function parseFlags(args: string[]): {
     const key = rawFlag;
     const next = args[index + 1];
     if (!next || next.startsWith("--")) {
-      values[key] = ["true"];
+      values[key] ??= [];
+      values[key]!.push("true");
       continue;
     }
 
@@ -142,8 +143,26 @@ export function renderCliHelp(): string {
 function getSingleValue(
   values: Record<string, string[]>,
   key: string,
+  command: string,
 ): string | undefined {
-  return values[key]?.[0];
+  const entries = values[key];
+  if (!entries) {
+    return undefined;
+  }
+  if (entries.length > 1) {
+    throw new Error(`${command} accepts --${key} only once`);
+  }
+  return entries[0];
+}
+
+function assertFlagAtMostOnce(
+  values: Record<string, string[]>,
+  key: string,
+  command: string,
+): void {
+  if ((values[key]?.length ?? 0) > 1) {
+    throw new Error(`${command} accepts --${key} only once`);
+  }
 }
 
 export async function runContinuityCli(
@@ -172,10 +191,10 @@ export async function runContinuityCli(
     assertNoPositionals(command, positionals);
     const parsed = continuityActionSchema.parse({
       action: "save",
-      type: getSingleValue(values, "type"),
-      title: getSingleValue(values, "title"),
-      summary: getSingleValue(values, "summary"),
-      project: getSingleValue(values, "project"),
+      type: getSingleValue(values, "type", command),
+      title: getSingleValue(values, "title", command),
+      summary: getSingleValue(values, "summary", command),
+      project: getSingleValue(values, "project", command),
       themes: values["theme"],
       entities: values["entity"],
       next_steps: values["next"],
@@ -188,7 +207,7 @@ export async function runContinuityCli(
     assertNoPositionals(command, positionals);
     const parsed = continuityActionSchema.parse({
       action: "list",
-      project: getSingleValue(values, "project"),
+      project: getSingleValue(values, "project", command),
     });
     return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
@@ -207,6 +226,8 @@ export async function runContinuityCli(
 
   if (command === "get") {
     assertKnownFlags(values, ["compact", "full"], command);
+    assertFlagAtMostOnce(values, "compact", command);
+    assertFlagAtMostOnce(values, "full", command);
     if (values["compact"] && values["full"]) {
       throw new Error("get accepts only one of --compact or --full");
     }
@@ -245,7 +266,7 @@ export async function runContinuityCli(
     const parsed = continuityActionSchema.parse({
       action: "related",
       id,
-      via: getSingleValue(values, "via"),
+      via: getSingleValue(values, "via", command),
     });
     return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
@@ -268,7 +289,7 @@ export async function runContinuityCli(
   if (command === "backup") {
     assertKnownFlags(values, ["file"], command);
     assertNoPositionals(command, positionals);
-    const file = getSingleValue(values, "file");
+    const file = getSingleValue(values, "file", command);
     if (!file) {
       throw new Error("backup requires --file <path>");
     }
@@ -280,8 +301,9 @@ export async function runContinuityCli(
 
   if (command === "import") {
     assertKnownFlags(values, ["file", "dry-run"], command);
+    assertFlagAtMostOnce(values, "dry-run", command);
     assertNoPositionals(command, positionals);
-    const file = getSingleValue(values, "file");
+    const file = getSingleValue(values, "file", command);
     if (!file) {
       throw new Error("import requires --file <path>");
     }
@@ -303,7 +325,7 @@ export async function runContinuityCli(
     assertNoPositionals(command, positionals);
     const parsed = continuityActionSchema.parse({
       action: "bundle",
-      project: getSingleValue(values, "project"),
+      project: getSingleValue(values, "project", command),
     });
     return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
@@ -313,8 +335,8 @@ export async function runContinuityCli(
     const parsed = continuityActionSchema.parse({
       action: "merge",
       ids: positionals,
-      type: getSingleValue(values, "type"),
-      title: getSingleValue(values, "title"),
+      type: getSingleValue(values, "type", command),
+      title: getSingleValue(values, "title", command),
     });
     return (await dispatchContinuityAction(requireStore(), parsed)).text;
   }
