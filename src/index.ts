@@ -162,7 +162,7 @@ if (isDirectEntrypoint()) {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`Continuity command failed: ${message}`);
-        process.exit(1);
+        process.exitCode = 1;
       } finally {
         store?.close();
       }
