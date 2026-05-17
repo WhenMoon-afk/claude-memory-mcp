@@ -100,6 +100,14 @@ function assertArray(value: unknown, key: string): asserts value is unknown[] {
   }
 }
 
+function assertExportEnvelope(
+  value: unknown,
+): asserts value is ContinuityExportEnvelope {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("Invalid continuity export: root must be an object.");
+  }
+}
+
 export class ContinuityStore {
   private readonly db: ReturnType<typeof openContinuityDb>;
 
@@ -306,6 +314,7 @@ export class ContinuityStore {
   searchArtifacts(query: string): CompactArtifactRow[] {
     const normalizedQuery = normalizeText(query);
     if (normalizedQuery === "") return [];
+    const ftsQuery = `"${normalizedQuery.replace(/"/g, '""')}"`;
     const likeQuery = `%${normalizedQuery.toLowerCase()}%`;
 
     return this.db
@@ -328,7 +337,7 @@ export class ContinuityStore {
          ORDER BY a.updated_at DESC, a.seq DESC
          LIMIT 20`,
       )
-      .all(normalizedQuery, likeQuery, likeQuery, likeQuery) as CompactArtifactRow[];
+      .all(ftsQuery, likeQuery, likeQuery, likeQuery) as CompactArtifactRow[];
   }
 
   getArtifactDetail(id: string): Omit<ContinuityArtifact, "seq" | "body" | "source_refs" | "created_at"> | null {
@@ -573,9 +582,11 @@ export class ContinuityStore {
   }
 
   importData(
-    input: ContinuityExportEnvelope,
+    input: unknown,
     options: { dryRun?: boolean } = {},
   ): ImportResult {
+    assertExportEnvelope(input);
+
     if (input.format !== "claude-memory-continuity-export" || input.version !== 1) {
       throw new Error("Unsupported continuity export format.");
     }

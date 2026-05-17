@@ -57,7 +57,24 @@ function parseFlags(args: string[]): {
       continue;
     }
 
-    const key = current.slice(2);
+    const rawFlag = current.slice(2);
+    if (!rawFlag) {
+      throw new Error("Invalid flag --");
+    }
+
+    const equalsIndex = rawFlag.indexOf("=");
+    if (equalsIndex !== -1) {
+      const key = rawFlag.slice(0, equalsIndex);
+      if (!key) {
+        throw new Error(`Invalid flag ${current}`);
+      }
+
+      values[key] ??= [];
+      values[key]!.push(rawFlag.slice(equalsIndex + 1));
+      continue;
+    }
+
+    const key = rawFlag;
     const next = args[index + 1];
     if (!next || next.startsWith("--")) {
       values[key] = ["true"];
@@ -70,6 +87,19 @@ function parseFlags(args: string[]): {
   }
 
   return { positionals, values };
+}
+
+function assertKnownFlags(
+  values: Record<string, string[]>,
+  allowedFlags: string[],
+  command: string,
+): void {
+  const allowed = new Set(allowedFlags);
+  for (const key of Object.keys(values)) {
+    if (!allowed.has(key)) {
+      throw new Error(`Unknown flag --${key} for ${command}`);
+    }
+  }
 }
 
 function renderCliHelp(): string {
@@ -111,6 +141,11 @@ export async function runContinuityCli(
   const { positionals, values } = parseFlags(rest);
 
   if (command === "save") {
+    assertKnownFlags(
+      values,
+      ["type", "title", "summary", "project", "theme", "entity", "next"],
+      command,
+    );
     const parsed = continuityActionSchema.parse({
       action: "save",
       type: getSingleValue(values, "type"),
@@ -125,6 +160,7 @@ export async function runContinuityCli(
   }
 
   if (command === "list") {
+    assertKnownFlags(values, ["project"], command);
     const parsed = continuityActionSchema.parse({
       action: "list",
       project: getSingleValue(values, "project"),
@@ -133,6 +169,7 @@ export async function runContinuityCli(
   }
 
   if (command === "search") {
+    assertKnownFlags(values, [], command);
     const parsed = continuityActionSchema.parse({
       action: "search",
       query: positionals.join(" "),
@@ -141,6 +178,7 @@ export async function runContinuityCli(
   }
 
   if (command === "get") {
+    assertKnownFlags(values, ["compact", "full"], command);
     const parsed = continuityActionSchema.parse({
       action: "get",
       id: positionals[0],
@@ -150,6 +188,7 @@ export async function runContinuityCli(
   }
 
   if (command === "neighbors") {
+    assertKnownFlags(values, [], command);
     const parsed = continuityActionSchema.parse({
       action: "neighbors",
       id: positionals[0],
@@ -158,6 +197,7 @@ export async function runContinuityCli(
   }
 
   if (command === "node") {
+    assertKnownFlags(values, [], command);
     const parsed = continuityActionSchema.parse({
       action: "node",
       id: positionals[0],
@@ -166,6 +206,7 @@ export async function runContinuityCli(
   }
 
   if (command === "related") {
+    assertKnownFlags(values, ["via"], command);
     const parsed = continuityActionSchema.parse({
       action: "related",
       id: positionals[0],
@@ -175,6 +216,7 @@ export async function runContinuityCli(
   }
 
   if (command === "doctor") {
+    assertKnownFlags(values, [], command);
     const parsed = continuityActionSchema.parse({
       action: "doctor",
     });
@@ -182,10 +224,12 @@ export async function runContinuityCli(
   }
 
   if (command === "export") {
+    assertKnownFlags(values, [], command);
     return JSON.stringify(store.exportData(), null, 2);
   }
 
   if (command === "backup") {
+    assertKnownFlags(values, ["file"], command);
     const file = getSingleValue(values, "file");
     if (!file) {
       throw new Error("backup requires --file <path>");
@@ -197,20 +241,26 @@ export async function runContinuityCli(
   }
 
   if (command === "import") {
+    assertKnownFlags(values, ["file", "dry-run"], command);
     const file = getSingleValue(values, "file");
     if (!file) {
       throw new Error("import requires --file <path>");
     }
 
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as Parameters<
-      ContinuityStore["importData"]
-    >[0];
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(readFileSync(file, "utf8"));
+    } catch {
+      throw new Error("Invalid continuity export: file must contain valid JSON.");
+    }
+
     const result = store.importData(parsed, { dryRun: values["dry-run"] !== undefined });
     const verb = result.dry_run ? "Validated" : "Imported";
     return `${verb} ${result.artifact_count} artifacts from ${file}`;
   }
 
   if (command === "bundle") {
+    assertKnownFlags(values, ["project"], command);
     const parsed = continuityActionSchema.parse({
       action: "bundle",
       project: getSingleValue(values, "project"),
@@ -219,6 +269,7 @@ export async function runContinuityCli(
   }
 
   if (command === "merge") {
+    assertKnownFlags(values, ["type", "title"], command);
     const parsed = continuityActionSchema.parse({
       action: "merge",
       ids: positionals,
@@ -229,6 +280,7 @@ export async function runContinuityCli(
   }
 
   if (command === "delete") {
+    assertKnownFlags(values, [], command);
     const parsed = continuityActionSchema.parse({
       action: "delete",
       id: positionals[0],

@@ -92,15 +92,16 @@ if (isMainModule) {
     process.exit(1);
   } else if (subcommand && subcommand !== "serve") {
     import("./cli.js").then(async ({ runContinuityCli }) => {
+      const store = new ContinuityStore(getContinuityDbPath());
       try {
-        const output = await runContinuityCli(
-          process.argv.slice(2),
-          new ContinuityStore(getContinuityDbPath()),
-        );
+        const output = await runContinuityCli(process.argv.slice(2), store);
         console.log(output);
       } catch (err) {
-        console.error("Continuity command failed:", err);
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Continuity command failed: ${message}`);
         process.exit(1);
+      } finally {
+        store.close();
       }
     });
   } else {

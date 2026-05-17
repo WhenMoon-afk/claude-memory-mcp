@@ -95,6 +95,41 @@ describe("cli", () => {
       );
     });
 
+    it("accepts equals-style flag values", async () => {
+      const saved = await runContinuityCli(
+        [
+          "save",
+          "--type=snapshot",
+          "--title=JWT auth pass",
+          "--summary=Middleware works",
+          "--project=notes-api",
+        ],
+        store,
+      );
+
+      expect(saved).toContain("snap-1");
+      expect(await runContinuityCli(["list", "--project=notes-api"], store)).toContain(
+        "JWT auth pass",
+      );
+    });
+
+    it("rejects unknown flags instead of silently ignoring typos", async () => {
+      await expect(
+        runContinuityCli(
+          [
+            "save",
+            "--type",
+            "snapshot",
+            "--titel",
+            "JWT auth pass",
+            "--summary",
+            "Middleware works",
+          ],
+          store,
+        ),
+      ).rejects.toThrow("Unknown flag --titel for save");
+    });
+
     it("accepts theme and entity flags for graph-aware saves", async () => {
       await runContinuityCli(
         [
@@ -213,6 +248,15 @@ describe("cli", () => {
       expect(await runContinuityCli(["list"], store)).toContain("dec-1");
     });
 
+    it("reports invalid import files clearly", async () => {
+      const invalidPath = join(dir, "invalid.json");
+      writeFileSync(invalidPath, "{not json");
+
+      await expect(
+        runContinuityCli(["import", "--file", invalidPath, "--dry-run"], store),
+      ).rejects.toThrow("Invalid continuity export: file must contain valid JSON.");
+    });
+
     it("returns help for unknown commands", async () => {
       const output = await runContinuityCli(["wat"], store);
       expect(output).toContain("Commands:");
@@ -295,6 +339,36 @@ describe("cli", () => {
       expect(result.stderr).toContain(
         "replaces self/reflect/anchor with the continuity surface",
       );
+    });
+
+    it("prints concise command failures from the entry point", () => {
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "src/index.ts",
+          "save",
+          "--type",
+          "snapshot",
+          "--titel",
+          "JWT auth pass",
+          "--summary",
+          "Middleware works",
+        ],
+        {
+          cwd: join(import.meta.dirname!, ".."),
+          env: { ...process.env, CLAUDE_MEMORY_DB_PATH: dbPath },
+          encoding: "utf-8",
+          timeout: 10000,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Continuity command failed: Unknown flag --titel for save",
+      );
+      expect(result.stderr).not.toContain("Error: Unknown flag");
     });
   });
 });

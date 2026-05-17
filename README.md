@@ -59,7 +59,7 @@ The server exposes a single dispatch-style tool:
 | `save` | Store a new artifact |
 | `list` | Return compact recent rows |
 | `search` | Search compact rows without expanding bodies |
-| `get` | Load one artifact in `compact`, `full`, or rendered form |
+| `get` | Load one artifact in `compact` or `full` form |
 | `neighbors` | Show nearby linked artifacts and nodes |
 | `node` | Inspect one node and list linked artifacts |
 | `related` | Explain why an artifact is related to nearby artifacts |
@@ -197,6 +197,10 @@ Environment variables:
 
 - `CLAUDE_MEMORY_DATA_DIR`: override the base directory
 - `CLAUDE_MEMORY_DB_PATH`: point directly at a database file
+
+When `CLAUDE_MEMORY_DB_PATH` is set, it wins over every directory setting. When
+only directory settings are present, `CLAUDE_MEMORY_DATA_DIR` wins first, then
+`XDG_DATA_HOME`, then `APPDATA`, then the home-directory fallback.
 
 If you want repo-local isolation, point `CLAUDE_MEMORY_DB_PATH` at a project-specific path when launching the server or CLI.
 

@@ -46,6 +46,9 @@ describe("public docs and metadata", () => {
     expect(pkg.files).toContain("SECURITY.md");
     expect(pkg.files).toContain("CONTRIBUTING.md");
     expect(readFileSync("CHANGELOG.md", "utf-8")).toContain("npm package");
+    expect(readFileSync("scripts/package-smoke.mjs", "utf-8")).not.toContain(
+      'packageJson.version !== "3.0.0"',
+    );
   });
 
   it("documents the v3 migration to the continuity surface", () => {
@@ -74,6 +77,8 @@ describe("public docs and metadata", () => {
     expect(readme).toContain("backup");
     expect(readme).toContain("--dry-run");
     expect(readme).toContain("import");
+    expect(readme).toContain("`get` | Load one artifact in `compact` or `full` form");
+    expect(readme).not.toContain("or rendered form");
     expect(contract).toContain("Schema Version");
     expect(contract).toContain("Stable Surface");
     expect(contract).toContain("claude-memory-continuity-export");
@@ -103,6 +108,15 @@ describe("public docs and metadata", () => {
 
     expect(readme).toContain("stable and conservative");
     expect(readme).toContain("small public surface");
+  });
+
+  it("documents local data path override precedence", () => {
+    const readme = readFileSync("README.md", "utf-8");
+    const collapsedReadme = readme.replace(/\s+/g, " ");
+
+    expect(readme).toContain("When `CLAUDE_MEMORY_DB_PATH` is set");
+    expect(readme).toContain("`CLAUDE_MEMORY_DATA_DIR` wins first");
+    expect(collapsedReadme).toContain("then `XDG_DATA_HOME`, then `APPDATA`");
   });
 
   it("documents npm publishing steps for the v3 baseline", () => {

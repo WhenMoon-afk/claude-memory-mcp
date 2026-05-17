@@ -206,6 +206,25 @@ describe("ContinuityStore", () => {
     ]);
   });
 
+  it("rejects non-object import envelopes before replacing current data", () => {
+    store.saveArtifact({
+      type: "snapshot",
+      title: "Existing continuity",
+      summary: "Keep this data intact",
+    });
+
+    expect(() => store.importData(null)).toThrow(
+      "Invalid continuity export: root must be an object.",
+    );
+    expect(() => store.importData([])).toThrow(
+      "Invalid continuity export: root must be an object.",
+    );
+
+    expect(store.listArtifacts()).toEqual([
+      expect.objectContaining({ id: "snap-1", label: "Existing continuity" }),
+    ]);
+  });
+
   it("rejects imports with invalid artifact fields before dry runs or replacement", () => {
     store.saveArtifact({
       type: "snapshot",

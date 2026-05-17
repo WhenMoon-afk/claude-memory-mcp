@@ -134,4 +134,14 @@ describe("continuity action dispatch", () => {
     });
     expect(deleted.text).toContain("Deleted meta-3");
   });
+
+  it("reports missing deletes without claiming success", async () => {
+    const deleted = await dispatchContinuityAction(store, {
+      action: "delete",
+      id: "missing-1",
+    });
+
+    expect(deleted.text).toContain("Artifact not found: missing-1");
+    expect(deleted.text).not.toContain("Deleted missing-1");
+  });
 });

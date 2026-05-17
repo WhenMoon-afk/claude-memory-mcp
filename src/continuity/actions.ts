@@ -119,7 +119,10 @@ export async function dispatchContinuityAction(
       return { text: `Saved ${merged.id} (${merged.label})` };
     }
     case "delete":
-      store.deleteArtifact(input.id);
-      return { text: `Deleted ${input.id}` };
+      return {
+        text: store.deleteArtifact(input.id)
+          ? `Deleted ${input.id}`
+          : `Artifact not found: ${input.id}`,
+      };
   }
 }

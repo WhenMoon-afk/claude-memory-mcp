@@ -115,6 +115,19 @@ describe("continuity search and detail", () => {
     expect(themeResults.map((row) => row.id)).toContain(saved.id);
   });
 
+  it("does not throw for punctuation-heavy search queries", () => {
+    store.saveArtifact({
+      type: "snapshot",
+      title: "Stack trace handoff",
+      summary: "Parser error included a token near foo: and quoted fragments.",
+      project: "notes-api",
+    });
+
+    expect(() => store.searchArtifacts(":")).not.toThrow();
+    expect(() => store.searchArtifacts("foo:")).not.toThrow();
+    expect(() => store.searchArtifacts('"unterminated')).not.toThrow();
+  });
+
   it("returns neighbors connected by shared graph nodes across projects", () => {
     const snapshot = store.saveArtifact({
       type: "snapshot",

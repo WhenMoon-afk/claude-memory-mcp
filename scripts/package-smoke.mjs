@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { tmpdir } from "node:os";
+import { runNpm } from "./npm-invocation.mjs";
 
 const requiredFiles = [
   "package/dist/index.js",
@@ -28,12 +29,15 @@ const forbiddenPatterns = [
   /^package\/.*\.mcpb$/,
 ];
 
-execFileSync("npm", ["run", "clean"], { stdio: "inherit" });
-execFileSync("npm", ["run", "build"], { stdio: "inherit" });
+const expectedPackageJson = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+);
+
+runNpm(["run", "clean"], { execFileSync, stdio: "inherit" });
+runNpm(["run", "build"], { execFileSync, stdio: "inherit" });
 
 const packDir = mkdtempSync(join(tmpdir(), "memory-mcp-package-smoke-"));
-const archive = execFileSync(
-  "npm",
+const archive = runNpm(
   [
     "pack",
     "--silent",
@@ -43,6 +47,7 @@ const archive = execFileSync(
     packDir,
   ],
   {
+    execFileSync,
     encoding: "utf8",
     env: { ...process.env, npm_config_dry_run: "false" },
   },
@@ -84,8 +89,14 @@ try {
     }),
   );
 
-  if (packageJson.version !== "3.0.0") {
-    fail(`Expected package version 3.0.0, got ${packageJson.version}`);
+  if (packageJson.name !== expectedPackageJson.name) {
+    fail(`Expected package name ${expectedPackageJson.name}, got ${packageJson.name}`);
+  }
+
+  if (packageJson.version !== expectedPackageJson.version) {
+    fail(
+      `Expected package version ${expectedPackageJson.version}, got ${packageJson.version}`,
+    );
   }
 
   if (packageJson.bin?.["claude-memory-mcp"] !== "dist/index.js") {
