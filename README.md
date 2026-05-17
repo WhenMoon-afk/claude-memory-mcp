@@ -230,7 +230,8 @@ The npm package is `@whenmoon-afk/memory-mcp`; the v3 CLI binary is `claude-memo
 - Search and neighbor queries intentionally return compact rows first so agents can inspect nearby context without wasting tokens.
 - Shared `theme`, `entity`, and `project` nodes can connect otherwise separate artifacts into a navigable continuity graph.
 - `node` and `related` keep the graph inspectable without forcing full graph dumps into context.
-- `doctor`, `export`, `backup`, and `import` are intentionally CLI-first so large maintenance operations stay explicit and local.
+- `doctor` is available through MCP and CLI; `export`, `backup`, and `import` are
+  CLI-only so data-transfer operations stay explicit and local.
 
 ## v3 Migration
 

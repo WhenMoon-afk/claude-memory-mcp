@@ -14,6 +14,7 @@ export default defineConfig({
         "cli/",
         "**/*.test.ts",
         "**/*.spec.ts",
+        "**/*.fixtures.ts",
         "vitest.config.ts",
       ],
       thresholds: {

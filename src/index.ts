@@ -84,7 +84,9 @@ const isMainModule =
   entryScript.endsWith("claude-memory-mcp");
 if (isMainModule) {
   const subcommand = process.argv[2];
-  if (subcommand === "setup") {
+  if (subcommand === "--version" || subcommand === "-v") {
+    console.log(VERSION);
+  } else if (subcommand === "setup") {
     import("./cli.js").then(({ getSetupInstructions }) => {
       console.log(getSetupInstructions());
     });

@@ -59,6 +59,28 @@ describe("setup", () => {
       const config = generateDesktopConfig(existing);
       expect(config.mcpServers["continuity"].command).toBe("custom");
     });
+
+    it("migrates a legacy identity server entry to continuity", () => {
+      const existing = {
+        mcpServers: {
+          identity: {
+            command: "node",
+            args: ["legacy-entry.js", "--flag"],
+          },
+        },
+      };
+
+      const config = generateDesktopConfig(existing);
+
+      expect(config.mcpServers["continuity"]).toEqual({
+        command: "node",
+        args: ["legacy-entry.js", "--flag"],
+      });
+      expect(config.mcpServers["identity"]).toBeUndefined();
+      expect(config.mcpServers["continuity"].args).not.toBe(
+        existing.mcpServers.identity.args,
+      );
+    });
   });
 
   describe("getDesktopConfigPath", () => {

@@ -323,5 +323,5 @@ export async function runContinuityCli(
     return (await dispatchContinuityAction(store, parsed)).text;
   }
 
-  return renderCliHelp();
+  throw new Error(`Unknown command: ${command}\n\n${renderCliHelp()}`);
 }

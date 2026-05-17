@@ -288,15 +288,11 @@ describe("cli", () => {
       ).rejects.toThrow("Invalid continuity export: file must contain valid JSON.");
     });
 
-    it("returns help for unknown commands", async () => {
-      const output = await runContinuityCli(["wat"], store);
-      expect(output).toContain("Commands:");
-      expect(output).toContain("save");
-      expect(output).toContain("merge");
-      expect(output).toContain("doctor");
-      expect(output).toContain("export");
-      expect(output).toContain("backup");
-      expect(output).toContain("import");
+    it("rejects unknown commands with help context", async () => {
+      await expect(runContinuityCli(["wat"], store)).rejects.toThrow(
+        "Unknown command: wat",
+      );
+      await expect(runContinuityCli(["wat"], store)).rejects.toThrow("Commands:");
     });
 
     it("keeps the save graph surface to project, theme, and entity nodes", async () => {
@@ -400,6 +396,40 @@ describe("cli", () => {
         "Continuity command failed: Unknown flag --titel for save",
       );
       expect(result.stderr).not.toContain("Error: Unknown flag");
+    });
+
+    it("prints the package version from the entry point", () => {
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "src/index.ts", "--version"],
+        {
+          cwd: join(import.meta.dirname!, ".."),
+          env: { ...process.env, CLAUDE_MEMORY_DB_PATH: dbPath },
+          encoding: "utf-8",
+          timeout: 10000,
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout.trim()).toBe("3.0.0");
+    });
+
+    it("exits non-zero for unknown entry point subcommands", () => {
+      const result = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "src/index.ts", "definitely-not-a-command"],
+        {
+          cwd: join(import.meta.dirname!, ".."),
+          env: { ...process.env, CLAUDE_MEMORY_DB_PATH: dbPath },
+          encoding: "utf-8",
+          timeout: 10000,
+        },
+      );
+
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(
+        "Continuity command failed: Unknown command: definitely-not-a-command",
+      );
     });
   });
 });
