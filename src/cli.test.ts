@@ -441,7 +441,10 @@ describe("cli", () => {
       );
 
       expect(result.status).toBe(0);
-      expect(result.stdout.trim()).toBe("3.0.0");
+      const pkg = JSON.parse(
+        readFileSync(join(import.meta.dirname!, "..", "package.json"), "utf-8"),
+      ) as { version: string };
+      expect(result.stdout.trim()).toBe(pkg.version);
     });
 
     it("prints help without opening the continuity database", () => {
