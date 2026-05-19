@@ -35,6 +35,8 @@ describe("public docs and metadata", () => {
     expect(pkg.scripts["release:check"]).toContain("npm run check");
     expect(pkg.scripts["release:check"]).toContain("npm run test:coverage");
     expect(pkg.scripts["release:check"]).toContain("npm run test:package-smoke");
+    expect(pkg.scripts["release:guard"]).toBe("node scripts/release-guard.mjs");
+    expect(pkg.scripts["release"]).toContain("npm run release:guard");
     expect(pkg.scripts["prepublishOnly"]).toBe("npm run clean && npm run release:check");
     expect(pkg.scripts["test:package-smoke"]).toBe("node scripts/package-smoke.mjs");
     expect(pkg.scripts["clean"]).toBe("node scripts/clean.mjs");
@@ -163,6 +165,8 @@ describe("public docs and metadata", () => {
     expect(ci).toContain("node-version: [20, 22, 24]");
     expect(ci).toContain("npm audit --omit=dev --audit-level=high");
     expect(publish).toContain("npm run release:check");
+    expect(publish).toContain("git fetch --no-tags origin main");
+    expect(publish).toContain("git merge-base --is-ancestor HEAD origin/main");
     expect(readFileSync("CHANGELOG.md", "utf-8")).toContain("production dependency audit");
   });
 });

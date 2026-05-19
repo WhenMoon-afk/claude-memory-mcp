@@ -31,10 +31,11 @@
     "check": "npm run typecheck && npm test && npm run build && npm run test:smoke",
     "verify": "npm run check",
     "release:check": "npm audit --omit=dev --audit-level=high && npm run check && npm run test:coverage && npm run test:package-smoke",
+    "release:guard": "node scripts/release-guard.mjs",
     "clean": "node scripts/clean.mjs",
     "prepare": "tsc",
     "prerelease": "npm run release:check",
-    "release": "npm run prerelease && git tag v$(node -p \"require('./package.json').version\") && git push origin v$(node -p \"require('./package.json').version\")",
+    "release": "npm run release:guard && npm run prerelease && git tag v$(node -p \"require('./package.json').version\") && git push origin v$(node -p \"require('./package.json').version\")",
     "prepublishOnly": "npm run clean && npm run release:check"
   },
   "keywords": [
