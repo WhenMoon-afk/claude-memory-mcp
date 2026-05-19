@@ -1,8 +1,10 @@
 # Continuity Contract
 
-This document defines the stable public contract for `claude-memory-mcp` `v3`.
+This document defines the current public contract for `claude-memory-mcp` `v3`.
 
-## Stable Surface
+`claude-memory-mcp` is actively in development. The local data model is intended to stay inspectable and portable, but MCP tool names, action shape, and agent-facing ergonomics may change in future minor or major releases when dogfooding shows a better design. Breaking changes must be documented in `CHANGELOG.md` and reflected here.
+
+## Current Surface
 
 The project has two supported public surfaces:
 
@@ -122,7 +124,7 @@ Full detail is only returned on explicit request, such as `get --full` or an exp
 
 ## Compatibility Notes
 
-The following are intended to be stable within `v3`:
+The following are intended to remain compatible unless a release explicitly documents a breaking contract change:
 
 - artifact and node type names
 - CLI command names

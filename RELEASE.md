@@ -1,6 +1,6 @@
 # Release Guide
 
-This project publishes `@whenmoon-afk/memory-mcp` to npm. v3 is the stable continuity-journal baseline and intentionally keeps one supported binary:
+This project publishes `@whenmoon-afk/memory-mcp` to npm. v3 is the current continuity-journal line and intentionally keeps one supported binary:
 
 ```text
 claude-memory-mcp
@@ -11,6 +11,8 @@ claude-memory-mcp
 `claude-memory-mcp` is a lightweight local memory database and continuity journal for MCP clients and shell scripts. Do not position it as a full task tracker, dependency graph, multi-agent coordinator, transcript archive, cloud memory service, or replacement for native client memory.
 
 The last npm-published v2 line was `2.5.0`. v3 publishes as `3.0.0` and removes the older identity-oriented surface in favor of the `continuity` MCP tool and the `claude-memory-mcp` CLI.
+
+The project is actively in development. Public GitHub updates may land before npm releases, and breaking MCP/CLI contract changes may happen from time to time when they are deliberate, documented, and versioned. Do not describe every merge to `main` as an npm release.
 
 ## Preconditions
 

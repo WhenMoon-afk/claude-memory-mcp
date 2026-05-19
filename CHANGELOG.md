@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 ### Changed
 
 - Tightened the public `3.0.0` reboot framing so docs, metadata, and packaging all describe the continuity product consistently
+- Clarified that the project is actively developed and may ship deliberate, documented breaking changes
 - Raised the supported runtime floor to Node `20`
 - Strengthened local release verification with a dedicated `npm run release:check` script
 - Aligned CI with the supported Node `20`+ release baseline and added production dependency audit coverage

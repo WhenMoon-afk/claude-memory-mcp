@@ -20,7 +20,7 @@ The last npm-published v2 release was `2.5.0`. v3 is an intentional product rese
 
 Client-native memory features are useful when your client provides them, but they are usually client-owned. `claude-memory-mcp` is for a different job: a portable, inspectable, local, private continuity store that you can back up, import, script, and query progressively.
 
-This version is meant to be stable and conservative. It prioritizes clear contracts, local storage, predictable CLI/MCP behavior, and a small public surface that downstream forks can understand.
+This project is actively in development. The storage format and CLI are kept deliberately boring, but the MCP tool surface, names, and ergonomics may change from time to time as the project is dogfooded. Breaking changes should be deliberate, documented in the changelog, and shipped through normal versioned releases rather than silent npm updates.
 
 ## What This Is Not
 

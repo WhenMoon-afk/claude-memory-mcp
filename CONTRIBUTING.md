@@ -1,6 +1,6 @@
 # Contributing
 
-This repository is kept as the stable v3 release line for `claude-memory-mcp`.
+This repository is actively developed as the v3 line for `claude-memory-mcp`.
 
 ## Project Direction
 
@@ -13,7 +13,7 @@ Contributions are not actively solicited. Bug reports and narrow fixes may be re
 - CLI/MCP contract clarity
 - release and security hygiene
 
-Out of scope for the stable v3 release line:
+Out of scope for the current v3 line:
 
 - cloud sync
 - telemetry
@@ -39,6 +39,8 @@ Changes to artifact types, node kinds, MCP actions, CLI commands, or export enve
 - `README.md`
 - `CHANGELOG.md`
 - public docs tests
+
+Breaking changes are allowed when they make the local continuity product clearer or safer, especially around the MCP tool surface. They should be intentional, versioned, and documented rather than hidden inside routine maintenance.
 
 ## Dependency Changes
 
