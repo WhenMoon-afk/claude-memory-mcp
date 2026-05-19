@@ -24,6 +24,7 @@ const forbiddenPatterns = [
   /^package\/dist\/.*\.fixtures\./,
   /^package\/dist\/tools\//,
   /^package\/\.github\//,
+  /^package\/AGENTS\.md$/,
   /^package\/CLAUDE\.md$/,
   /^package\/manifest\.json$/,
   /^package\/mcp-servers\.json$/,
