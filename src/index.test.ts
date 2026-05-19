@@ -45,6 +45,16 @@ describe("createServer", () => {
     expect(existsSync(dbPath)).toBe(true);
   });
 
+  it("closes the continuity database when the server closes", async () => {
+    server = createServer();
+
+    await server.close();
+    server = undefined;
+
+    expect(() => rmSync(dbPath)).not.toThrow();
+    expect(existsSync(dbPath)).toBe(false);
+  });
+
   it("runs the continuity tool handler directly", async () => {
     const store = new ContinuityStore(dbPath);
 
