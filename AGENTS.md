@@ -51,6 +51,16 @@ claude-memory-mcp serve
 
 Do not claim work is complete without a fresh verification run.
 
+## Public Repo and npm Release Policy
+
+- GitHub is the public development record. It is okay to push reviewed, verified branches or merges without publishing a new npm version.
+- npm is the stable distribution channel for users who install with `npx`, global npm installs, or package manager version ranges.
+- Do not publish to npm just because code was pushed to GitHub or merged to `main`.
+- Push to GitHub when the branch is useful to preserve or review and `npm run check` passes.
+- Publish a stable npm version only for a deliberate release milestone after docs, changelog, package contents, and migration notes are ready and `npm run release:check` passes.
+- Use npm pre-releases only when real installer-path dogfood is needed before stable release, for example `3.1.0-alpha.0`, `3.1.0-beta.0`, or `3.1.0-rc.0` with npm dist-tags such as `alpha`, `beta`, or `next`.
+- Treat nightly or snapshot builds as optional future automation, not the default workflow for this package.
+
 ## Storage Rules
 
 - Default database path: `~/.local/share/claude-memory/continuity.db` on Unix-like systems, `%APPDATA%\claude-memory\continuity.db` on Windows
