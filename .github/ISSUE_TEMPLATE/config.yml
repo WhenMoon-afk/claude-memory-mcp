@@ -1,8 +1,0 @@
-blank_issues_enabled: false
-contact_links:
-  - name: Security report
-    url: https://github.com/whenmoon-afk/claude-memory-mcp/security/advisories/new
-    about: Please report vulnerabilities privately instead of opening a public issue.
-  - name: Documentation
-    url: https://github.com/whenmoon-afk/claude-memory-mcp#readme
-    about: Start with the README, continuity contract, and changelog before filing a question.
