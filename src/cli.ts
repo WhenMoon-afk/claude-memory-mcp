@@ -80,11 +80,17 @@ export function resolveInstallationOptions(env: NodeJS.ProcessEnv = process.env)
 function writeResult(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
+const HELP_TEXT = "Mooncite commands: install, status, rebuild, source list, source add, source remove, disable, uninstall, purge, serve\n";
 
 async function main(): Promise<void> {
-  const command = process.argv[2] ?? "serve";
+  const args = process.argv.slice(2);
+  const command = args[0] ?? "help";
+  if (["help", "--help", "-h"].includes(command) || args.slice(1).some((arg) => arg === "--help" || arg === "-h")) {
+    process.stdout.write(HELP_TEXT);
+    return;
+  }
   if (command === "source") {
-    const action = process.argv[3] ?? "list";
+    const action = args[1] ?? "list";
     const configPath = resolveSourceConfigPath();
     if (action === "list") {
       const configured = loadSourceRegistrations(configPath);
@@ -95,19 +101,17 @@ async function main(): Promise<void> {
       });
       return;
     }
-    const origin = process.argv[4];
+    if (action !== "add" && action !== "remove") throw new Error("Usage: mooncite source <list|add|remove>");
+    const origin = args[2];
     if (!origin || !isOptionalSourceOrigin(origin)) throw new Error("Mooncite source origin must be claude-code, codex, or chatgpt.");
     if (action === "add") {
-      const root = process.argv[5];
+      const root = args[3];
       if (!root) throw new Error("Usage: mooncite source add <claude-code|codex|chatgpt> <absolute-root>");
       writeResult(addSourceRegistration(configPath, { origin, root }));
       return;
     }
-    if (action === "remove") {
-      writeResult(removeSourceRegistration(configPath, origin));
-      return;
-    }
-    throw new Error("Usage: mooncite source <list|add|remove>");
+    writeResult(removeSourceRegistration(configPath, origin));
+    return;
   }
   const engineOptions = resolveEngineOptions();
   const installation = resolveInstallationOptions();
@@ -141,7 +145,7 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "purge") {
-    const result = await purgeMooncite(engineOptions, process.argv.includes("--yes"));
+    const result = await purgeMooncite(engineOptions, args.includes("--yes"));
     writeResult(result);
     if (result.outcome === "confirmation_required") process.exitCode = 2;
     return;
@@ -162,10 +166,6 @@ async function main(): Promise<void> {
     } finally {
       engine.close();
     }
-    return;
-  }
-  if (["help", "--help", "-h"].includes(command)) {
-    process.stdout.write("Mooncite commands: install, status, rebuild, source list, source add, source remove, disable, uninstall, purge, serve\n");
     return;
   }
   throw new Error(`Unknown Mooncite command: ${command}`);

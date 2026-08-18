@@ -1,4 +1,4 @@
-import { appendFile, chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MoonciteEngine } from "../src/engine.js";
@@ -106,7 +106,7 @@ describe("Mooncite engine public seam", () => {
       engine.close();
     }
   });
-  it("indexes Pi and OMP collisions independently and follows safe OMP title and append changes", async () => {
+  it("indexes Pi and OMP collisions independently and transactionally replaces OMP changes", async () => {
     const f = await fixture();
     const engine = new MoonciteEngine({
       sessionsRoot: f.sessionsRoot,
@@ -164,11 +164,33 @@ describe("Mooncite engine public seam", () => {
       const appended = engine.recall({ query: "cobalt-comet-63" });
       expect(appended).toMatchObject({
         outcome: "matches",
-        trustState: "append_trusted",
+        trustState: "full_verified",
         candidates: [{ sourceOrigin: "omp" }],
       });
       expect(appended.candidates[0]!.evidenceId).toMatch(/^mooncite:omp:[a-f0-9]{24}:[a-f0-9]{24}:[a-f0-9]{24}:0$/u);
       expect(engine.inspect({ evidenceId: appended.candidates[0]!.evidenceId })).toMatchObject({ outcome: "verified" });
+
+      const beforeRewriteAppend = await readFile(f.ompSource, "utf8");
+      const beforeRewriteMetadata = await stat(f.ompSource);
+      const rewrittenPrefix = beforeRewriteAppend.replace("cobalt-comet-63", "magenta-moon-24");
+      expect(rewrittenPrefix).not.toBe(beforeRewriteAppend);
+      await writeFile(f.ompSource, rewrittenPrefix + jsonLine({
+        type: "message",
+        id: "entry-d",
+        parentId: "entry-c",
+        message: { role: "assistant", content: "OMP replacement marker topaz-cloud-75." },
+      }));
+      const afterRewriteMetadata = await stat(f.ompSource);
+      expect(afterRewriteMetadata.dev).toBe(beforeRewriteMetadata.dev);
+      expect(afterRewriteMetadata.ino).toBe(beforeRewriteMetadata.ino);
+      expect(afterRewriteMetadata.size).toBeGreaterThan(beforeRewriteMetadata.size);
+      expect(engine.recall({ query: "topaz-cloud-75" })).toMatchObject({
+        outcome: "matches",
+        trustState: "full_verified",
+        candidates: [{ sourceOrigin: "omp" }],
+      });
+      expect(engine.recall({ query: "magenta-moon-24" }).outcome).toBe("matches");
+      expect(engine.recall({ query: "cobalt-comet-63" }).outcome).toBe("no_match");
       expect(await digest(f.source)).toBe(f.sourceDigest);
     } finally {
       engine.close();
@@ -352,12 +374,27 @@ describe("Mooncite engine public seam", () => {
     }
   });
 
-  it("refuses overlapping source and derived-state roots", async () => {
+  it("refuses overlapping or symlinked source/state roots before creating state", async () => {
     const f = await fixture();
     expect(() => new MoonciteEngine({
       sessionsRoot: f.sessionsRoot,
       stateDir: join(f.sessionsRoot, "derived-state"),
     })).toThrow(/must be disjoint/u);
+    expect(() => new MoonciteEngine({
+      sessionsRoot: "/",
+      stateDir: f.stateDir,
+    })).toThrow(/must be disjoint/u);
+
+    const physicalSourceRoot = join(f.home, "physical-source");
+    const linkedSourceRoot = join(f.home, "linked-source");
+    const nestedStateDir = join(physicalSourceRoot, "state");
+    await mkdir(physicalSourceRoot);
+    await symlink(physicalSourceRoot, linkedSourceRoot, "dir");
+    expect(() => new MoonciteEngine({
+      sessionsRoot: linkedSourceRoot,
+      stateDir: nestedStateDir,
+    })).toThrow(/symbolic-link/u);
+    await expect(stat(nestedStateDir)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("indexes ChatGPT conversation arrays with conversation-backed locators and branch state", async () => {

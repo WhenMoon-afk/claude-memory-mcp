@@ -42,6 +42,7 @@ const MAX_CHATGPT_CONVERSATION_BYTES = 16 * 1024 * 1024;
 const MAX_SOURCE_IDENTIFIER_BYTES = 256;
 const MAX_SOURCE_KIND_BYTES = 64;
 const PRESENTATION_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
+const PRESENTATION_CONTROL_REPLACEMENT_PATTERN = new RegExp(PRESENTATION_CONTROL_PATTERN.source, "gu");
 const DERIVATION_VERSION = "11";
 
 export type SourceOrigin = "pi" | "omp" | SourceRegistration["origin"];
@@ -83,14 +84,12 @@ function citationNamespace(sourceRootDigest: string, sourcePath: string): string
   return sha256(`citation-source-v1\0${sourceRootDigest}\0${sourcePath}`).slice(0, 24);
 }
 
-function evidenceId(origin: SourceOrigin, sourceRootDigest: string, sourcePath: string, sessionId: string, entryId: string, ordinal: number): string {
-  const namespace = citationNamespace(sourceRootDigest, sourcePath);
-  return `mooncite:${origin}:${namespace}:${sha256(sessionId).slice(0, 24)}:${sha256(entryId).slice(0, 24)}:${ordinal}`;
+function evidenceId(origin: SourceOrigin, sourceNamespace: string, sessionId: string, entryId: string, ordinal: number): string {
+  return `mooncite:${origin}:${sourceNamespace}:${sha256(sessionId).slice(0, 24)}:${sha256(entryId).slice(0, 24)}:${ordinal}`;
 }
 
-function evidenceUri(origin: SourceOrigin, sourceRootDigest: string, sourcePath: string, sessionId: string, entryId: string, ordinal: number): string {
-  const namespace = citationNamespace(sourceRootDigest, sourcePath);
-  return `mooncite://${origin}/${namespace}/${encodeURIComponent(sessionId)}/${encodeURIComponent(entryId)}/${ordinal}`;
+function evidenceUri(origin: SourceOrigin, sourceNamespace: string, sessionId: string, entryId: string, ordinal: number): string {
+  return `mooncite://${origin}/${sourceNamespace}/${encodeURIComponent(sessionId)}/${encodeURIComponent(entryId)}/${ordinal}`;
 }
 const DATABASE_SCHEMA = `
   PRAGMA busy_timeout=5000;
@@ -365,18 +364,19 @@ function aggregateGeneration(sources: Array<{ sourcePath: string; sourceGenerati
 }
 
 function truncateUtf8(value: string, maxBytes: number): { text: string; omittedBytes: number } {
+  const byteLength = Buffer.byteLength(value, "utf8");
+  if (byteLength <= maxBytes) return { text: value, omittedBytes: 0 };
   const bytes = Buffer.from(value, "utf8");
-  if (bytes.length <= maxBytes) return { text: value, omittedBytes: 0 };
   const decoder = new TextDecoder("utf-8", { fatal: true });
   let end = Math.max(0, maxBytes);
   while (end > 0) {
     try {
-      return { text: decoder.decode(bytes.subarray(0, end)), omittedBytes: bytes.length - end };
+      return { text: decoder.decode(bytes.subarray(0, end)), omittedBytes: byteLength - end };
     } catch {
       end--;
     }
   }
-  return { text: "", omittedBytes: bytes.length };
+  return { text: "", omittedBytes: byteLength };
 }
 
 function queryTerms(input: string): string[] {
@@ -556,49 +556,14 @@ function assertStateMarker(path: string): void {
 function pathsOverlap(left: string, right: string): boolean {
   const canonicalLeft = resolve(left);
   const canonicalRight = resolve(right);
-  return canonicalLeft === canonicalRight
-    || canonicalLeft.startsWith(`${canonicalRight}${sep}`)
-    || canonicalRight.startsWith(`${canonicalLeft}${sep}`);
+  const leftFromRight = relative(canonicalRight, canonicalLeft);
+  if (leftFromRight === "" || (leftFromRight !== ".." && !leftFromRight.startsWith(`..${sep}`))) return true;
+  const rightFromLeft = relative(canonicalLeft, canonicalRight);
+  return rightFromLeft === "" || (rightFromLeft !== ".." && !rightFromLeft.startsWith(`..${sep}`));
 }
 
 function listSessionFiles(root: string): { files: string[]; errors: number } {
-  if (hasSymlinkComponent(root) || !existsSync(root)) return { files: [], errors: 0 };
-  const rootState = lstatSync(root);
-  if (rootState.isSymbolicLink() || !rootState.isDirectory()) return { files: [], errors: 1 };
-  const canonicalRoot = resolve(root);
-  const files: string[] = [];
-  const directories: Array<{ path: string; depth: number }> = [{ path: canonicalRoot, depth: 0 }];
-  let directoryIndex = 0;
-  let visited = 0;
-  let errors = 0;
-  while (directoryIndex < directories.length) {
-    const directory = directories[directoryIndex++]!;
-    if (directory.depth > MAX_DISCOVERY_DEPTH) {
-      errors++;
-      continue;
-    }
-    let entries: Dirent<string>[];
-    try {
-      entries = readdirSync(directory.path, { withFileTypes: true });
-    } catch {
-      errors++;
-      continue;
-    }
-    for (const entry of entries) {
-      visited++;
-      if (visited > MAX_DISCOVERY_ENTRIES || files.length >= MAX_DISCOVERED_SOURCE_FILES) {
-        return { files: files.sort(), errors: errors + 1 };
-      }
-      const path = join(directory.path, entry.name);
-      if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory()) directories.push({ path, depth: directory.depth + 1 });
-      else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
-        const canonical = resolve(path);
-        if (canonical.startsWith(`${canonicalRoot}${sep}`)) files.push(canonical);
-      }
-    }
-  }
-  return { files: files.sort(), errors };
+  return listSessionFilesByName(root, (name) => name.endsWith(".jsonl"));
 }
 
 function listClaudeSessionFiles(root: string): { files: string[]; errors: number } {
@@ -643,9 +608,8 @@ function listClaudeSessionFiles(root: string): { files: string[]; errors: number
 }
 
 function listChatGptConversationFiles(root: string): { files: string[]; errors: number } {
-  const scan = listSessionFilesByName(root, (name) =>
+  return listSessionFilesByName(root, (name) =>
     name === "conversation.json" || name === "conversations.json" || /^conversations-\d+\.json$/u.test(name));
-  return scan;
 }
 
 function listSessionFilesByName(root: string, accept: (name: string) => boolean): { files: string[]; errors: number } {
@@ -679,18 +643,18 @@ function listSessionFilesByName(root: string, accept: (name: string) => boolean)
       const path = join(directory.path, entry.name);
       if (entry.isSymbolicLink()) continue;
       if (entry.isDirectory()) directories.push({ path, depth: directory.depth + 1 });
-      else if (entry.isFile() && accept(entry.name)) files.push(resolve(path));
+      else if (entry.isFile() && accept(entry.name)) {
+        const canonical = resolve(path);
+        if (canonical.startsWith(`${canonicalRoot}${sep}`)) files.push(canonical);
+      }
     }
   }
   return { files: files.sort(), errors };
 }
 
-function listAutomaticClaudeSessionFiles(root: string): { files: string[]; errors: number } {
-  return listClaudeSessionFiles(root);
-}
 
-function listSourceFiles(origin: SourceOrigin, root: string, discovery?: "automatic"): { files: string[]; errors: number } {
-  if (origin === "claude-code") return discovery === "automatic" ? listAutomaticClaudeSessionFiles(root) : listClaudeSessionFiles(root);
+function listSourceFiles(origin: SourceOrigin, root: string): { files: string[]; errors: number } {
+  if (origin === "claude-code") return listClaudeSessionFiles(root);
   if (origin === "chatgpt") return listChatGptConversationFiles(root);
   return listSessionFiles(root);
 }
@@ -768,11 +732,11 @@ function hashFilePrefix(path: string, size: number, expected: SourceMetadata): s
 
 function splitReadableText(value: string): string[] {
   const rendered = value.replace(
-    new RegExp(PRESENTATION_CONTROL_PATTERN.source, "gu"),
+    PRESENTATION_CONTROL_REPLACEMENT_PATTERN,
     (character) => `\\u{${character.codePointAt(0)!.toString(16)}}`,
   );
+  if (Buffer.byteLength(rendered, "utf8") <= MAX_EVIDENCE_TEXT_BYTES) return rendered.trim() ? [rendered] : [];
   const bytes = Buffer.from(rendered, "utf8");
-  if (bytes.length <= MAX_EVIDENCE_TEXT_BYTES) return rendered.trim() ? [rendered] : [];
   const decoder = new TextDecoder("utf-8", { fatal: true });
   const chunks: string[] = [];
   let offset = 0;
@@ -1208,6 +1172,7 @@ function parseAppend(
   const prefixDigest = captured.bytes.length === 0
     ? stored.prefix_digest
     : `append-chain:${sha256(`append-v1:${stored.prefix_digest}:${sha256(captured.bytes)}:${newAdmittedBytes}`)}`;
+  const sourceNamespace = citationNamespace(stored.source_root_digest, stored.source_path);
 
   for (let index = 0; index < lines.length; index++) {
     const physical = lines[index]!;
@@ -1259,8 +1224,8 @@ function parseAppend(
     for (let ordinal = 0; ordinal < spans.length; ordinal++) {
       const span = spans[ordinal]!;
       evidence.push({
-        evidenceId: evidenceId(location.origin, stored.source_root_digest, stored.source_path, stored.session_id, entry.id, ordinal),
-        evidenceUri: evidenceUri(location.origin, stored.source_root_digest, stored.source_path, stored.session_id, entry.id, ordinal),
+        evidenceId: evidenceId(location.origin, sourceNamespace, stored.session_id, entry.id, ordinal),
+        evidenceUri: evidenceUri(location.origin, sourceNamespace, stored.session_id, entry.id, ordinal),
         excerpt: span.text,
         text: span.text,
         project: stored.project,
@@ -1621,9 +1586,8 @@ export class MoonciteEngine {
         ...(source.discovery ? { discovery: source.discovery } : {}),
       })),
     ];
-    const qualifiedRoots = roots.map((source) => `${source.origin}:${source.root}`);
-    if (new Set(qualifiedRoots).size !== qualifiedRoots.length) {
-      throw new Error("Mooncite source root is configured more than once for one origin.");
+    if (roots.some((source) => hasSymlinkComponent(source.root))) {
+      throw new Error("Mooncite source root contains a symbolic-link component.");
     }
     if (new Set(roots.map((source) => source.root)).size !== roots.length) {
       throw new Error("Mooncite source roots must be distinct.");
@@ -1685,7 +1649,7 @@ export class MoonciteEngine {
         continue;
       }
       if (!rootExists) continue;
-      const scan = listSourceFiles(configured.origin, configured.root, configured.discovery);
+      const scan = listSourceFiles(configured.origin, configured.root);
       errors += scan.errors;
       for (const path of scan.files) {
         const metadata = sourceMetadata(path, configured.root);
@@ -1773,6 +1737,7 @@ export class MoonciteEngine {
   #indexFullChatGptSource(location: SourceLocation): SourceSnapshot {
     const { path, sourcePath } = location;
     const sourceRootDigest = sourceAuthorizationDigest(location.root, location.discovery);
+    const sourceNamespace = citationNamespace(sourceRootDigest, sourcePath);
     const metadata = sourceMetadata(path, location.root);
     if (!metadata) throw new Error("Mooncite ChatGPT source is not a regular file.");
     this.#consumeIngestion(metadata.size, 0, 0);
@@ -1907,13 +1872,13 @@ export class MoonciteEngine {
         eligibleRecords++;
         for (let ordinal = 0; ordinal < spans.length; ordinal++) {
           const span = spans[ordinal]!;
-          const identifier = evidenceId("chatgpt", sourceRootDigest, sourcePath, sessionId, entryId, ordinal);
+          const identifier = evidenceId("chatgpt", sourceNamespace, sessionId, entryId, ordinal);
           if ((findEvidence.get(identifier) as { found?: number } | undefined)?.found) {
             throw new Error("Mooncite evidence identity collision.");
           }
           insertEvidence.run(
             identifier,
-            evidenceUri("chatgpt", sourceRootDigest, sourcePath, sessionId, entryId, ordinal),
+            evidenceUri("chatgpt", sourceNamespace, sessionId, entryId, ordinal),
             span.text,
             project,
             sessionId,
@@ -1985,6 +1950,7 @@ export class MoonciteEngine {
     if (location.origin === "chatgpt") return this.#indexFullChatGptSource(location);
     const { path, sourcePath } = location;
     const sourceRootDigest = sourceAuthorizationDigest(location.root, location.discovery);
+    const sourceNamespace = citationNamespace(sourceRootDigest, sourcePath);
     const metadata = sourceMetadata(path, location.root);
     if (!metadata) throw new Error("Mooncite source is not a regular file.");
     this.#consumeIngestion(metadata.size, 0, 0);
@@ -2154,13 +2120,13 @@ export class MoonciteEngine {
       if (sourceKind === "compaction") latestCompactionLine = physicalLine;
       for (let ordinal = 0; ordinal < spans.length; ordinal++) {
         const span = spans[ordinal]!;
-        const identifier = evidenceId(location.origin, sourceRootDigest, sourcePath, sessionId, entryId, ordinal);
+        const identifier = evidenceId(location.origin, sourceNamespace, sessionId, entryId, ordinal);
         if ((findEvidence.get(identifier) as { found?: number } | undefined)?.found) {
           throw new Error("Mooncite evidence identity collision.");
         }
         insertEvidence.run(
           identifier,
-          evidenceUri(location.origin, sourceRootDigest, sourcePath, sessionId, entryId, ordinal),
+          evidenceUri(location.origin, sourceNamespace, sessionId, entryId, ordinal),
           span.text,
           project!,
           sessionId,
@@ -2205,7 +2171,7 @@ export class MoonciteEngine {
             }
           }
           if (newline < 0) break;
-          prefixHash.update(Buffer.from([0x0a]));
+          prefixHash.update("\n");
           admittedHash = prefixHash.copy();
           processLine(fileOffset + newline);
           lineStart = fileOffset + newline + 1;
@@ -2437,11 +2403,11 @@ export class MoonciteEngine {
   #performRefresh(operation: "refresh" | "rebuild", force: boolean): ScanResult {
     this.#resetIngestionBudget();
     if (!this.#pruneDeauthorizedSources(operation)) return this.#retainForSourceFailure(operation);
-    if (force) return this.#performFullRefresh(operation, true);
+    if (force) return this.#performFullRefresh(operation);
     const stored = this.#storedSources();
     const scan = this.#scanSources(stored);
     if (scan.blocked) return this.#retainForSourceFailure(operation);
-    if (this.#last.generation === "empty" || stored.length === 0) return this.#performFullRefresh(operation, false);
+    if (this.#last.generation === "empty" || stored.length === 0) return this.#performFullRefresh(operation);
     if (scan.errors > 0) return this.#retainForSourceFailure(operation, scan.errors);
     const byPath = new Map(stored.map((source) => [source.source_path, source]));
     const currentPaths = new Set(scan.locations.map((location) => location.sourcePath));
@@ -2459,25 +2425,13 @@ export class MoonciteEngine {
       if (!metadata) return this.#retainForSourceFailure(operation);
       const exact = metadata.dev === previous.dev && metadata.ino === previous.ino && metadata.size === previous.observed_size && metadata.mtimeNs === previous.mtime_ns && metadata.ctimeNs === previous.ctime_ns;
       if (exact) continue;
-      if (["claude-code", "codex", "chatgpt"].includes(location.origin)) {
+      if (location.origin !== "pi") {
         replacementPlans.push({ location, stored: previous });
         continue;
       }
       const monotonicAppend = metadata.dev === previous.dev && metadata.ino === previous.ino && metadata.size > previous.observed_size;
-      if (!monotonicAppend) {
-        if (location.origin === "omp") {
-          replacementPlans.push({ location, stored: previous });
-          continue;
-        }
-        return this.#retainForSourceFailure(operation);
-      }
-      if (metadata.size - previous.admitted_bytes > MAX_APPEND_CAPTURE_BYTES) {
-        if (location.origin === "omp") {
-          replacementPlans.push({ location, stored: previous });
-          continue;
-        }
-        return this.#performFullRefresh(operation, true);
-      }
+      if (!monotonicAppend) return this.#retainForSourceFailure(operation);
+      if (metadata.size - previous.admitted_bytes > MAX_APPEND_CAPTURE_BYTES) return this.#performFullRefresh(operation);
       appendPlans.push({ location, stored: previous });
     }
     if (appendPlans.length === 0 && replacementPlans.length === 0 && newSources.length === 0 && removedPaths.length === 0) {
@@ -2491,13 +2445,7 @@ export class MoonciteEngine {
     for (const plan of appendPlans) {
       const ids = new Set((this.#db.prepare("SELECT entry_id FROM source_records WHERE source_path = ?").all(plan.stored.source_path) as Array<{ entry_id: string }>).map((row) => row.entry_id));
       const source = parseAppend(plan.location, plan.stored, ids);
-      if (source === "requires_full") {
-        if (plan.location.origin === "omp") {
-          replacementPlans.push(plan);
-          continue;
-        }
-        return this.#performFullRefresh(operation, true);
-      }
+      if (source === "requires_full") return this.#performFullRefresh(operation);
       if (!source) return this.#retainForSourceFailure(operation);
       if (!this.#tryConsumeAppendBatch(
         source.admittedBytes - plan.stored.admitted_bytes,
@@ -2505,7 +2453,7 @@ export class MoonciteEngine {
         source.evidence.length,
       )) {
         this.#resetIngestionBudget();
-        return this.#performFullRefresh(operation, true);
+        return this.#performFullRefresh(operation);
       }
       parsedPlans.push({ stored: plan.stored, source });
     }
@@ -2514,7 +2462,7 @@ export class MoonciteEngine {
     return this.#publishChanges(filteredParsedPlans, newSources, replacementPlans, removedPaths, operation);
   }
 
-  #performFullRefresh(operation: "refresh" | "rebuild", _force: boolean): ScanResult {
+  #performFullRefresh(operation: "refresh" | "rebuild"): ScanResult {
     const stored = this.#storedSources();
     const scan = this.#scanSources(stored);
     if (scan.blocked) return this.#retainForSourceFailure(operation);

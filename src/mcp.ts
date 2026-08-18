@@ -5,12 +5,13 @@ import { MOONCITE_MCP_NAME, MOONCITE_VERSION } from "./identity.js";
 import type { RegistrationDiagnostics } from "./clients.js";
 
 const PRESENTATION_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
+const PRESENTATION_CONTROL_REPLACEMENT_PATTERN = new RegExp(PRESENTATION_CONTROL_PATTERN.source, "gu");
 const boundedRenderedInput = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => !PRESENTATION_CONTROL_PATTERN.test(value), "Control characters are not allowed.");
 function sanitizePresentation<T>(value: T): T {
   if (typeof value === "string") {
     return value.replace(
-      new RegExp(PRESENTATION_CONTROL_PATTERN.source, "gu"),
+      PRESENTATION_CONTROL_REPLACEMENT_PATTERN,
       (character) => `\\u{${character.codePointAt(0)!.toString(16)}}`,
     ) as T;
   }

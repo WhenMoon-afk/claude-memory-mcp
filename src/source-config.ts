@@ -205,13 +205,24 @@ function writeConfig(configPath: string, sources: SourceRegistration[]): void {
   }
   const validated = parseConfig({ version: 1, sources });
   const temporary = `${path}.${process.pid}.tmp`;
+  let ownsTemporary = false;
   try {
-    writeFileSync(temporary, `${JSON.stringify(validated, null, 2)}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    const temporaryFd = openSync(
+      temporary,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0),
+      0o600,
+    );
+    ownsTemporary = true;
+    try {
+      writeFileSync(temporaryFd, `${JSON.stringify(validated, null, 2)}\n`, { encoding: "utf8" });
+    } finally {
+      closeSync(temporaryFd);
+    }
     assertOwnedConfigDirectory(directory);
     renameSync(temporary, path);
     chmodSync(path, 0o600);
   } finally {
-    rmSync(temporary, { force: true });
+    if (ownsTemporary) rmSync(temporary, { force: true });
   }
 }
 

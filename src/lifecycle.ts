@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
 import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import {
+  CLIENT_NAMES,
   createClientRegistrationAdapter,
   defaultCommandRunner,
   type ClientOptions,
@@ -22,7 +23,6 @@ const OWNED_STATE_FILES: Record<string, true> = {
   "index.sqlite-wal": true,
 };
 const REGISTRATION_OWNER_FILE = ".mooncite-registrations.json";
-const CLIENT_NAMES: readonly ClientName[] = ["pi", "omp", "codex", "claudeCode"];
 
 export interface InstallationOptions extends EngineOptions, ClientOptions {
   dataHome: string;
@@ -250,9 +250,11 @@ async function assertStateMarker(path: string): Promise<void> {
 function pathsOverlap(left: string, right: string): boolean {
   const canonicalLeft = resolve(left);
   const canonicalRight = resolve(right);
+  const leftPrefix = canonicalLeft.endsWith(sep) ? canonicalLeft : `${canonicalLeft}${sep}`;
+  const rightPrefix = canonicalRight.endsWith(sep) ? canonicalRight : `${canonicalRight}${sep}`;
   return canonicalLeft === canonicalRight
-    || canonicalLeft.startsWith(`${canonicalRight}${sep}`)
-    || canonicalRight.startsWith(`${canonicalLeft}${sep}`);
+    || canonicalLeft.startsWith(rightPrefix)
+    || canonicalRight.startsWith(leftPrefix);
 }
 
 function processIsAlive(pid: number): boolean {
@@ -369,7 +371,7 @@ function createPackageStager(options: InstallationOptions, runner: CommandRunner
     await required(
       runner,
       options.npmCommand ?? "npm",
-      ["install", "--prefix", targetRoot, "--omit=dev", "--ignore-scripts", archive],
+      ["install", "--prefix", targetRoot, "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund", archive],
       process.env,
     );
     await chmod(join(targetRoot, "node_modules"), 0o700);
@@ -400,9 +402,9 @@ export async function installMooncite(
   await assertOwnedDataHome(options.dataHome);
   const adapter = registrations ?? createClientRegistrationAdapter(options, runner);
   const registrationPreflight = await adapter.diagnose();
-  const conflicts = Object.entries(registrationPreflight).filter(([, state]) => state === "conflict");
+  const conflicts = CLIENT_NAMES.filter((client) => registrationPreflight[client] === "conflict");
   if (conflicts.length) {
-    throw new Error(`Refusing conflicting Mooncite client registration: ${conflicts.map(([client]) => client).join(", ")}.`);
+    throw new Error(`Refusing conflicting Mooncite client registration: ${conflicts.join(", ")}.`);
   }
   const existing = await pathKind(options.installRoot);
   let outcome: InstallResult["outcome"] = "already_installed";
@@ -424,40 +426,55 @@ export async function installMooncite(
     } finally {
       await rm(staging, { recursive: true, force: true });
     }
-  } else {
-    await assertOwnedInstallation(options);
   }
-  await assertOwnedInstallation(options);
-  const priorOwners = await readRegistrationOwners(options) ?? [];
   let launcherCreated = false;
+  let configured: RegistrationDiagnostics | null = null;
   try {
+    await assertOwnedInstallation(options);
+    const recordedOwners = await readRegistrationOwners(options);
+    if (!fresh && !recordedOwners) {
+      const unavailable = CLIENT_NAMES.filter((client) => registrationPreflight[client] === "unavailable");
+      if (unavailable.length) {
+        throw new Error(`Mooncite registration ownership cannot be repaired while client state is unavailable: ${unavailable.join(", ")}.`);
+      }
+    }
+    const priorOwners = recordedOwners ?? [];
     launcherCreated = await installCommandLauncher(options);
     const status = openStatus(options);
-    const configured = await adapter.configure();
-    const ownedClients = [...new Set([
-      ...priorOwners,
-      ...CLIENT_NAMES.filter((client) => configured[client] === "exact"),
-    ])];
+    const diagnostics = await adapter.configure();
+    configured = diagnostics;
+    const unverified = CLIENT_NAMES.filter((client) =>
+      diagnostics[client] === "conflict"
+        || (registrationPreflight[client] !== "unavailable" && diagnostics[client] === "missing"));
+    if (unverified.length) {
+      throw new Error(`Mooncite client registration could not be verified for: ${unverified.map((client) => `${client}=${diagnostics[client]}`).join(", ")}.`);
+    }
+    const ownedClients = CLIENT_NAMES.filter((client) =>
+      priorOwners.includes(client)
+        || registrationPreflight[client] === "exact"
+        || diagnostics[client] === "exact");
     await writeRegistrationOwners(options, ownedClients);
-    return { outcome, version: MOONCITE_VERSION, status, registrations: configured };
+    return { outcome, version: MOONCITE_VERSION, status, registrations: diagnostics };
   } catch (error) {
-    if (fresh || launcherCreated) {
-      try {
-        if (launcherCreated) await removeCommandLauncher(options);
-        if (fresh) {
-          await assertOwnedInstallation(options);
-          const afterFailure = await adapter.diagnose();
-          const unresolved = Object.entries(afterFailure)
-            .filter(([client, state]) => registrationPreflight[client as keyof RegistrationDiagnostics] !== state);
-          if (unresolved.length) {
-            throw new Error(`Registration rollback could not be verified for: ${unresolved.map(([client, state]) => `${client}=${state}`).join(", ")}.`);
-          }
-          await assertOwnedInstallation(options);
-          await rm(options.installRoot, { recursive: true });
-        }
-      } catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], "Mooncite installation failed and rollback was incomplete.");
+    try {
+      if (configured) {
+        const registrationAfterConfigure = configured;
+        const addedClients = CLIENT_NAMES.filter((client) =>
+          registrationPreflight[client] === "missing" && registrationAfterConfigure[client] === "exact");
+        if (addedClients.length) await adapter.disable(addedClients);
       }
+      if (launcherCreated) await removeCommandLauncher(options);
+      const afterFailure = await adapter.diagnose();
+      const unresolved = CLIENT_NAMES.filter((client) => registrationPreflight[client] !== afterFailure[client]);
+      if (unresolved.length) {
+        throw new Error(`Registration rollback could not be verified for: ${unresolved.map((client) => `${client}=${afterFailure[client]}`).join(", ")}.`);
+      }
+      if (fresh) {
+        await assertOwnedInstallation(options);
+        await rm(options.installRoot, { recursive: true });
+      }
+    } catch (cleanupError) {
+      throw new AggregateError([error, cleanupError], "Mooncite installation failed and rollback was incomplete.");
     }
     throw error;
   }
@@ -491,11 +508,21 @@ export async function uninstallMooncite(
   const owners = await readRegistrationOwners(options);
   if (!owners) throw new Error("Mooncite registration ownership record is missing; run install to repair it.");
   const before = await registrations.diagnose();
+  const unownedRegistrations = CLIENT_NAMES.filter((client) =>
+    !owners.includes(client) && (before[client] === "exact" || before[client] === "conflict"));
+  if (unownedRegistrations.length) {
+    throw new Error(`Refusing to remove Mooncite while an unowned client registration may still target it: ${unownedRegistrations.join(", ")}.`);
+  }
   const unavailable = owners.filter((client) => before[client] === "unavailable");
   if (unavailable.length) {
     throw new Error(`Refusing to remove Mooncite while an owned client registration state is unavailable: ${unavailable.join(", ")}.`);
   }
   const diagnostics = await registrations.disable(owners);
+  const newlyUnownedRegistrations = CLIENT_NAMES.filter((client) =>
+    !owners.includes(client) && (diagnostics[client] === "exact" || diagnostics[client] === "conflict"));
+  if (newlyUnownedRegistrations.length) {
+    throw new Error(`Refusing to remove Mooncite while an unowned client registration may still target it: ${newlyUnownedRegistrations.join(", ")}.`);
+  }
   const unresolved = owners.filter((client) => diagnostics[client] !== "missing");
   if (unresolved.length) {
     throw new Error(`Refusing to remove Mooncite while owned client registration cleanup is unverified: ${unresolved.join(", ")}.`);
@@ -524,6 +551,19 @@ export async function purgeMooncite(
   if (kind === "missing") return { outcome: confirmed ? "purged" : "confirmation_required", ownedPaths: [] };
   if (kind !== "directory") throw new Error("Refusing to purge a non-directory Mooncite state path.");
   const identity = await assertOwnedStateDirectory(options.stateDir);
+  const canonicalStateDir = await realpath(options.stateDir);
+  for (const sourceRoot of sourceRoots) {
+    let canonicalSourceRoot: string;
+    try {
+      canonicalSourceRoot = await realpath(sourceRoot);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (pathsOverlap(canonicalSourceRoot, canonicalStateDir)) {
+      throw new Error("Refusing to purge overlapping Mooncite source and derived-state paths.");
+    }
+  }
   await assertStateMarker(join(options.stateDir, MOONCITE_STATE_MARKER_NAME));
   const purgeLock = join(options.stateDir, ".purge.lock");
   try {
@@ -539,24 +579,22 @@ export async function purgeMooncite(
   let purgeLockHeld = true;
   try {
     await assertOwnedStateDirectory(options.stateDir, identity);
-    const initialEntries = await readdir(options.stateDir, { withFileTypes: true });
-    for (const entry of initialEntries) {
-      const match = /^\.engine-(\d+)-[0-9a-f-]+\.lock$/u.exec(entry.name);
-      if (!match) continue;
-      const path = join(options.stateDir, entry.name);
-      await assertOwnedStateFile(path);
-      if (processIsAlive(Number(match[1]))) {
-        throw new Error("Refusing to purge Mooncite while a live engine is using its evidence index.");
-      }
-      await rm(path);
-    }
     const entries = (await readdir(options.stateDir, { withFileTypes: true }))
       .filter((entry) => entry.name !== ".purge.lock");
     for (const entry of entries) {
+      const engineLock = /^\.engine-(\d+)-[0-9a-f-]+\.lock$/u.exec(entry.name);
+      const path = join(options.stateDir, entry.name);
+      if (engineLock) {
+        await assertOwnedStateFile(path);
+        if (processIsAlive(Number(engineLock[1]))) {
+          throw new Error("Refusing to purge Mooncite while a live engine is using its evidence index.");
+        }
+        continue;
+      }
       if (!OWNED_STATE_FILES[entry.name] || entry.isSymbolicLink() || !entry.isFile()) {
         throw new Error(`Refusing unknown Mooncite state entry: ${entry.name}`);
       }
-      await assertOwnedStateFile(join(options.stateDir, entry.name));
+      await assertOwnedStateFile(path);
     }
     const ownedPaths = entries.map((entry) => join(options.stateDir, entry.name)).sort((left, right) => {
       if (left.endsWith(`${sep}${MOONCITE_STATE_MARKER_NAME}`)) return 1;
@@ -577,8 +615,4 @@ export async function purgeMooncite(
   } finally {
     if (purgeLockHeld) await rm(purgeLock, { force: true });
   }
-}
-
-export function relativeInstallPath(options: InstallationOptions, path: string): string {
-  return relative(options.installRoot, path);
 }

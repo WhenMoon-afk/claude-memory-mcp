@@ -1,4 +1,4 @@
-import { mkdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -74,6 +74,21 @@ describe("Mooncite optional source registry", () => {
     expect(resolveSourceRegistrations(configPath, { ...env, MOONCITE_AUTO_SOURCES: "0" })).toEqual([
       { origin: "codex", root: customCodex },
     ]);
+  });
+
+  it("preserves a pre-existing temporary file when configuration publication collides", async () => {
+    const f = await fixture();
+    const configDirectory = join(f.home, ".config", "mooncite");
+    const configPath = join(configDirectory, "sources.json");
+    const temporaryPath = `${configPath}.${process.pid}.tmp`;
+    const codexRoot = join(f.home, "codex-sessions");
+    await mkdir(configDirectory, { recursive: true, mode: 0o700 });
+    await mkdir(codexRoot);
+    await writeFile(temporaryPath, "foreign temporary file", { mode: 0o600 });
+
+    expect(() => addSourceRegistration(configPath, { origin: "codex", root: codexRoot })).toThrow(/exist/iu);
+    expect(await readFile(temporaryPath, "utf8")).toBe("foreign temporary file");
+    await expect(stat(configPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("refuses conflicting, symbolic-link, and malformed source registrations", async () => {

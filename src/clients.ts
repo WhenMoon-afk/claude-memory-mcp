@@ -3,7 +3,8 @@ import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { MOONCITE_MCP_NAME, MOONCITE_PACKAGE_NAME } from "./identity.js";
 
-export type ClientName = "pi" | "omp" | "codex" | "claudeCode";
+export const CLIENT_NAMES = ["pi", "omp", "codex", "claudeCode"] as const;
+export type ClientName = (typeof CLIENT_NAMES)[number];
 export type RegistrationState = "missing" | "exact" | "conflict" | "unavailable";
 export type RegistrationDiagnostics = Record<ClientName, RegistrationState>;
 
@@ -114,6 +115,8 @@ function packageSource(value: unknown): string | null {
     : null;
 }
 
+const MISSING_MCP_SERVER_MESSAGE = /(?:^|\r?\n)\s*(?:error:\s*)?(?:no mcp server\b[^\r\n]*\bfound\b|mcp server\b[^\r\n]*\bnot found\b)/iu;
+
 async function piState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
   const probe = await runner(options.piCommand ?? "pi", ["--version"], env).catch(() => null);
   if (!probe || probe.code !== 0) return "unavailable";
@@ -180,7 +183,7 @@ async function codexState(options: ClientOptions, runner: CommandRunner, env: No
   if (!result) return "unavailable";
   if (result.code !== 0) {
     const text = `${result.stdout}\n${result.stderr}`;
-    return /not found|no mcp server/iu.test(text) ? "missing" : "unavailable";
+    return MISSING_MCP_SERVER_MESSAGE.test(text) ? "missing" : "unavailable";
   }
   let value: unknown;
   try { value = JSON.parse(result.stdout) as unknown; } catch { return "conflict"; }
@@ -208,7 +211,7 @@ async function claudeState(options: ClientOptions, runner: CommandRunner, env: N
   if (!result) return "unavailable";
   if (result.code !== 0) {
     const text = `${result.stdout}\n${result.stderr}`;
-    return /not found|no mcp server/iu.test(text) ? "missing" : "unavailable";
+    return MISSING_MCP_SERVER_MESSAGE.test(text) ? "missing" : "unavailable";
   }
   const text = `${result.stdout}\n${result.stderr}`;
   const scope = claudeField(text, "Scope");
@@ -233,12 +236,15 @@ export function createClientRegistrationAdapter(
   runner: CommandRunner = defaultCommandRunner,
 ): ClientRegistrationAdapter {
   const env = { ...process.env, HOME: options.home, PI_AGENT_DIR: options.piAgentDir };
-  const diagnose = async (): Promise<RegistrationDiagnostics> => ({
-    pi: await piState(options, runner, env),
-    omp: await ompState(options, runner, env),
-    codex: await codexState(options, runner, env),
-    claudeCode: await claudeState(options, runner, env),
-  });
+  const diagnose = async (): Promise<RegistrationDiagnostics> => {
+    const [pi, omp, codex, claudeCode] = await Promise.all([
+      piState(options, runner, env),
+      ompState(options, runner, env),
+      codexState(options, runner, env),
+      claudeState(options, runner, env),
+    ]);
+    return { pi, omp, codex, claudeCode };
+  };
 
   const add = async (client: ClientName): Promise<void> => {
     if (client === "pi") await required(runner, options.piCommand ?? "pi", ["install", options.packageRoot], env);
@@ -257,29 +263,57 @@ export function createClientRegistrationAdapter(
     diagnose,
     async configure() {
       const before = await diagnose();
-      for (const [client, state] of Object.entries(before) as Array<[ClientName, RegistrationState]>) {
-        if (state === "conflict") throw new Error(`Refusing conflicting ${client} registration for Mooncite.`);
+      for (const client of CLIENT_NAMES) {
+        if (before[client] === "conflict") throw new Error(`Refusing conflicting ${client} registration for Mooncite.`);
       }
-      const added: ClientName[] = [];
+      const attempted: ClientName[] = [];
       try {
-        for (const client of ["pi", "omp", "codex", "claudeCode"] as const) {
+        for (const client of CLIENT_NAMES) {
           if (before[client] !== "missing") continue;
+          attempted.push(client);
           await add(client);
-          added.push(client);
         }
+        const after = await diagnose();
+        const unverified = CLIENT_NAMES.filter((client) =>
+          (before[client] === "missing" || before[client] === "exact")
+            ? after[client] !== "exact"
+            : after[client] === "conflict");
+        if (unverified.length) {
+          throw new Error(`Mooncite registration could not be verified for: ${unverified.map((client) => `${client}=${after[client]}`).join(", ")}.`);
+        }
+        return after;
       } catch (error) {
         const rollbackErrors: unknown[] = [];
-        for (const client of added.reverse()) {
-          try { await remove(client); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+        let rollbackState: RegistrationDiagnostics | null = null;
+        try { rollbackState = await diagnose(); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+        if (rollbackState) {
+          for (const client of [...attempted].reverse()) {
+            if (rollbackState[client] === "missing") continue;
+            if (rollbackState[client] !== "exact") {
+              rollbackErrors.push(new Error(`Refusing to roll back unverified ${client} registration state: ${rollbackState[client]}.`));
+              continue;
+            }
+            try { await remove(client); } catch (rollbackError) { rollbackErrors.push(rollbackError); }
+          }
         }
-        if (rollbackErrors.length) throw new AggregateError([error, ...rollbackErrors], "Mooncite registration failed and rollback was incomplete.");
+        try {
+          const restored = await diagnose();
+          const unresolved = attempted.filter((client) => restored[client] !== before[client]);
+          if (unresolved.length) {
+            rollbackErrors.push(new Error(`Registration rollback could not be verified for: ${unresolved.map((client) => `${client}=${restored[client]}`).join(", ")}.`));
+          }
+        } catch (rollbackError) {
+          rollbackErrors.push(rollbackError);
+        }
+        if (rollbackErrors.length) {
+          throw new AggregateError([error, ...rollbackErrors], "Mooncite registration failed and rollback was incomplete.");
+        }
         throw error;
       }
-      return diagnose();
     },
     async disable(clients) {
       const before = await diagnose();
-      const targets = clients ?? (["pi", "omp", "codex", "claudeCode"] as const);
+      const targets = clients ?? CLIENT_NAMES;
       for (const client of targets) {
         const state = before[client];
         if (state === "conflict") throw new Error(`Refusing to remove conflicting ${client} registration for Mooncite.`);
