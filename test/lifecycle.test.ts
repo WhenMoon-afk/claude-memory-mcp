@@ -1,4 +1,4 @@
-import { chmod, link, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdir, readFile, readlink, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -72,8 +72,10 @@ describe("Mooncite lifecycle public seam", () => {
     const { fixture, options } = await setup();
     const registrations = fakeRegistrations();
     const installed = await installMooncite(options, async () => ({ code: 1, stdout: "", stderr: "unused" }), registrations, stagePackage);
-    expect(installed).toMatchObject({ outcome: "installed", version: "4.0.3", status: { outcome: "ready" } });
+    expect(installed).toMatchObject({ outcome: "installed", version: "4.0.4", status: { outcome: "ready" } });
     expect(JSON.parse(await readFile(join(options.packageRoot, "package.json"), "utf8"))).toEqual({ name: MOONCITE_PACKAGE_NAME, version: MOONCITE_VERSION });
+    const launcherPath = join(fixture.home, ".local", "bin", "mooncite");
+    expect(await readlink(launcherPath)).toBe(options.cliPath);
     const indexBefore = await stat(join(options.stateDir, "index.sqlite"));
     expect(indexBefore.isFile()).toBe(true);
     expect(await digest(fixture.source)).toBe(fixture.sourceDigest);
@@ -81,8 +83,21 @@ describe("Mooncite lifecycle public seam", () => {
     const removed = await uninstallMooncite(options, undefined, registrations);
     expect(removed.outcome).toBe("uninstalled");
     await expect(stat(options.installRoot)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(lstat(launcherPath)).rejects.toMatchObject({ code: "ENOENT" });
     expect((await stat(join(options.stateDir, "index.sqlite"))).isFile()).toBe(true);
     expect(await digest(fixture.source)).toBe(fixture.sourceDigest);
+  });
+
+  it("refuses to replace an existing local command", async () => {
+    const { fixture, options } = await setup();
+    const launcherPath = join(fixture.home, ".local", "bin", "mooncite");
+    await mkdir(join(fixture.home, ".local", "bin"), { recursive: true, mode: 0o700 });
+    await writeFile(launcherPath, "owner command\n", { mode: 0o700 });
+
+    await expect(installMooncite(options, undefined, fakeRegistrations(), stagePackage))
+      .rejects.toThrow(/existing non-Mooncite command/u);
+    expect(await readFile(launcherPath, "utf8")).toBe("owner command\n");
+    await expect(stat(options.installRoot)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("installs beneath an owner primary-group-writable XDG data directory", async () => {

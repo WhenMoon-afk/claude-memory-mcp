@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -177,11 +177,12 @@ process.exit(result.status ?? 1);
   await chmod(bunShim, 0o755);
 
   const dataHome = join(home, ".local", "share");
+  const localBin = join(home, ".local", "bin");
   const stateHome = join(home, ".local", "state");
   const realOmp = process.env.MOONCITE_REAL_OMP ?? "omp";
   const env = {
     ...process.env,
-    PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
+    PATH: `${fakeBin}${delimiter}${localBin}${delimiter}${process.env.PATH ?? ""}`,
     HOME: home,
     PI_AGENT_DIR: agent,
     PI_CODING_AGENT_DIR: ompAgent,
@@ -207,6 +208,9 @@ process.exit(result.status ?? 1);
   const stablePackageRoot = join(dataHome, "mooncite", "node_modules", "@whenmoon-afk", "mooncite");
   const stableCli = join(stablePackageRoot, "dist", "cli.js");
   if (!(await stat(stableCli)).isFile()) throw new Error("stable CLI missing");
+  const stableLauncher = join(localBin, "mooncite");
+  const installedStatus = JSON.parse((await run("mooncite", ["status"], { env })).stdout);
+  if (installedStatus.outcome !== "ready") throw new Error("installed Mooncite command did not report ready");
   const installedSkill = await readFile(join(stablePackageRoot, "skills", "mooncite", "SKILL.md"), "utf8");
   if (!installedSkill.includes("name: mooncite") || !installedSkill.includes("mooncite_recall") || !installedSkill.includes("mooncite_inspect")) {
     throw new Error("stable package did not install the Mooncite skill");
@@ -325,11 +329,13 @@ process.exit(result.status ?? 1);
   if (await digest(codexSource) !== codexBefore) throw new Error("packed receiver flow changed Codex source history");
   if (await digest(chatGptSource) !== chatGptBefore) throw new Error("packed receiver flow changed ChatGPT source history");
   try { await stat(join(dataHome, "mooncite")); throw new Error("uninstall retained the stable package"); } catch (error) { if (error.code !== "ENOENT") throw error; }
+  try { await lstat(stableLauncher); throw new Error("uninstall retained the Mooncite command"); } catch (error) { if (error.code !== "ENOENT") throw error; }
   console.log(JSON.stringify({
     outcome: "passed",
     package: `@whenmoon-afk/mooncite@${packageVersion}`,
     npxBootstrap: true,
     ompPluginDiscovered: true,
+    installedCommand: stableLauncher,
     skillInstalled: true,
     ompMcpManifest: ".mcp.json",
     resolvedMcpCommand: [resolvedServer.command, ...resolvedServer.args],

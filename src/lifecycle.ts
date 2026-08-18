@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
+import { chmod, lstat, mkdir, mkdtemp, open, readFile, readdir, readlink, realpath, rename, rm, rmdir, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import {
   createClientRegistrationAdapter,
@@ -51,6 +51,54 @@ async function pathKind(path: string): Promise<"missing" | "file" | "directory" 
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
     throw error;
   }
+}
+
+function commandLauncherPath(options: InstallationOptions): string {
+  return resolve(options.home, ".local", "bin", "mooncite");
+}
+
+async function commandLauncherState(options: InstallationOptions): Promise<"missing" | "exact"> {
+  const path = commandLauncherPath(options);
+  let state;
+  try {
+    state = await lstat(path, { bigint: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return "missing";
+    throw error;
+  }
+  if (!state.isSymbolicLink()) throw new Error("Refusing an existing non-Mooncite command at ~/.local/bin/mooncite.");
+  if (typeof process.getuid === "function" && state.uid !== BigInt(process.getuid())) {
+    throw new Error("Refusing a Mooncite command link not owned by the current user.");
+  }
+  const target = resolve(dirname(path), await readlink(path));
+  if (target !== resolve(options.cliPath)) {
+    throw new Error("Refusing an existing non-Mooncite command at ~/.local/bin/mooncite.");
+  }
+  return "exact";
+}
+
+async function installCommandLauncher(options: InstallationOptions): Promise<boolean> {
+  if (await commandLauncherState(options) === "exact") return false;
+  const path = commandLauncherPath(options);
+  const directory = dirname(path);
+  await assertNoSymlinkComponents(directory);
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await assertSafeOwnedDirectory(directory, "Mooncite command");
+  let created = false;
+  try {
+    await symlink(resolve(options.cliPath), path, "file");
+    created = true;
+    await commandLauncherState(options);
+    return true;
+  } catch (error) {
+    if (created) await rm(path, { force: true });
+    throw error;
+  }
+}
+
+async function removeCommandLauncher(options: InstallationOptions): Promise<void> {
+  if (await commandLauncherState(options) === "missing") return;
+  await rm(commandLauncherPath(options));
 }
 
 async function assertNoSymlinkComponents(path: string): Promise<void> {
@@ -381,7 +429,9 @@ export async function installMooncite(
   }
   await assertOwnedInstallation(options);
   const priorOwners = await readRegistrationOwners(options) ?? [];
+  let launcherCreated = false;
   try {
+    launcherCreated = await installCommandLauncher(options);
     const status = openStatus(options);
     const configured = await adapter.configure();
     const ownedClients = [...new Set([
@@ -391,19 +441,22 @@ export async function installMooncite(
     await writeRegistrationOwners(options, ownedClients);
     return { outcome, version: MOONCITE_VERSION, status, registrations: configured };
   } catch (error) {
-    if (fresh) {
+    if (fresh || launcherCreated) {
       try {
-        await assertOwnedInstallation(options);
-        const afterFailure = await adapter.diagnose();
-        const unresolved = Object.entries(afterFailure)
-          .filter(([client, state]) => registrationPreflight[client as keyof RegistrationDiagnostics] !== state);
-        if (unresolved.length) {
-          throw new Error(`Registration rollback could not be verified for: ${unresolved.map(([client, state]) => `${client}=${state}`).join(", ")}.`);
+        if (launcherCreated) await removeCommandLauncher(options);
+        if (fresh) {
+          await assertOwnedInstallation(options);
+          const afterFailure = await adapter.diagnose();
+          const unresolved = Object.entries(afterFailure)
+            .filter(([client, state]) => registrationPreflight[client as keyof RegistrationDiagnostics] !== state);
+          if (unresolved.length) {
+            throw new Error(`Registration rollback could not be verified for: ${unresolved.map(([client, state]) => `${client}=${state}`).join(", ")}.`);
+          }
+          await assertOwnedInstallation(options);
+          await rm(options.installRoot, { recursive: true });
         }
-        await assertOwnedInstallation(options);
-        await rm(options.installRoot, { recursive: true });
       } catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], "Mooncite installation failed and the package was retained because registration rollback was incomplete.");
+        throw new AggregateError([error, cleanupError], "Mooncite installation failed and rollback was incomplete.");
       }
     }
     throw error;
@@ -448,6 +501,7 @@ export async function uninstallMooncite(
     throw new Error(`Refusing to remove Mooncite while owned client registration cleanup is unverified: ${unresolved.join(", ")}.`);
   }
   await assertOwnedInstallation(options);
+  await removeCommandLauncher(options);
   await rm(options.installRoot, { recursive: true });
   return { outcome: "uninstalled", retainedState: resolve(options.stateDir), registrations: diagnostics };
 }

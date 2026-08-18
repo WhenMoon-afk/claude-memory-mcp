@@ -1,14 +1,14 @@
 # Operations
 
 ## Install
-Mooncite 4.0.3 is distributed from GitHub rather than the npm registry:
+Mooncite 4.0.4 is distributed from GitHub rather than the npm registry:
 
 ```bash
-npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.3 install
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.4 install
 ```
 
 
-`mooncite install` stages the current package, verifies exact name/version/layout, atomically places a fresh package under `$XDG_DATA_HOME/mooncite`, refreshes the evidence index, and adds missing registrations for supported clients that are available. A conflicting registration or different package at the owned path is refused. Repeating 4.0.3 is idempotent and repairs its registration-ownership journal.
+`mooncite install` stages the current package, verifies exact name/version/layout, atomically places a fresh package under `$XDG_DATA_HOME/mooncite`, creates an exact `~/.local/bin/mooncite` link, refreshes the evidence index, and adds missing registrations for supported clients that are available. A conflicting registration, different package, or unrelated command at the launcher path is refused. Repeating 4.0.4 is idempotent and repairs its registration-ownership journal.
 
 ## Conversation sources
 
@@ -51,8 +51,8 @@ For remote desktop histories, first make an owner-controlled local snapshot or r
 
 ## Disable, uninstall, purge
 
-`mooncite disable` removes only client registrations recorded as owned by this Mooncite installation. `mooncite uninstall` also verifies and deletes the stable package. An unavailable unowned client does not block either operation; an unavailable owned client preserves the package for retry. Both retain `$XDG_STATE_HOME/mooncite`, `$XDG_CONFIG_HOME/mooncite/sources.json`, and every source history file.
+`mooncite disable` removes only client registrations recorded as owned by this Mooncite installation. `mooncite uninstall` also verifies and deletes the exact command link and stable package. An unavailable unowned client does not block either operation; an unavailable owned client preserves the package for retry. Both retain `$XDG_STATE_HOME/mooncite`, `$XDG_CONFIG_HOME/mooncite/sources.json`, and every source history file.
 
 `mooncite purge` lists recognized derived files and requires `--yes`. Purge requires the owner marker and accepts only the SQLite database and its SQLite sidecars; unknown files, directories, symbolic links, and hard links cause refusal. Source history lives outside the state root and is never a purge target.
 
-Use the executable matching an installed older version to uninstall its package, then install 4.0.3 fresh. Mooncite safely recognizes and adopts a private, schema-identified pre-marker Mooncite index retained by 4.0.0; incompatible derived state is rebuilt from unchanged source history.
+Use the executable matching an installed older version to uninstall its package, then install 4.0.4 fresh. Mooncite safely recognizes and adopts a private, schema-identified pre-marker Mooncite index retained by 4.0.0; incompatible derived state is rebuilt from unchanged source history.
