@@ -1,4 +1,4 @@
-import { link, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -72,7 +72,7 @@ describe("Mooncite lifecycle public seam", () => {
     const { fixture, options } = await setup();
     const registrations = fakeRegistrations();
     const installed = await installMooncite(options, async () => ({ code: 1, stdout: "", stderr: "unused" }), registrations, stagePackage);
-    expect(installed).toMatchObject({ outcome: "installed", version: "4.0.1", status: { outcome: "ready" } });
+    expect(installed).toMatchObject({ outcome: "installed", version: "4.0.2", status: { outcome: "ready" } });
     expect(JSON.parse(await readFile(join(options.packageRoot, "package.json"), "utf8"))).toEqual({ name: MOONCITE_PACKAGE_NAME, version: MOONCITE_VERSION });
     const indexBefore = await stat(join(options.stateDir, "index.sqlite"));
     expect(indexBefore.isFile()).toBe(true);
@@ -83,6 +83,15 @@ describe("Mooncite lifecycle public seam", () => {
     await expect(stat(options.installRoot)).rejects.toMatchObject({ code: "ENOENT" });
     expect((await stat(join(options.stateDir, "index.sqlite"))).isFile()).toBe(true);
     expect(await digest(fixture.source)).toBe(fixture.sourceDigest);
+  });
+
+  it("installs beneath an owner primary-group-writable XDG data directory", async () => {
+    const { options } = await setup();
+    await mkdir(options.dataHome, { recursive: true, mode: 0o700 });
+    await chmod(options.dataHome, 0o770);
+    const installed = await installMooncite(options, undefined, fakeRegistrations(), stagePackage);
+    expect(installed.outcome).toBe("installed");
+    expect((await stat(options.installRoot)).mode & 0o077).toBe(0);
   });
 
   it("uninstalls with unavailable clients that were never registered by Mooncite", async () => {

@@ -443,6 +443,33 @@ interface OwnedDirectoryIdentity {
   ino: string;
 }
 
+function assertSafeAncestorChain(path: string): void {
+  if (typeof process.getuid !== "function") return;
+  const uid = BigInt(process.getuid());
+  const chain: string[] = [];
+  let current = resolve(path);
+  while (true) {
+    chain.push(current);
+    const parent = dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  let confined = false;
+  for (const component of chain.reverse()) {
+    const state = lstatSync(component, { bigint: true });
+    if (state.isSymbolicLink() || !state.isDirectory()) throw new Error("Mooncite state path has a non-directory ancestor.");
+    if (!confined && state.uid !== 0n && state.uid !== uid) {
+      throw new Error("Mooncite state path has an untrusted ancestor owner.");
+    }
+    const mode = Number(state.mode);
+    if (confined && state.uid !== uid) throw new Error("Mooncite state path escapes its owner-private ancestor.");
+    if (!confined && (mode & 0o022) !== 0 && (mode & 0o1000) === 0) {
+      throw new Error("Mooncite state path has an unsafe writable ancestor.");
+    }
+    if (state.uid === uid && (mode & 0o011) === 0) confined = true;
+  }
+}
+
 function assertOwnedStateDirectory(path: string, expected?: OwnedDirectoryIdentity): OwnedDirectoryIdentity {
   const absolutePath = resolve(path);
   if (hasSymlinkComponent(absolutePath) || realpathSync(absolutePath) !== absolutePath) {
@@ -454,11 +481,7 @@ function assertOwnedStateDirectory(path: string, expected?: OwnedDirectoryIdenti
   if (getUid) {
     if (state.uid !== BigInt(getUid())) throw new Error("Mooncite state directory is not owned by the current user.");
     if ((Number(state.mode) & 0o077) !== 0) throw new Error("Mooncite state directory is not private.");
-    const parent = lstatSync(dirname(absolutePath), { bigint: true });
-    const parentMode = Number(parent.mode);
-    if (!parent.isDirectory() || parent.isSymbolicLink() || ((parentMode & 0o022) !== 0 && (parentMode & 0o1000) === 0)) {
-      throw new Error("Mooncite state parent directory permits unsafe replacement.");
-    }
+    assertSafeAncestorChain(absolutePath);
   }
   const identity = { dev: state.dev.toString(), ino: state.ino.toString() };
   if (expected && (identity.dev !== expected.dev || identity.ino !== expected.ino)) {

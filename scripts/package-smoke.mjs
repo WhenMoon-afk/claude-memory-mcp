@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { delimiter, dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 const root = new URL("..", import.meta.url).pathname;
-const receiver = await mkdtemp(join(process.env.MOONCITE_SMOKE_TMPDIR ?? dirname(root), "mooncite-packed-receiver-"));
+const receiver = await mkdtemp(join(process.env.MOONCITE_SMOKE_TMPDIR ?? tmpdir(), "mooncite-packed-receiver-"));
 const run = async (command, args, options = {}) => {
   const { promise, resolve, reject } = Promise.withResolvers();
   const child = spawn(command, args, { cwd: options.cwd ?? receiver, env: options.env ?? process.env, stdio: ["ignore", "pipe", "pipe"] });

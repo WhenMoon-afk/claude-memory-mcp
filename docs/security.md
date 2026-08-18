@@ -2,7 +2,7 @@
 
 Mooncite is Linux-only and requires procfs so every source read can pin its authorized root through file descriptors and verify the opened file remains physically contained. It authorizes only expected conversation files below narrow source roots: `.jsonl` beneath Pi, OMP, Claude Code, and Codex roots, plus `conversation.json`, `conversations.json`, and numbered conversation exports beneath a ChatGPT root. Pi and OMP use standard roots. Claude Code, Codex, and an existing local ChatGPT archive use narrowly scoped automatic roots by default; `MOONCITE_AUTO_SOURCES=0` disables them, and explicit registrations override them. Directory and file symbolic links are excluded. Index and inspect reads verify file identity and coherent byte ranges; inspect rechecks source record digests before returning text.
 
-The index is derived local state with owner-only directory/file modes. Corrupt SQLite state is disposable and rebuilt from source. Refresh keeps a last-good generation rather than publishing incomplete replacement state.
+The index is derived local state with owner-only directory/file modes. Installation, state, and configuration paths reject unsafe writable ancestors unless an earlier owner-private directory or sticky directory prevents pathname replacement. Corrupt SQLite state is disposable and rebuilt from source. Refresh keeps a last-good generation rather than publishing incomplete replacement state.
 
 Recall excerpts and inspect windows are deliberately bounded. Control characters and bidirectional controls are rejected in rendered identifiers and query inputs, and visibly escaped in all returned transcript text and structured fields. Status contains counts and safe source labels, not transcript text or full physical source paths.
 

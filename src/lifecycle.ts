@@ -67,6 +67,33 @@ async function assertNoSymlinkComponents(path: string): Promise<void> {
   }
 }
 
+async function assertSafeAncestorChain(path: string, label: string): Promise<void> {
+  if (typeof process.getuid !== "function") return;
+  const uid = BigInt(process.getuid());
+  const chain: string[] = [];
+  let current = resolve(path);
+  while (true) {
+    chain.push(current);
+    const parent = resolve(current, "..");
+    if (parent === current) break;
+    current = parent;
+  }
+  let confined = false;
+  for (const component of chain.reverse()) {
+    const state = await lstat(component, { bigint: true });
+    if (state.isSymbolicLink() || !state.isDirectory()) throw new Error(`Refusing ${label} path with a non-directory ancestor.`);
+    if (!confined && state.uid !== 0n && state.uid !== uid) {
+      throw new Error(`Refusing ${label} path with an untrusted ancestor owner.`);
+    }
+    const mode = Number(state.mode);
+    if (confined && state.uid !== uid) throw new Error(`Refusing ${label} path that escapes its owner-private ancestor.`);
+    if (!confined && (mode & 0o022) !== 0 && (mode & 0o1000) === 0) {
+      throw new Error(`Refusing ${label} path with an unsafe writable ancestor.`);
+    }
+    if (state.uid === uid && (mode & 0o011) === 0) confined = true;
+  }
+}
+
 async function assertSafeOwnedDirectory(path: string, label: string): Promise<void> {
   await assertNoSymlinkComponents(path);
   const absolutePath = resolve(path);
@@ -76,12 +103,21 @@ async function assertSafeOwnedDirectory(path: string, label: string): Promise<vo
   if (typeof process.getuid === "function") {
     if (state.uid !== BigInt(process.getuid())) throw new Error(`Refusing ${label} directory not owned by the current user.`);
     if ((Number(state.mode) & 0o022) !== 0) throw new Error(`Refusing writable-by-others ${label} directory.`);
-    const parent = await lstat(dirname(absolutePath), { bigint: true });
-    const parentMode = Number(parent.mode);
-    if (!parent.isDirectory() || parent.isSymbolicLink() || ((parentMode & 0o022) !== 0 && (parentMode & 0o1000) === 0)) {
-      throw new Error(`Refusing ${label} directory with an unsafe parent.`);
-    }
   }
+  await assertSafeAncestorChain(absolutePath, label);
+}
+
+async function assertOwnedDataHome(path: string): Promise<void> {
+  await assertNoSymlinkComponents(path);
+  const absolutePath = resolve(path);
+  if (await realpath(absolutePath) !== absolutePath) throw new Error("Refusing aliased Mooncite data directory.");
+  const state = await lstat(absolutePath, { bigint: true });
+  if (state.isSymbolicLink() || !state.isDirectory()) throw new Error("Refusing non-directory Mooncite data path.");
+  if (typeof process.getuid === "function" && state.uid !== BigInt(process.getuid())) {
+    throw new Error("Refusing Mooncite data directory not owned by the current user.");
+  }
+  if ((Number(state.mode) & 0o002) !== 0) throw new Error("Refusing world-writable Mooncite data directory.");
+  await assertSafeAncestorChain(absolutePath, "Mooncite data");
 }
 
 async function assertOwnedInstallTree(root: string): Promise<void> {
@@ -122,11 +158,7 @@ async function assertOwnedStateDirectory(path: string, expected?: OwnedStateIden
   if (typeof process.getuid === "function") {
     if (state.uid !== BigInt(process.getuid())) throw new Error("Refusing a Mooncite state directory not owned by the current user.");
     if ((Number(state.mode) & 0o077) !== 0) throw new Error("Refusing a non-private Mooncite state directory.");
-    const parent = await lstat(dirname(resolve(path)), { bigint: true });
-    const parentMode = Number(parent.mode);
-    if (!parent.isDirectory() || parent.isSymbolicLink() || ((parentMode & 0o022) !== 0 && (parentMode & 0o1000) === 0)) {
-      throw new Error("Refusing a Mooncite state directory with an unsafe parent.");
-    }
+    await assertSafeAncestorChain(resolve(path), "Mooncite state");
   }
   const identity = { dev: state.dev, ino: state.ino };
   if (expected && (identity.dev !== expected.dev || identity.ino !== expected.ino)) {
@@ -241,7 +273,7 @@ async function writeRegistrationOwners(options: InstallationOptions, clients: re
 
 async function assertOwnedInstallation(options: InstallationOptions): Promise<void> {
   assertLayout(options);
-  await assertSafeOwnedDirectory(options.dataHome, "Mooncite data");
+  await assertOwnedDataHome(options.dataHome);
   await assertSafeOwnedDirectory(options.installRoot, "Mooncite installation");
   await assertSafeOwnedDirectory(options.packageRoot, "Mooncite package");
   await assertOwnedInstallTree(options.installRoot);
@@ -317,7 +349,7 @@ export async function installMooncite(
   assertLayout(options);
   await assertNoSymlinkComponents(options.dataHome);
   await mkdir(options.dataHome, { recursive: true, mode: 0o700 });
-  await assertSafeOwnedDirectory(options.dataHome, "Mooncite data");
+  await assertOwnedDataHome(options.dataHome);
   const adapter = registrations ?? createClientRegistrationAdapter(options, runner);
   const registrationPreflight = await adapter.diagnose();
   const conflicts = Object.entries(registrationPreflight).filter(([, state]) => state === "conflict");
