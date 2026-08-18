@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { MOONCITE_MCP_NAME, MOONCITE_PACKAGE_NAME } from "./identity.js";
 
@@ -106,8 +106,25 @@ async function ompState(options: ClientOptions, runner: CommandRunner, env: Node
   const entries: Array<Record<string, unknown>> = [];
   walkPluginEntries(parsed, entries);
   const mooncite = entries.filter((entry) => entry.name === MOONCITE_PACKAGE_NAME || entry.name === "mooncite");
-  const exact = mooncite.filter((entry) => resolve(String(entry.path)) === resolve(options.packageRoot));
-  return mooncite.length === 0 ? "missing" : exact.length === 1 && mooncite.length === 1 ? "exact" : "conflict";
+  let exact = 0;
+  const expected = resolve(options.packageRoot);
+  let expectedReal: string | null = null;
+  try { expectedReal = resolve(await realpath(expected)); } catch { /* A missing stable package cannot own an OMP link. */ }
+  for (const entry of mooncite) {
+    const registered = resolve(String(entry.path));
+    if (registered === expected) {
+      exact++;
+      continue;
+    }
+    if (expectedReal) {
+      try {
+        if (resolve(await realpath(registered)) === expectedReal) exact++;
+      } catch {
+        // A broken plugin path is a conflict, not an exact registration.
+      }
+    }
+  }
+  return mooncite.length === 0 ? "missing" : exact === 1 && mooncite.length === 1 ? "exact" : "conflict";
 }
 
 async function codexState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {

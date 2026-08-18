@@ -16,7 +16,7 @@
 
 **Rebuild** — Full verified recreation of the evidence index from authorized source history.
 
-**Registration** — A client connection to the one local stdio MCP server. Pi and OMP load the packaged thin extension; Codex and Claude Code register the same server directly.
+**Registration** — A client connection to the one local stdio MCP server. OMP discovers the packaged MCP manifest; Codex and Claude Code register the same server directly. Pi may load the packaged thin extension.
 
 **Disable** — Remove exact Mooncite client registrations while preserving the package, evidence index, and source history.
 

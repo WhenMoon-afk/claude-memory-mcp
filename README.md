@@ -7,13 +7,15 @@ Mooncite gives local coding agents bounded, citation-backed recall from prior Pi
 Requires Node.js 24 or newer.
 
 ```bash
-npx --yes @whenmoon-afk/mooncite@4.0.0 install
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.0 install
 ```
+
+Mooncite 4.0.0 is distributed from the tagged GitHub repository, not the npm registry.
 
 A fresh install places a stable package under `$XDG_DATA_HOME/mooncite` (default `~/.local/share/mooncite`), builds the index under `$XDG_STATE_HOME/mooncite` (default `~/.local/state/mooncite`), and configures every supported client found on the machine:
 
 - Pi: packaged thin extension
-- Oh My Pi (OMP): packaged thin extension
+- Oh My Pi (OMP): packaged `.mcp.json` pointing to the same local stdio server
 - Codex: local stdio MCP registration
 - Claude Code: local stdio MCP registration
 

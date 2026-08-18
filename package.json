@@ -15,6 +15,7 @@
     "mooncite": "./dist/cli.js"
   },
   "files": [
+    ".mcp.json",
     "dist/",
     "docs/",
     "skills/",
@@ -22,6 +23,9 @@
     "README.md",
     "LICENSE"
   ],
+  "omp": {
+    "description": "Mooncite local citation-backed MCP server"
+  },
   "pi": {
     "extensions": [
       "./dist/pi/extension.js"

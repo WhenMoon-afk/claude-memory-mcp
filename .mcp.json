@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "mooncite": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "dist/cli.js",
+        "serve"
+      ],
+      "cwd": "."
+    }
+  }
+}

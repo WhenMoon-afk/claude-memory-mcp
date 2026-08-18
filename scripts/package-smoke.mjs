@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 
 const root = new URL("..", import.meta.url).pathname;
@@ -57,11 +57,6 @@ if (client === "pi") {
   if (args[0] === "install") { state.pi = args[1]; mkdirSync(process.env.PI_AGENT_DIR, { recursive: true }); writeFileSync(join(process.env.PI_AGENT_DIR, "settings.json"), JSON.stringify({ packages: [args[1]] })); save(); process.exit(0); }
   if (args[0] === "remove") { delete state.pi; writeFileSync(join(process.env.PI_AGENT_DIR, "settings.json"), JSON.stringify({ packages: [] })); save(); process.exit(0); }
 }
-if (client === "omp") {
-  if (args[0] === "plugin" && args[1] === "list") { console.log(JSON.stringify({ local: state.omp ? [{ name: "@whenmoon-afk/mooncite", path: state.omp }] : [] })); process.exit(0); }
-  if (args[0] === "plugin" && args[1] === "link") { state.omp = args[2]; save(); process.exit(0); }
-  if (args[0] === "plugin" && args[1] === "uninstall") { delete state.omp; save(); process.exit(0); }
-}
 if (client === "codex") {
   if (args[0] === "mcp" && args[1] === "get") { if (!state.codex) { console.error("No MCP server named 'mooncite' found"); process.exit(1); } console.log(JSON.stringify({ name: "mooncite", transport: { type: "stdio", command: state.codex[0], args: state.codex.slice(1) } })); process.exit(0); }
   if (args[0] === "mcp" && args[1] === "add") { state.codex = args.slice(args.indexOf("--") + 1); save(); process.exit(0); }
@@ -78,31 +73,61 @@ process.exit(1);
   await chmod(fakeClient, 0o755);
   const fakeBin = join(receiver, "clients");
   await mkdir(fakeBin);
-  for (const name of ["pi", "omp", "codex", "claude"]) {
+  for (const name of ["pi", "codex", "claude"]) {
     await copyFile(fakeClient, join(fakeBin, name));
     await chmod(join(fakeBin, name), 0o755);
   }
+  const bunShim = join(fakeBin, "bun");
+  await writeFile(bunShim, `#!/usr/bin/env node
+import { spawnSync } from "node:child_process";
+const result = spawnSync("npm", process.argv.slice(2), { stdio: "inherit" });
+process.exit(result.status ?? 1);
+`);
+  await chmod(bunShim, 0o755);
 
   const dataHome = join(home, ".local", "share");
   const stateHome = join(home, ".local", "state");
+  const ompAgent = join(home, ".omp", "agent");
+  const realOmp = process.env.MOONCITE_REAL_OMP ?? "omp";
   const env = {
     ...process.env,
+    PATH: `${fakeBin}${delimiter}${process.env.PATH ?? ""}`,
     HOME: home,
     PI_AGENT_DIR: agent,
+    PI_CODING_AGENT_DIR: ompAgent,
     XDG_DATA_HOME: dataHome,
     XDG_STATE_HOME: stateHome,
     MOONCITE_PI_COMMAND: join(fakeBin, "pi"),
-    MOONCITE_OMP_COMMAND: join(fakeBin, "omp"),
+    MOONCITE_OMP_COMMAND: realOmp,
     MOONCITE_CODEX_COMMAND: join(fakeBin, "codex"),
     MOONCITE_CLAUDE_COMMAND: join(fakeBin, "claude"),
     MOONCITE_SMOKE_CLIENT_STATE: join(receiver, "client-state.json"),
   };
+  const npxHelp = await run("npx", ["--yes", "--package", archive, "mooncite", "help"], { env });
+  if (!npxHelp.stdout.includes("Mooncite commands:")) throw new Error("npx did not dispatch the packed Mooncite executable");
   const installed = JSON.parse((await run(process.execPath, [bootstrapCli, "install"], { env })).stdout);
   if (installed.outcome !== "installed" || installed.version !== "4.0.0") throw new Error("fresh packed install did not complete");
-  const stableCli = join(dataHome, "mooncite", "node_modules", "@whenmoon-afk", "mooncite", "dist", "cli.js");
+  const stablePackageRoot = join(dataHome, "mooncite", "node_modules", "@whenmoon-afk", "mooncite");
+  const stableCli = join(stablePackageRoot, "dist", "cli.js");
   if (!(await stat(stableCli)).isFile()) throw new Error("stable CLI missing");
+  const pluginList = JSON.parse((await run(realOmp, ["plugin", "list", "--json"], { env })).stdout);
+  const ompPlugin = pluginList.npm?.find((entry) => entry.name === "@whenmoon-afk/mooncite");
+  if (!ompPlugin || await realpath(ompPlugin.path) !== await realpath(stablePackageRoot)) {
+    throw new Error(`real OMP plugin discovery did not resolve the stable Mooncite package: ${JSON.stringify(pluginList)}`);
+  }
+  const pluginPackageRoot = ompPlugin.path;
+  const packagedMcp = JSON.parse(await readFile(join(pluginPackageRoot, ".mcp.json"), "utf8"));
+  const declaredServer = packagedMcp.mcpServers?.mooncite;
+  if (declaredServer?.command !== "node" || declaredServer.cwd !== "." || JSON.stringify(declaredServer.args) !== JSON.stringify(["dist/cli.js", "serve"])) {
+    throw new Error("packed OMP MCP declaration is missing or not package-root-safe");
+  }
+  const resolvedServer = {
+    command: declaredServer.command,
+    args: declaredServer.args,
+    cwd: resolve(pluginPackageRoot, declaredServer.cwd),
+  };
 
-  const child = spawn(process.execPath, [stableCli, "serve"], { env, stdio: ["pipe", "pipe", "pipe"] });
+  const child = spawn(resolvedServer.command, resolvedServer.args, { cwd: resolvedServer.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
   const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
   let id = 0;
   const request = async (method, params) => {
@@ -142,7 +167,16 @@ process.exit(1);
   await run(process.execPath, [bootstrapCli, "purge", "--yes"], { env });
   if (await digest(source) !== before) throw new Error("packed receiver flow changed source history");
   try { await stat(join(dataHome, "mooncite")); throw new Error("uninstall retained the stable package"); } catch (error) { if (error.code !== "ENOENT") throw error; }
-  console.log(JSON.stringify({ outcome: "passed", package: "@whenmoon-afk/mooncite@4.0.0", tools: names, sourceUnchanged: true }));
+  console.log(JSON.stringify({
+    outcome: "passed",
+    package: "@whenmoon-afk/mooncite@4.0.0",
+    npxBootstrap: true,
+    ompPluginDiscovered: true,
+    ompMcpManifest: ".mcp.json",
+    resolvedMcpCommand: [resolvedServer.command, ...resolvedServer.args],
+    tools: names,
+    sourceUnchanged: true,
+  }));
 } finally {
   await rm(receiver, { recursive: true, force: true });
 }
