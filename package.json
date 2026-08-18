@@ -1,0 +1,81 @@
+{
+  "name": "@whenmoon-afk/mooncite",
+  "version": "4.0.0",
+  "description": "Mooncite — local citation-backed recall for prior Pi sessions",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "mooncite": "./dist/cli.js"
+  },
+  "files": [
+    "dist/",
+    "docs/",
+    "skills/",
+    "CONTEXT.md",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./dist/pi/extension.js"
+    ],
+    "skills": [
+      "./skills/mooncite/SKILL.md"
+    ]
+  },
+  "scripts": {
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:focused": "vitest run test/engine.test.ts test/mcp.test.ts test/lifecycle.test.ts",
+    "verify": "npm run typecheck && npm test && npm run build",
+    "smoke:package": "npm run build && node scripts/package-smoke.mjs",
+    "prepare": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "typebox": "1.3.7",
+    "zod": "4.3.6"
+  },
+  "bundleDependencies": [
+    "@modelcontextprotocol/server",
+    "typebox",
+    "zod"
+  ],
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "^4.1.4"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/WhenMoon-afk/claude-memory-mcp.git"
+  },
+  "homepage": "https://github.com/WhenMoon-afk/claude-memory-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/WhenMoon-afk/claude-memory-mcp/issues"
+  },
+  "keywords": [
+    "mooncite",
+    "claude-memory-mcp",
+    "mcp",
+    "pi",
+    "omp",
+    "codex",
+    "claude-code",
+    "local-first",
+    "citations"
+  ],
+  "license": "MIT"
+}
