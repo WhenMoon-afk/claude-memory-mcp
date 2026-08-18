@@ -4,15 +4,30 @@ import { MoonciteEngine, type EngineOptions, type EvidenceBundle, type EvidenceI
 import { MOONCITE_MCP_NAME, MOONCITE_VERSION } from "./identity.js";
 import type { RegistrationDiagnostics } from "./clients.js";
 
-const PRESENTATION_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u;
+const PRESENTATION_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
 const boundedRenderedInput = (maximum: number) => z.string().min(1).max(maximum)
   .refine((value) => !PRESENTATION_CONTROL_PATTERN.test(value), "Control characters are not allowed.");
+function sanitizePresentation<T>(value: T): T {
+  if (typeof value === "string") {
+    return value.replace(
+      new RegExp(PRESENTATION_CONTROL_PATTERN.source, "gu"),
+      (character) => `\\u{${character.codePointAt(0)!.toString(16)}}`,
+    ) as T;
+  }
+  if (Array.isArray(value)) return value.map((item) => sanitizePresentation(item)) as T;
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, sanitizePresentation(item)]),
+    ) as T;
+  }
+  return value;
+}
 
 const recallInput = z.object({
   query: boundedRenderedInput(2_000).describe("Lexical query; exact names, identifiers, error text, hashes, and distinctive phrases work best."),
   limit: z.number().int().min(1).max(20).optional().describe("Maximum candidates to return; defaults to 5."),
   project: boundedRenderedInput(256).optional().describe("Exact encoded project identity returned by an earlier candidate, such as project:example-0123456789abcdef."),
-  session_id: boundedRenderedInput(256).optional().describe("Exact Pi session identifier returned by an earlier candidate."),
+  session_id: boundedRenderedInput(512).optional().describe("Exact source-qualified session identifier returned by an earlier candidate."),
 }).strict();
 
 function renderRecall(bundle: EvidenceBundle): string {
@@ -50,7 +65,8 @@ export type RegistrationProvider = () => Promise<RegistrationDiagnostics>;
 
 function renderStatus(status: MoonciteToolStatus): string {
   const registrations = status.registrations;
-  return `Mooncite is ${status.outcome} (${status.freshness}, ${status.trustState}, ${status.coverage} coverage): ${status.evidenceSpans} searchable span(s) from ${status.sourceFiles} Pi session file(s); ${status.malformed} malformed, ${status.oversized} oversized, ${status.errors} error(s); registrations: Pi ${registrations.pi}, OMP ${registrations.omp}, Codex ${registrations.codex}, Claude Code ${registrations.claudeCode}; last good usable: ${status.lastGoodUsable}.`;
+  const sourceCounts = `${status.sourceFilesByOrigin.pi} Pi, ${status.sourceFilesByOrigin.omp} OMP, ${status.sourceFilesByOrigin["claude-code"]} Claude Code, ${status.sourceFilesByOrigin.codex} Codex, ${status.sourceFilesByOrigin.chatgpt} ChatGPT`;
+  return `Mooncite is ${status.outcome} (${status.freshness}, ${status.trustState}, ${status.coverage} coverage): ${status.evidenceSpans} searchable span(s) from ${status.sourceFiles} session file(s) (${sourceCounts}); ${status.malformed} malformed, ${status.oversized} oversized, ${status.errors} error(s); registrations: Pi ${registrations.pi}, OMP ${registrations.omp}, Codex ${registrations.codex}, Claude Code ${registrations.claudeCode}; last good usable: ${status.lastGoodUsable}.`;
 }
 
 export function createMoonciteMcpServer(
@@ -59,33 +75,50 @@ export function createMoonciteMcpServer(
 ): McpServer {
   const engine = new MoonciteEngine(options);
   const server = new McpServer({ name: MOONCITE_MCP_NAME, version: MOONCITE_VERSION }, { capabilities: { tools: {} } });
+  const closeServer = server.close.bind(server);
+  let engineClosed = false;
+  server.close = async (): Promise<void> => {
+    try {
+      await closeServer();
+    } finally {
+      if (!engineClosed) {
+        engineClosed = true;
+        engine.close();
+      }
+    }
+  };
 
   server.registerTool(
     "mooncite_recall",
     {
-      title: "Recall prior Pi evidence",
-      description: "Find bounded cited evidence with transparent lexical search over authorized local Pi history.",
+      title: "Recall prior session evidence",
+      description: "Find bounded cited evidence with transparent lexical search over authorized Pi, OMP, Claude Code, Codex, and ChatGPT history.",
       inputSchema: recallInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ query, limit, project, session_id }) => {
-      const bundle = engine.recall({
-        query,
-        ...(limit === undefined ? {} : { limit }),
-        ...(project === undefined ? {} : { project }),
-        ...(session_id === undefined ? {} : { sessionId: session_id }),
-      });
-      return {
-        content: [{ type: "text" as const, text: renderRecall(bundle) }],
-        structuredContent: bundle,
-      };
+      try {
+        const bundle = engine.recall({
+          query,
+          ...(limit === undefined ? {} : { limit }),
+          ...(project === undefined ? {} : { project }),
+          ...(session_id === undefined ? {} : { sessionId: session_id }),
+        });
+        const safeBundle = sanitizePresentation(bundle);
+        return {
+          content: [{ type: "text" as const, text: renderRecall(safeBundle) }],
+          structuredContent: safeBundle,
+        };
+      } catch {
+        return { content: [{ type: "text" as const, text: "Mooncite recall is temporarily unavailable." }], isError: true };
+      }
     },
   );
 
   server.registerTool(
     "mooncite_inspect",
     {
-      title: "Inspect cited Pi evidence",
+      title: "Inspect cited session evidence",
       description: "Verify one evidence ID or evidence URI and return a bounded physical source window.",
       inputSchema: z.object({
         evidence_id: boundedRenderedInput(2_048),
@@ -94,11 +127,16 @@ export function createMoonciteMcpServer(
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async ({ evidence_id, window }) => {
-      const inspection = engine.inspect({ evidenceId: evidence_id, ...(window === undefined ? {} : { window }) });
-      return {
-        content: [{ type: "text" as const, text: renderInspection(inspection) }],
-        structuredContent: inspection,
-      };
+      try {
+        const inspection = engine.inspect({ evidenceId: evidence_id, ...(window === undefined ? {} : { window }) });
+        const safeInspection = sanitizePresentation(inspection);
+        return {
+          content: [{ type: "text" as const, text: renderInspection(safeInspection) }],
+          structuredContent: safeInspection,
+        };
+      } catch {
+        return { content: [{ type: "text" as const, text: "Mooncite inspection is temporarily unavailable." }], isError: true };
+      }
     },
   );
 
@@ -111,11 +149,16 @@ export function createMoonciteMcpServer(
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
     async () => {
-      const status: MoonciteToolStatus = { ...engine.status(), registrations: await registrations() };
-      return {
-        content: [{ type: "text" as const, text: renderStatus(status) }],
-        structuredContent: status,
-      };
+      try {
+        const status: MoonciteToolStatus = { ...engine.status(), registrations: await registrations() };
+        const safeStatus = sanitizePresentation(status);
+        return {
+          content: [{ type: "text" as const, text: renderStatus(safeStatus) }],
+          structuredContent: safeStatus,
+        };
+      } catch {
+        return { content: [{ type: "text" as const, text: "Mooncite status is temporarily unavailable." }], isError: true };
+      }
     },
   );
 

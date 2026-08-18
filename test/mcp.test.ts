@@ -1,3 +1,4 @@
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import { PassThrough } from "node:stream";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { afterEach, describe, expect, it } from "vitest";
@@ -55,6 +56,7 @@ async function rpc(method: string, params?: Record<string, unknown>, sourceFixtu
   input.write(`${JSON.stringify({ jsonrpc: "2.0", id: 2, method, ...(params ? { params } : {}) })}\n`);
   const result = await response;
   await server.close();
+  expect((await readdir(f.stateDir)).some((name) => name.startsWith(".engine-"))).toBe(false);
   return result;
 }
 
@@ -87,12 +89,30 @@ describe("Mooncite stdio MCP seam", () => {
     }
   });
 
+  it("visibly escapes terminal and bidirectional controls in text and structured results", async () => {
+    const sourceFixture = await createFixture();
+    fixtures.push(sourceFixture);
+    const entries = (await readFile(sourceFixture.source, "utf8")).trimEnd().split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const message = entries[1]!.message as Record<string, unknown>;
+    message.content = "The launch marker is silver-cedar-17. Unsafe \u001b]52;clipboard\u0007 and \u202espoof.";
+    await writeFile(sourceFixture.source, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+    const recalled = await callTool("mooncite_recall", { query: "silver-cedar-17" }, sourceFixture);
+    const rendered = JSON.stringify(recalled);
+    expect(rendered).not.toContain("\u001b");
+    expect(rendered).not.toContain("\u0007");
+    expect(rendered).not.toContain("\u202e");
+    expect(rendered).toContain("\\\\u{1b}");
+    expect(rendered).toContain("\\\\u{202e}");
+  });
+
   it("reports honest index and all supported client states without transcript text", async () => {
     const result = await callTool("mooncite_status", {});
     expect(result.structuredContent).toMatchObject({
       outcome: "ready",
       freshness: "current",
       sourceFiles: 1,
+      sourceFilesByOrigin: { pi: 1, omp: 0, "claude-code": 0, codex: 0, chatgpt: 0 },
       evidenceSpans: 2,
       registrations: { pi: "exact", omp: "exact", codex: "exact", claudeCode: "exact" },
     });

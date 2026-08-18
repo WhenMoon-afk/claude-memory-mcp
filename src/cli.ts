@@ -14,15 +14,41 @@ import {
   type InstallationOptions,
 } from "./lifecycle.js";
 import { createMoonciteMcpServer } from "./mcp.js";
+import {
+  addSourceRegistration,
+  discoverAutomaticSourceRegistrations,
+  isOptionalSourceOrigin,
+  loadSourceRegistrations,
+  removeSourceRegistration,
+  resolveSourceRegistrations as resolveConfiguredSources,
+  type SourceRegistration,
+} from "./source-config.js";
+
+export function resolveAutomaticSourceRegistrations(env: NodeJS.ProcessEnv = process.env): SourceRegistration[] {
+  return discoverAutomaticSourceRegistrations(env);
+}
+
+export function resolveSourceRegistrations(env: NodeJS.ProcessEnv = process.env): SourceRegistration[] {
+  return resolveConfiguredSources(resolveSourceConfigPath(env), env);
+}
 
 export function resolveEngineOptions(env: NodeJS.ProcessEnv = process.env): EngineOptions {
   const home = resolve(env.HOME || homedir());
-  const agentDir = resolve(env.PI_AGENT_DIR || join(home, ".pi", "agent"));
+  const piAgentDir = resolve(env.PI_AGENT_DIR || join(home, ".pi", "agent"));
+  const ompAgentDir = resolve(env.PI_CODING_AGENT_DIR || join(home, ".omp", "agent"));
   const stateHome = resolve(env.XDG_STATE_HOME || join(home, ".local", "state"));
   return {
-    sessionsRoot: resolve(join(agentDir, "sessions")),
+    sessionsRoot: resolve(join(piAgentDir, "sessions")),
+    ompSessionsRoot: resolve(join(ompAgentDir, "sessions")),
+    optionalSourcesProvider: () => resolveSourceRegistrations(env),
     stateDir: resolve(join(stateHome, MOONCITE_STATE_DIRECTORY)),
   };
+}
+
+export function resolveSourceConfigPath(env: NodeJS.ProcessEnv = process.env): string {
+  const home = resolve(env.HOME || homedir());
+  const configHome = resolve(env.XDG_CONFIG_HOME || join(home, ".config"));
+  return resolve(join(configHome, "mooncite", "sources.json"));
 }
 
 export function resolveInstallationOptions(env: NodeJS.ProcessEnv = process.env): InstallationOptions {
@@ -57,6 +83,32 @@ function writeResult(value: unknown): void {
 
 async function main(): Promise<void> {
   const command = process.argv[2] ?? "serve";
+  if (command === "source") {
+    const action = process.argv[3] ?? "list";
+    const configPath = resolveSourceConfigPath();
+    if (action === "list") {
+      const configured = loadSourceRegistrations(configPath);
+      writeResult({
+        automatic: resolveAutomaticSourceRegistrations().filter((source) => !configured.some((item) => item.origin === source.origin)),
+        configured,
+        sources: resolveSourceRegistrations(),
+      });
+      return;
+    }
+    const origin = process.argv[4];
+    if (!origin || !isOptionalSourceOrigin(origin)) throw new Error("Mooncite source origin must be claude-code, codex, or chatgpt.");
+    if (action === "add") {
+      const root = process.argv[5];
+      if (!root) throw new Error("Usage: mooncite source add <claude-code|codex|chatgpt> <absolute-root>");
+      writeResult(addSourceRegistration(configPath, { origin, root }));
+      return;
+    }
+    if (action === "remove") {
+      writeResult(removeSourceRegistration(configPath, origin));
+      return;
+    }
+    throw new Error("Usage: mooncite source <list|add|remove>");
+  }
   const engineOptions = resolveEngineOptions();
   const installation = resolveInstallationOptions();
   const registrations = createClientRegistrationAdapter(installation);
@@ -105,7 +157,7 @@ async function main(): Promise<void> {
     return;
   }
   if (["help", "--help", "-h"].includes(command)) {
-    process.stdout.write("Mooncite commands: install, status, rebuild, disable, uninstall, purge, serve\n");
+    process.stdout.write("Mooncite commands: install, status, rebuild, source list, source add, source remove, disable, uninstall, purge, serve\n");
     return;
   }
   throw new Error(`Unknown Mooncite command: ${command}`);

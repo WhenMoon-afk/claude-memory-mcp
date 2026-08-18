@@ -1,8 +1,11 @@
 {
   "name": "@whenmoon-afk/mooncite",
-  "version": "4.0.0",
-  "description": "Mooncite — local citation-backed recall for prior Pi sessions",
+  "version": "4.0.1",
+  "description": "Mooncite — local citation-backed recall for Pi, OMP, Claude Code, Codex, and ChatGPT history",
   "type": "module",
+  "os": [
+    "linux"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -39,7 +42,7 @@
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:focused": "vitest run test/engine.test.ts test/mcp.test.ts test/lifecycle.test.ts",
+    "test:focused": "vitest run test/engine.test.ts test/mcp.test.ts test/lifecycle.test.ts test/source-config.test.ts",
     "verify": "npm run typecheck && npm test && npm run build",
     "smoke:package": "npm run build && node scripts/package-smoke.mjs",
     "prepare": "npm run build"
@@ -78,6 +81,7 @@
     "omp",
     "codex",
     "claude-code",
+    "chatgpt",
     "local-first",
     "citations"
   ],

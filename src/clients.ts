@@ -34,18 +34,66 @@ export interface ClientOptions {
 export interface ClientRegistrationAdapter {
   diagnose(): Promise<RegistrationDiagnostics>;
   configure(): Promise<RegistrationDiagnostics>;
-  disable(): Promise<RegistrationDiagnostics>;
+  disable(clients?: readonly ClientName[]): Promise<RegistrationDiagnostics>;
 }
 
 export const defaultCommandRunner: CommandRunner = async (command, args, env = process.env) => {
   const { promise, resolve, reject } = Promise.withResolvers<CommandResult>();
-  const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(command, args, {
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: process.platform !== "win32",
+  });
+  const maxOutputBytes = 1024 * 1024;
   let stdout = "";
   let stderr = "";
-  child.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
-  child.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
-  child.once("error", reject);
-  child.once("close", (code) => resolve({ code: code ?? 1, stdout, stderr }));
+  let stdoutBytes = 0;
+  let stderrBytes = 0;
+  let settled = false;
+  const terminate = (): void => {
+    try {
+      if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+      else child.kill("SIGKILL");
+    } catch {
+      try { child.kill("SIGKILL"); } catch { /* The process may already have exited. */ }
+    }
+  };
+  const finish = (result: CommandResult): void => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    resolve(result);
+  };
+  const timer = setTimeout(() => {
+    terminate();
+    finish({ code: 1, stdout, stderr: "Mooncite client command timed out." });
+  }, 120_000);
+  timer.unref();
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    stdoutBytes += Buffer.byteLength(chunk, "utf8");
+    if (stdoutBytes > maxOutputBytes) {
+      terminate();
+      finish({ code: 1, stdout: "", stderr: "Mooncite client command exceeded the output limit." });
+      return;
+    }
+    stdout += chunk;
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+    stderrBytes += Buffer.byteLength(chunk, "utf8");
+    if (stderrBytes > maxOutputBytes) {
+      terminate();
+      finish({ code: 1, stdout: "", stderr: "Mooncite client command exceeded the output limit." });
+      return;
+    }
+    stderr += chunk;
+  });
+  child.once("error", (error) => {
+    if (settled) return;
+    settled = true;
+    clearTimeout(timer);
+    reject(error);
+  });
+  child.once("close", (code) => finish({ code: code ?? 1, stdout, stderr }));
   return promise;
 };
 
@@ -146,6 +194,15 @@ async function codexState(options: ClientOptions, runner: CommandRunner, env: No
     : "conflict";
 }
 
+function claudeField(text: string, name: string): string | null {
+  const prefix = `${name}:`;
+  const matches = text.split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith(prefix));
+  if (matches.length !== 1) return null;
+  return matches[0]!.slice(prefix.length).trim();
+}
+
 async function claudeState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
   const result = await runner(options.claudeCommand ?? "claude", ["mcp", "get", MOONCITE_MCP_NAME], env).catch(() => null);
   if (!result) return "unavailable";
@@ -154,8 +211,16 @@ async function claudeState(options: ClientOptions, runner: CommandRunner, env: N
     return /not found|no mcp server/iu.test(text) ? "missing" : "unavailable";
   }
   const text = `${result.stdout}\n${result.stderr}`;
-  const exact = text.includes(options.nodePath) && text.includes(options.cliPath) && text.includes("serve");
-  return exact ? "exact" : "conflict";
+  const scope = claudeField(text, "Scope");
+  const type = claudeField(text, "Type");
+  const command = claudeField(text, "Command");
+  const args = claudeField(text, "Args");
+  return scope?.startsWith("User config") === true
+    && type === "stdio"
+    && command === options.nodePath
+    && args === `${options.cliPath} serve`
+    ? "exact"
+    : "conflict";
 }
 
 async function required(runner: CommandRunner, command: string, args: string[], env: NodeJS.ProcessEnv): Promise<void> {
@@ -212,15 +277,24 @@ export function createClientRegistrationAdapter(
       }
       return diagnose();
     },
-    async disable() {
+    async disable(clients) {
       const before = await diagnose();
-      for (const [client, state] of Object.entries(before) as Array<[ClientName, RegistrationState]>) {
+      const targets = clients ?? (["pi", "omp", "codex", "claudeCode"] as const);
+      for (const client of targets) {
+        const state = before[client];
         if (state === "conflict") throw new Error(`Refusing to remove conflicting ${client} registration for Mooncite.`);
+        if (state === "unavailable") throw new Error(`Refusing to remove ${client} registration while its state is unavailable.`);
       }
-      for (const client of ["claudeCode", "codex", "omp", "pi"] as const) {
-        if (before[client] === "exact") await remove(client);
+      const removed: ClientName[] = [];
+      for (const client of [...targets].reverse()) {
+        if (before[client] !== "exact") continue;
+        await remove(client);
+        removed.push(client);
       }
-      return diagnose();
+      const after = await diagnose();
+      const unverified = removed.filter((client) => after[client] !== "missing");
+      if (unverified.length) throw new Error(`Mooncite registration removal could not be verified for: ${unverified.join(", ")}.`);
+      return after;
     },
   };
 }
