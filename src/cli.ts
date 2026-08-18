@@ -114,10 +114,18 @@ async function main(): Promise<void> {
   const registrations = createClientRegistrationAdapter(installation);
 
   if (command === "serve") {
-    serveStdio(
+    const handle = serveStdio(
       () => createMoonciteMcpServer(engineOptions, () => registrations.diagnose()),
       { onerror: (error) => process.stderr.write(`mooncite: ${error.message}\n`) },
     );
+    await new Promise<void>((resolve) => {
+      const finish = (): void => resolve();
+      process.stdin.once("end", finish);
+      process.stdin.once("close", finish);
+      process.once("SIGINT", finish);
+      process.once("SIGTERM", finish);
+    });
+    await handle.close();
     return;
   }
   if (command === "install") {

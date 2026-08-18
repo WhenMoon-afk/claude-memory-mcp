@@ -7,10 +7,10 @@ Mooncite gives local coding agents bounded, citation-backed recall from authoriz
 Requires Linux with procfs and Node.js 24 or newer. Mooncite fails closed when it cannot pin authorized source roots through Linux file descriptors.
 
 ```bash
-npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.2 install
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.3 install
 ```
 
-Mooncite 4.0.2 is distributed from the tagged GitHub repository, not the npm registry.
+Mooncite 4.0.3 is distributed from the tagged GitHub repository, not the npm registry.
 
 A fresh install places a stable package under `$XDG_DATA_HOME/mooncite` (default `~/.local/share/mooncite`), builds the index under `$XDG_STATE_HOME/mooncite` (default `~/.local/state/mooncite`), automatically discovers supported histories in narrow standard locations, and configures every supported client found on the machine:
 
@@ -52,7 +52,7 @@ mooncite purge --yes
 mooncite serve
 ```
 
-`source list` distinguishes automatic and configured roots. `source add` records an explicit local override; it does not copy history. `source remove` removes that override, not its files, so an available automatic root may become active again. `disable` removes exact client registrations only. `uninstall` also removes the recognized stable package. Both preserve source history, source authorizations, and the evidence index. `purge --yes` separately removes only recognized derived-state files and refuses unknown entries. Mooncite has no updater or in-place cross-version upgrade path; uninstall another version with that version's executable, then install 4.0.2 fresh.
+`source list` distinguishes automatic and configured roots. `source add` records an explicit local override; it does not copy history. `source remove` removes that override, not its files, so an available automatic root may become active again. `disable` removes exact client registrations only. `uninstall` also removes the recognized stable package. Both preserve source history, source authorizations, and the evidence index. `purge --yes` separately removes only recognized derived-state files and refuses unknown entries. Mooncite has no updater or in-place cross-version upgrade path; uninstall another version with that version's executable, then install 4.0.3 fresh.
 
 ## ChatGPT desktop conversations
 

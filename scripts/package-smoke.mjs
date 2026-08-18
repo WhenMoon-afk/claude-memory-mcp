@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmod, copyFile, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -300,7 +300,12 @@ process.exit(result.status ?? 1);
     || status.structuredContent.sourceFilesByOrigin?.["claude-code"] !== 1
     || status.structuredContent.sourceFilesByOrigin?.codex !== 1
     || status.structuredContent.sourceFilesByOrigin?.chatgpt !== 1) throw new Error("status did not report all source origins");
+  const serverClosed = new Promise((resolve) => child.once("close", resolve));
   child.kill("SIGTERM");
+  await serverClosed;
+  if ((await readdir(join(stateHome, "mooncite"))).some((name) => name.startsWith(".engine-"))) {
+    throw new Error("packed MCP server left an engine lock after shutdown");
+  }
   await run(process.execPath, [bootstrapCli, "source", "remove", "claude-code"], { env });
   await run(process.execPath, [bootstrapCli, "source", "remove", "codex"], { env });
   await run(process.execPath, [bootstrapCli, "source", "remove", "chatgpt"], { env });

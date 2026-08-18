@@ -1,6 +1,6 @@
 {
   "name": "@whenmoon-afk/mooncite",
-  "version": "4.0.2",
+  "version": "4.0.3",
   "description": "Mooncite — local citation-backed recall for Pi, OMP, Claude Code, Codex, and ChatGPT history",
   "type": "module",
   "os": [

@@ -72,7 +72,7 @@ describe("Mooncite lifecycle public seam", () => {
     const { fixture, options } = await setup();
     const registrations = fakeRegistrations();
     const installed = await installMooncite(options, async () => ({ code: 1, stdout: "", stderr: "unused" }), registrations, stagePackage);
-    expect(installed).toMatchObject({ outcome: "installed", version: "4.0.2", status: { outcome: "ready" } });
+    expect(installed).toMatchObject({ outcome: "installed", version: "4.0.3", status: { outcome: "ready" } });
     expect(JSON.parse(await readFile(join(options.packageRoot, "package.json"), "utf8"))).toEqual({ name: MOONCITE_PACKAGE_NAME, version: MOONCITE_VERSION });
     const indexBefore = await stat(join(options.stateDir, "index.sqlite"));
     expect(indexBefore.isFile()).toBe(true);

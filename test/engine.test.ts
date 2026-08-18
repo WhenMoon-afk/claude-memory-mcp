@@ -1,4 +1,4 @@
-import { appendFile, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MoonciteEngine } from "../src/engine.js";
@@ -433,6 +433,21 @@ describe("Mooncite engine public seam", () => {
       expect(await digest(f.source)).toBe(f.sourceDigest);
     } finally {
       adopted.close();
+    }
+  });
+
+  it("removes verified stale engine locks before opening the index", async () => {
+    const f = await fixture();
+    const options = { sessionsRoot: f.sessionsRoot, stateDir: f.stateDir };
+    const first = new MoonciteEngine(options);
+    first.close();
+    const staleName = ".engine-2147483647-00000000-0000-0000-0000-000000000000.lock";
+    await writeFile(`${f.stateDir}/${staleName}`, "2147483647\n", { mode: 0o600 });
+    const reopened = new MoonciteEngine(options);
+    try {
+      expect(await readdir(f.stateDir)).not.toContain(staleName);
+    } finally {
+      reopened.close();
     }
   });
 

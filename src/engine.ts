@@ -501,6 +501,37 @@ function assertOwnedStateFile(path: string): void {
   }
 }
 
+
+function processIsAlive(pid: number): boolean {
+  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function cleanupStaleEngineLocks(stateDir: string): void {
+  for (const entry of readdirSync(stateDir, { withFileTypes: true })) {
+    const match = /^\.engine-([1-9]\d*)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.lock$/u.exec(entry.name);
+    if (!match) continue;
+    const path = join(stateDir, entry.name);
+    assertOwnedStateFile(path);
+    const pid = Number(match[1]);
+    const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const opened = fstatSync(fd, { bigint: true });
+      if (!opened.isFile() || opened.nlink !== 1n) throw new Error("Mooncite engine lock is not an owned regular file.");
+      const bytes = Buffer.alloc(32);
+      const count = readSync(fd, bytes, 0, bytes.length, 0);
+      if (bytes.subarray(0, count).toString("utf8") !== `${pid}\n`) throw new Error("Mooncite engine lock content is invalid.");
+    } finally {
+      closeSync(fd);
+    }
+    if (!processIsAlive(pid)) rmSync(path, { force: true });
+  }
+}
 function assertStateMarker(path: string): void {
   assertOwnedStateFile(path);
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
@@ -1435,6 +1466,7 @@ export class MoonciteEngine {
     let database: DatabaseSync | null = null;
     try {
       if (existsSync(join(this.#stateDir, ".purge.lock"))) throw new Error("Mooncite state purge is in progress.");
+      cleanupStaleEngineLocks(this.#stateDir);
       writeFileSync(engineLockPath, `${process.pid}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
       if (existsSync(join(this.#stateDir, ".purge.lock"))) throw new Error("Mooncite state purge is in progress.");
       this.#engineLockPath = engineLockPath;
