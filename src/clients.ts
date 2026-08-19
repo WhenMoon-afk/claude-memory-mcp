@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { readFile, realpath } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import { MOONCITE_MCP_NAME, MOONCITE_PACKAGE_NAME } from "./identity.js";
 
 export const CLIENT_NAMES = ["pi", "omp", "codex", "claudeCode"] as const;
@@ -114,8 +115,7 @@ function packageSource(value: unknown): string | null {
     ? String((value as Record<string, unknown>).source)
     : null;
 }
-
-const MISSING_MCP_SERVER_MESSAGE = /(?:^|\r?\n)\s*(?:error:\s*)?(?:no mcp server\b[^\r\n]*\bfound\b|mcp server\b[^\r\n]*\bnot found\b)/iu;
+const MISSING_MCP_SERVER_MESSAGE = /(?:^|\r?\n)\s*(?:error:\s*)?(?:no mcp server\s+named\s+["']?mooncite["']?(?:\.|\s|$)|no mcp server\b[^\r\n]*\bfound\b|mcp server\b[^\r\n]*\bnot found\b)/iu;
 
 async function piState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
   const probe = await runner(options.piCommand ?? "pi", ["--version"], env).catch(() => null);
@@ -231,6 +231,22 @@ async function required(runner: CommandRunner, command: string, args: string[], 
   if (result.code !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim() || `exit ${result.code}`}`);
 }
 
+async function removeOmpPlugin(command: string, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<void> {
+  const shimDir = await mkdtemp(join(tmpdir(), "mooncite-omp-uninstall-"));
+  try {
+    await writeFile(
+      join(shimDir, "bun"),
+      "#!/bin/sh\nexec \"${MOONCITE_NPM_COMMAND:-npm}\" \"$@\"\n",
+      { mode: 0o700 },
+    );
+    const existingPath = env.PATH;
+    const shimEnv = { ...env, PATH: existingPath ? `${shimDir}${delimiter}${existingPath}` : shimDir };
+    await required(runner, command, ["plugin", "uninstall", MOONCITE_PACKAGE_NAME], shimEnv);
+  } finally {
+    await rm(shimDir, { recursive: true, force: true });
+  }
+}
+
 export function createClientRegistrationAdapter(
   options: ClientOptions,
   runner: CommandRunner = defaultCommandRunner,
@@ -254,7 +270,7 @@ export function createClientRegistrationAdapter(
   };
   const remove = async (client: ClientName): Promise<void> => {
     if (client === "pi") await required(runner, options.piCommand ?? "pi", ["remove", options.packageRoot], env);
-    else if (client === "omp") await required(runner, options.ompCommand ?? "omp", ["plugin", "uninstall", MOONCITE_PACKAGE_NAME], env);
+    else if (client === "omp") await removeOmpPlugin(options.ompCommand ?? "omp", runner, env);
     else if (client === "codex") await required(runner, options.codexCommand ?? "codex", ["mcp", "remove", MOONCITE_MCP_NAME], env);
     else await required(runner, options.claudeCommand ?? "claude", ["mcp", "remove", "--scope", "user", MOONCITE_MCP_NAME], env);
   };

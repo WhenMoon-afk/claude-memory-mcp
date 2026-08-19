@@ -7,11 +7,11 @@ Mooncite gives local coding agents bounded, citation-backed recall from authoriz
 Requires Linux with procfs, Node.js 24 or newer, and the `npm`/`npx` commands. Fetching the tagged package also requires access to GitHub. Mooncite fails closed when it cannot pin authorized source roots through Linux file descriptors.
 
 ```bash
-npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.4 install
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.5 install
 "$HOME/.local/bin/mooncite" status
 ```
 
-Tagged v4.0.4 is the current stable release and is not published on the npm registry. The untagged `main` branch is 4.0.5 prerelease development, identified by commit SHA rather than a stable install tag.
+Tagged v4.0.5 is the current stable release and is distributed from GitHub rather than the npm registry.
 
 A fresh install places a stable package under `$XDG_DATA_HOME/mooncite` (default `~/.local/share/mooncite`), builds the evidence index under `$XDG_STATE_HOME/mooncite` (default `~/.local/state/mooncite`), and creates an exact launcher link at `~/.local/bin/mooncite`. It configures each supported client it can verify:
 

@@ -2,7 +2,7 @@
 
 Mooncite has one core module, `MoonciteEngine`. Its interface is `refresh`, `recall`, `inspect`, `status`, `rebuild`, and `close`; source adapters, coherent reads, SQLite transactions, FTS ranking, corruption recovery, and last-good retention stay behind that seam.
 
-The 4.0.5 prerelease has five explicit source adapters: Pi session-format-v3 JSONL, compatible OMP JSONL, canonical Claude Code session JSONL, Codex rollout JSONL, and ChatGPT conversation JSON exports. OMP accepts its optional fixed-width title preamble. Claude Code scans project-level JSONL and excludes nested subagent and workflow copies. Codex indexes the user and assistant event stream rather than duplicate transport records. ChatGPT streams a single conversation object or top-level export array into bounded conversation-object byte locators and excludes cycles without losing valid siblings.
+Mooncite 4.0.5 has five explicit source adapters: Pi session-format-v3 JSONL, compatible OMP JSONL, canonical Claude Code session JSONL, Codex rollout JSONL, and ChatGPT conversation JSON exports. OMP accepts its optional fixed-width title preamble. Claude Code scans project-level JSONL and excludes nested subagent and workflow copies. Codex indexes the user and assistant event stream rather than duplicate transport records. ChatGPT streams a single conversation object or top-level export array into per-conversation ingestion so large valid exports are not first materialized as one JavaScript value.
 
 `mooncite serve` wraps the engine in one stdio MCP server. OMP's linked package exposes its package-root-safe `.mcp.json`; Codex and Claude Code register the same server directly. The packaged Pi extension only translates native tool calls to MCP methods and contains no retrieval behavior.
 

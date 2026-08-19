@@ -2,13 +2,13 @@
 
 ## Install
 
-Tagged v4.0.4 is the current stable release and is distributed from GitHub rather than the npm registry:
+Tagged v4.0.5 is the current stable release and is distributed from GitHub rather than the npm registry:
 
 ```bash
-npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.4 install
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.5 install
 ```
 
-The untagged `main` branch is 4.0.5 prerelease development, identified by commit SHA. It does not yet have a stable v4.0.5 install tag.
+Use the exact stable tag above for installation; untagged `main` development is identified by commit SHA.
 
 `mooncite install` stages its own package, verifies the exact name, version, and layout, atomically places a fresh package under `$XDG_DATA_HOME/mooncite`, creates an exact `~/.local/bin/mooncite` link, refreshes the evidence index, and adds missing registrations for available Pi, OMP, Codex, and Claude Code clients. Repeating the same installed version is idempotent. A missing registration-ownership journal can be recreated only when all four client states are available to diagnose; otherwise install refuses to guess ownership.
 
@@ -79,6 +79,6 @@ To remove Mooncite-owned registrations, derived state, launcher, and package whi
 3. Run `mooncite purge --yes`.
 4. Run `mooncite uninstall`.
 
-There is no updater or in-place cross-version replacement. Use the launcher belonging to the installed version to run `uninstall`, run the tagged v4.0.4 install command above, then restart or reload configured clients. Do not substitute `#v4.0.5` while 4.0.5 remains untagged prerelease development.
+There is no updater or in-place cross-version replacement. Use the launcher belonging to the installed version to run `uninstall`, install tagged v4.0.5 with the command above, then restart or reload configured clients.
 
 A marked, owner-private but corrupt or incompatible SQLite index is disposable and rebuilt from unchanged sources. An unmarked state directory is adopted only when its private allowlisted files and SQLite metadata identify it as Mooncite-owned; otherwise startup refuses it.

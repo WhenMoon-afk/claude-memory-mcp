@@ -1,5 +1,5 @@
 import { chmod, link, lstat, mkdir, readFile, readlink, stat, symlink, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   createClientRegistrationAdapter,
@@ -396,7 +396,8 @@ describe("Mooncite lifecycle public seam", () => {
     await mkdir(options.piAgentDir, { recursive: true });
     await writeFile(join(options.piAgentDir, "settings.json"), JSON.stringify({ packages: [] }));
     const enabled = { pi: false, omp: false, codex: false, claudeCode: false };
-    const runner: CommandRunner = async (command, args) => {
+    let ompShimDir: string | null = null;
+    const runner: CommandRunner = async (command, args, env) => {
       if (command === "pi" && args[0] === "--version") return { code: 0, stdout: "1.0.0\n", stderr: "" };
       if (command === "pi" && args[0] === "install") {
         enabled.pi = true;
@@ -412,7 +413,12 @@ describe("Mooncite lifecycle public seam", () => {
         return { code: 0, stdout: JSON.stringify({ local: enabled.omp ? [{ name: MOONCITE_PACKAGE_NAME, path: options.packageRoot }] : [] }), stderr: "" };
       }
       if (command === "omp" && args[1] === "link") { enabled.omp = true; return { code: 0, stdout: "", stderr: "" }; }
-      if (command === "omp" && args[1] === "uninstall") { enabled.omp = false; return { code: 0, stdout: "", stderr: "" }; }
+      if (command === "omp" && args[1] === "uninstall") {
+        ompShimDir = (env?.PATH ?? "").split(delimiter)[0] ?? null;
+        expect(await readFile(join(ompShimDir!, "bun"), "utf8")).toContain("MOONCITE_NPM_COMMAND");
+        enabled.omp = false;
+        return { code: 0, stdout: "", stderr: "" };
+      }
       if (command === "codex" && args[1] === "get") {
         return enabled.codex
           ? { code: 0, stdout: JSON.stringify({ name: "mooncite", transport: { type: "stdio", command: options.nodePath, args: [options.cliPath, "serve"] } }), stderr: "" }
@@ -423,7 +429,7 @@ describe("Mooncite lifecycle public seam", () => {
       if (command === "claude" && args[1] === "get") {
         return enabled.claudeCode
           ? { code: 0, stdout: `mooncite:\n  Scope: User config (available in all your projects)\n  Status: Connected\n  Type: stdio\n  Command: ${options.nodePath}\n  Args: ${options.cliPath} serve\n  Environment:\n`, stderr: "" }
-          : { code: 1, stdout: "", stderr: "No MCP server found" };
+          : { code: 1, stdout: "", stderr: "No MCP server named \"mooncite\". Run `claude mcp add` to add one." };
       }
       if (command === "claude" && args[1] === "add") { enabled.claudeCode = true; return { code: 0, stdout: "", stderr: "" }; }
       if (command === "claude" && args[1] === "remove") { enabled.claudeCode = false; return { code: 0, stdout: "", stderr: "" }; }
@@ -432,6 +438,8 @@ describe("Mooncite lifecycle public seam", () => {
     const adapter = createClientRegistrationAdapter(options, runner);
     expect(await adapter.configure()).toEqual(exactDiagnostics());
     expect(await adapter.disable()).toEqual({ pi: "missing", omp: "missing", codex: "missing", claudeCode: "missing" });
+    expect(ompShimDir).not.toBeNull();
+    await expect(stat(ompShimDir!)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("does not mistake unrelated client not-found errors for missing registrations", async () => {
