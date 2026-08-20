@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Type, type TSchema } from "typebox";
 import { MOONCITE_VERSION } from "../identity.js";
+import { loadLearnedMemoryMode, resolveLearnedMemoryConfigPath } from "../learned-memory.js";
 
 export interface PiToolResult {
   content: Array<{ type: "text"; text: string }>;
@@ -41,6 +42,27 @@ interface JsonRpcMessage {
 
 const packagedCliPath = fileURLToPath(new URL("../cli.js", import.meta.url));
 const PRESENTATION_SAFE_PATTERN = "^[^\\u0000-\\u001f\\u007f-\\u009f\\u061c\\u200e\\u200f\\u2028-\\u202e\\u2066-\\u2069]*$";
+const MEMORY_ID_PATTERN = "^mooncite-memory:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$";
+const MEMORY_SCOPE_PARAMETER = Type.Union([
+  Type.Object({ kind: Type.Literal("global") }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal("project"),
+    project: Type.String({ minLength: 1, maxLength: 256, pattern: PRESENTATION_SAFE_PATTERN }),
+  }, { additionalProperties: false }),
+]);
+const MEMORY_INTERPRETATION_PARAMETER = Type.String({ minLength: 1, maxLength: 8_192, pattern: PRESENTATION_SAFE_PATTERN });
+const MEMORY_EVIDENCE_PARAMETERS = Type.Array(
+  Type.String({ minLength: 1, maxLength: 2_048, pattern: PRESENTATION_SAFE_PATTERN }),
+  { minItems: 1, maxItems: 8, uniqueItems: true },
+);
+
+function learnedMemoryEnabled(): boolean {
+  try {
+    return loadLearnedMemoryMode(resolveLearnedMemoryConfigPath()).enabled;
+  } catch {
+    return false;
+  }
+}
 
 export const callPackagedMcp: McpToolCaller = async (name, args, signal) =>
   new Promise<PiToolResult>((resolvePromise, reject) => {
@@ -165,7 +187,10 @@ function tool(
   };
 }
 
-export function createMooncitePiExtension(call: McpToolCaller = callPackagedMcp) {
+export function createMooncitePiExtension(
+  call: McpToolCaller = callPackagedMcp,
+  memoryEnabled = learnedMemoryEnabled(),
+) {
   return (pi: PiExtensionApi): void => {
     pi.registerTool(tool(call, {
       name: "mooncite_recall",
@@ -173,34 +198,99 @@ export function createMooncitePiExtension(call: McpToolCaller = callPackagedMcp)
       description: "Find bounded cited evidence with transparent lexical search over authorized local conversation history. Returns at most 20 candidates.",
       promptSnippet: "Recall cited evidence from prior local sessions",
       promptGuidelines: [
-        "Use mooncite_recall when earlier local-session evidence could materially inform the current task. Start with exact names, identifiers, error text, or distinctive phrases; refine broad or empty results, and inspect consequential citations before relying on them.",
-        "Reuse exact project and session_id values returned by earlier candidates when narrowing scope; project filters use encoded identities such as project:example, not filesystem paths.",
+        "Use mooncite_recall when earlier local-session evidence could materially inform the current task. Start with exact names, identifiers, literal error text, hashes, or distinctive phrases; quote a multiword phrase for exact phrase search.",
+        "Read outcome, conclusive, match, warnings, and next before acting. Inspect a cited candidate before reliance. An inconclusive result is not evidence of absence.",
+        "Start unscoped. Narrow only by copying exact project and sessionId values returned by a candidate; never invent a scope or pass a filesystem path.",
       ],
       parameters: Type.Object({
-        query: Type.String({ minLength: 1, maxLength: 2_000, pattern: PRESENTATION_SAFE_PATTERN, description: "Lexical query; exact names, identifiers, error text, hashes, and distinctive phrases work best." }),
+        query: Type.String({ minLength: 1, maxLength: 2_000, pattern: PRESENTATION_SAFE_PATTERN, description: "Lexical query. Wrap a multiword phrase in matching quotes for phrase search; otherwise terms are ORed. Exact Mooncite locators and returned encoded identities also match directly." }),
         limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum candidates to return; defaults to 5." })),
-        project: Type.Optional(Type.String({ minLength: 1, maxLength: 256, pattern: PRESENTATION_SAFE_PATTERN, description: "Exact encoded project identity returned by an earlier candidate, such as project:example-0123456789abcdef." })),
-        session_id: Type.Optional(Type.String({ minLength: 1, maxLength: 512, pattern: PRESENTATION_SAFE_PATTERN, description: "Exact source-qualified session identifier returned by an earlier candidate." })),
+        project: Type.Optional(Type.String({ minLength: 1, maxLength: 256, pattern: PRESENTATION_SAFE_PATTERN, description: "Copy the exact candidate.project value from an earlier result; never pass a filesystem path." })),
+        session_id: Type.Optional(Type.String({ minLength: 1, maxLength: 512, pattern: PRESENTATION_SAFE_PATTERN, description: "Copy the exact source-qualified candidate.sessionId value from an earlier result." })),
       }, { additionalProperties: false }),
     }));
     pi.registerTool(tool(call, {
       name: "mooncite_inspect",
-      label: "Inspect Pi evidence",
-      description: "Verify one Mooncite evidence ID or evidence URI and return a bounded physical source window (maximum 10 spans each side).",
+      label: "Inspect cited evidence",
+      description: "Physically verify one Mooncite evidence ID or URI and return a bounded source window (maximum 10 spans each side). Byte verification proves provenance, not claim truth.",
       promptSnippet: "Verify and expand one Mooncite citation",
-      promptGuidelines: ["Use mooncite_inspect after mooncite_recall when the surrounding source evidence or current locator state matters; pass either the returned evidence_id or evidence_uri."],
+      promptGuidelines: ["Before relying on recalled evidence, inspect its exact locator. Treat verified as physical provenance, not truth or current authority."],
       parameters: Type.Object({
         evidence_id: Type.String({ minLength: 1, maxLength: 2_048, pattern: PRESENTATION_SAFE_PATTERN }),
-        window: Type.Optional(Type.Integer({ minimum: 0, maximum: 10 })),
+        window: Type.Optional(Type.Integer({ minimum: 0, maximum: 10, description: "Number of indexed spans before and after the target; defaults to 2, range 0–10." })),
       }, { additionalProperties: false }),
     }));
     pi.registerTool(tool(call, {
       name: "mooncite_status",
       label: "Mooncite status",
-      description: "Report local Pi source and Mooncite index health without transcript text.",
+      description: "Report usable, degraded, or unavailable source/index health, explicit freshness, grouped errors, and next action without transcript text.",
       promptSnippet: "Check Mooncite source and index health",
-      promptGuidelines: ["Use mooncite_status to diagnose Mooncite availability or index freshness without retrieving transcript content."],
+      promptGuidelines: ["Use mooncite_status to diagnose availability or freshness. Search may remain usable when degraded, but empty results are then inconclusive."],
       parameters: Type.Object({}, { additionalProperties: false }),
+    }));
+    if (!memoryEnabled) return;
+    pi.registerTool(tool(call, {
+      name: "mooncite_memory_recall",
+      label: "Recall derived memory",
+      description: "Search explicit citation-backed interpretations. Results are derived memory, not source evidence.",
+      promptSnippet: "Recall citation-backed derived interpretations",
+      promptGuidelines: [
+        "Treat every result as derived_memory, not evidence. Inspect the learned item and its source anchors before consequential reliance.",
+        "Use include_invalid only to review or repair quarantined interpretations.",
+      ],
+      parameters: Type.Object({
+        query: Type.String({ minLength: 1, maxLength: 2_000, pattern: PRESENTATION_SAFE_PATTERN, description: "Lexical interpretation query or exact mooncite-memory ID." }),
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })),
+        project: Type.Optional(Type.String({ minLength: 1, maxLength: 256, pattern: PRESENTATION_SAFE_PATTERN })),
+        include_invalid: Type.Optional(Type.Boolean()),
+      }, { additionalProperties: false }),
+    }));
+    pi.registerTool(tool(call, {
+      name: "mooncite_memory_inspect",
+      label: "Inspect derived memory",
+      description: "Resolve one immutable derived-memory revision and physically inspect every source-evidence anchor.",
+      promptSnippet: "Verify a learned interpretation and all citations",
+      promptGuidelines: ["A verified provenance outcome verifies the source anchors, not the truth or current authority of the interpretation."],
+      parameters: Type.Object({
+        memory_id: Type.String({ minLength: 1, maxLength: 64, pattern: MEMORY_ID_PATTERN }),
+        revision: Type.Optional(Type.Integer({ minimum: 1 })),
+        window: Type.Optional(Type.Integer({ minimum: 0, maximum: 2 })),
+      }, { additionalProperties: false }),
+    }));
+    pi.registerTool(tool(call, {
+      name: "mooncite_memory_write",
+      label: "Write derived memory",
+      description: "Create or append an immutable citation-backed interpretation after physical verification of every evidence anchor.",
+      promptSnippet: "Retain an explicit citation-backed interpretation",
+      promptGuidelines: [
+        "Recall and inspect source evidence before writing. Never write an uncited interpretation or cite another learned memory.",
+        "Supply memory_id and its exact current expected_revision only to append a correction; history is immutable.",
+      ],
+      parameters: Type.Union([
+        Type.Object({
+          interpretation: MEMORY_INTERPRETATION_PARAMETER,
+          evidence_ids: MEMORY_EVIDENCE_PARAMETERS,
+          scope: Type.Optional(MEMORY_SCOPE_PARAMETER),
+        }, { additionalProperties: false }),
+        Type.Object({
+          memory_id: Type.String({ minLength: 1, maxLength: 64, pattern: MEMORY_ID_PATTERN }),
+          expected_revision: Type.Integer({ minimum: 1 }),
+          interpretation: MEMORY_INTERPRETATION_PARAMETER,
+          evidence_ids: MEMORY_EVIDENCE_PARAMETERS,
+          scope: Type.Optional(MEMORY_SCOPE_PARAMETER),
+        }, { additionalProperties: false }),
+      ]),
+    }));
+    pi.registerTool(tool(call, {
+      name: "mooncite_memory_delete",
+      label: "Delete derived memory",
+      description: "Delete one learned item and every revision without changing source history or the evidence index.",
+      promptSnippet: "Delete a learned interpretation only",
+      promptGuidelines: ["Use the exact current revision as the stale-write guard. Deletion never deletes cited source evidence."],
+      parameters: Type.Object({
+        memory_id: Type.String({ minLength: 1, maxLength: 64, pattern: MEMORY_ID_PATTERN }),
+        expected_revision: Type.Integer({ minimum: 1 }),
+      }, { additionalProperties: false }),
     }));
   };
 }

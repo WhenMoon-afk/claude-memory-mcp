@@ -1,6 +1,6 @@
 {
   "name": "@whenmoon-afk/mooncite",
-  "version": "4.0.5",
+  "version": "4.0.6-preview.1001.0",
   "description": "Mooncite — local citation-backed recall for Pi, OMP, Claude Code, Codex, and ChatGPT history",
   "type": "module",
   "os": [
@@ -42,7 +42,7 @@
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:focused": "vitest run test/engine.test.ts test/mcp.test.ts test/pi-extension.test.ts test/lifecycle.test.ts test/source-config.test.ts",
+    "test:focused": "vitest run test/engine.test.ts test/learned-memory.test.ts test/mcp.test.ts test/pi-extension.test.ts test/lifecycle.test.ts test/source-config.test.ts",
     "verify": "npm run typecheck && npm test && npm run build",
     "smoke:package": "npm run build && node scripts/package-smoke.mjs",
     "prepare": "npm run build"

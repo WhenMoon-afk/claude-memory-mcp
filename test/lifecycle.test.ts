@@ -78,6 +78,8 @@ describe("Mooncite lifecycle public seam", () => {
     expect(await readlink(launcherPath)).toBe(options.cliPath);
     const indexBefore = await stat(join(options.stateDir, "index.sqlite"));
     expect(indexBefore.isFile()).toBe(true);
+    const learnedDatabase = join(options.stateDir, "learned-memory.sqlite");
+    await writeFile(learnedDatabase, "retained learned state", { mode: 0o600 });
     expect(await digest(fixture.source)).toBe(fixture.sourceDigest);
 
     const removed = await uninstallMooncite(options, undefined, registrations);
@@ -85,6 +87,7 @@ describe("Mooncite lifecycle public seam", () => {
     await expect(stat(options.installRoot)).rejects.toMatchObject({ code: "ENOENT" });
     await expect(lstat(launcherPath)).rejects.toMatchObject({ code: "ENOENT" });
     expect((await stat(join(options.stateDir, "index.sqlite"))).isFile()).toBe(true);
+    expect(await readFile(learnedDatabase, "utf8")).toBe("retained learned state");
     expect(await digest(fixture.source)).toBe(fixture.sourceDigest);
   });
 
@@ -375,20 +378,25 @@ describe("Mooncite lifecycle public seam", () => {
     expect((await stat(join(options.stateDir, "index.sqlite"))).isFile()).toBe(true);
   });
 
-  it("previews stale engine locks without removing them before confirmation", async () => {
-    const { options } = await setup();
+  it("previews and purges only allowlisted evidence and learned state after confirmation", async () => {
+    const { fixture, options } = await setup();
     const engine = new MoonciteEngine({ sessionsRoot: options.sessionsRoot, stateDir: options.stateDir });
     engine.close();
+    const learnedDatabase = join(options.stateDir, "learned-memory.sqlite");
+    const learnedJournal = join(options.stateDir, "learned-memory.sqlite-journal");
+    await writeFile(learnedDatabase, "durable learned state", { mode: 0o600 });
+    await writeFile(learnedJournal, "sqlite sidecar", { mode: 0o600 });
     const staleLock = join(options.stateDir, ".engine-10000000-dead-beef.lock");
     await writeFile(staleLock, "10000000\n", { mode: 0o600 });
 
     const preview = await purgeMooncite(options, false);
     expect(preview).toMatchObject({ outcome: "confirmation_required" });
-    expect(preview.ownedPaths).toContain(staleLock);
-    expect((await stat(staleLock)).isFile()).toBe(true);
+    expect(preview.ownedPaths).toEqual(expect.arrayContaining([learnedDatabase, learnedJournal, staleLock]));
+    expect((await stat(learnedDatabase)).isFile()).toBe(true);
 
     await expect(purgeMooncite(options, true)).resolves.toMatchObject({ outcome: "purged" });
     await expect(stat(options.stateDir)).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await digest(fixture.source)).toBe(fixture.sourceDigest);
   });
 
   it("configures and removes the same local server for Pi, OMP, Codex, and Claude Code", async () => {

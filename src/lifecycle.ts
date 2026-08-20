@@ -21,6 +21,10 @@ const OWNED_STATE_FILES: Record<string, true> = {
   "index.sqlite-journal": true,
   "index.sqlite-shm": true,
   "index.sqlite-wal": true,
+  "learned-memory.sqlite": true,
+  "learned-memory.sqlite-journal": true,
+  "learned-memory.sqlite-shm": true,
+  "learned-memory.sqlite-wal": true,
 };
 const REGISTRATION_OWNER_FILE = ".mooncite-registrations.json";
 

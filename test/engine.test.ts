@@ -77,6 +77,26 @@ describe("Mooncite engine public seam", () => {
       const candidate = recalled.candidates[0]!;
       expect(candidate.evidenceId).toMatch(/^mooncite:pi:[a-f0-9]{24}:[a-f0-9]{24}:[a-f0-9]{24}:0$/u);
       expect(candidate.evidenceUri).toMatch(/^mooncite:\/\/pi\/[a-f0-9]{24}\/session-moon\/entry-a\/0$/u);
+      const [byId, byUri] = engine.resolveEvidenceAnchors([
+        { locator: candidate.evidenceId },
+        { locator: candidate.evidenceUri },
+      ]);
+      expect(byId).toMatchObject({
+        outcome: "resolved",
+        freshness: "current",
+        anchor: {
+          evidenceId: candidate.evidenceId,
+          evidenceUri: candidate.evidenceUri,
+          sourceOrigin: "pi",
+          recordDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          contextDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          spanDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+          isMoonciteRendering: false,
+        },
+      });
+      expect(byUri?.anchor).toEqual(byId?.anchor);
+      expect(byId?.anchor).not.toHaveProperty("text");
+      expect(byId?.anchor).not.toHaveProperty("sourcePath");
       for (const locator of [candidate.evidenceId, candidate.evidenceUri]) {
         const inspected = engine.inspect({ evidenceId: locator, window: 1 });
         expect(inspected.outcome).toBe("verified");
@@ -306,6 +326,160 @@ describe("Mooncite engine public seam", () => {
     }
   });
 
+  it("returns decision-oriented outcomes, match explanations, and copy-safe scopes", async () => {
+    const f = await fixture();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    try {
+      const exact = engine.recall({ query: "\"The launch marker is silver-cedar-17.\"" });
+      expect(exact).toMatchObject({
+        outcome: "matches",
+        conclusive: true,
+        next: { action: "call", target: "mooncite_inspect" },
+        candidates: [{
+          omittedBytes: 0,
+          isEcho: false,
+          match: {
+            kind: "phrase_exact",
+            band: "strong",
+            missingTerms: [],
+            termCoverage: 1,
+          },
+        }],
+      });
+      const candidate = exact.candidates[0]!;
+      expect(engine.recall({
+        query: "silver-cedar-17",
+        project: candidate.project,
+        sessionId: candidate.sessionId,
+      })).toMatchObject({
+        outcome: "matches",
+        scope: { project: candidate.project, sessionId: candidate.sessionId, evidenceSpans: 2 },
+      });
+      expect(engine.recall({ query: "silver-cedar-17", sessionId: "session-moon" })).toMatchObject({
+        outcome: "matches",
+        scope: { sessionId: candidate.sessionId },
+      });
+      expect(engine.recall({ query: "silver-cedar-17 absent-vocabulary extraneous-term" })).toMatchObject({
+        outcome: "weak_leads",
+        conclusive: false,
+        candidates: [{
+          match: {
+            band: "partial",
+            matchedTerms: ["silver-cedar-17"],
+            missingTerms: ["absent-vocabulary", "extraneous-term"],
+          },
+        }],
+      });
+      expect(engine.recall({ query: "definitely-absent-marker-9081" })).toMatchObject({
+        outcome: "no_match",
+        conclusive: true,
+        candidates: [],
+        next: null,
+      });
+      expect(engine.recall({ query: "silver-cedar-17", project: "/work/moon-project" })).toMatchObject({
+        outcome: "invalid_scope",
+        conclusive: false,
+        next: { action: "call", target: "mooncite_recall" },
+      });
+      expect(engine.recall({ query: "silver-cedar-17", sessionId: "not-a-session" })).toMatchObject({
+        outcome: "invalid_scope",
+        conclusive: false,
+      });
+    } finally {
+      engine.close();
+    }
+  });
+
+  it("suppresses recursive Mooncite renderings while preserving genuine source evidence", async () => {
+    const f = await fixture();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    try {
+      expect(engine.status().outcome).toBe("ready");
+      await appendFile(
+        f.source,
+        jsonLine({
+          type: "message",
+          id: "entry-echo",
+          parentId: "entry-b",
+          message: {
+            role: "assistant",
+            content: "Nested transport wrapper: {\"content\":[{\"type\":\"text\",\"text\":\"Mooncite recall: matches; conclusive=true; recursive-origin-marker-77 was rendered by a prior Mooncite call.\\nTrust: full_verified\"}]}",
+          },
+        })
+        + jsonLine({
+          type: "message",
+          id: "entry-genuine",
+          parentId: "entry-echo",
+          message: { role: "user", content: "The genuine event marker is recursive-origin-marker-77." },
+        }),
+      );
+      const recalled = engine.recall({ query: "recursive-origin-marker-77", limit: 10 });
+      expect(recalled).toMatchObject({
+        outcome: "matches",
+        conclusive: true,
+        echoesSuppressed: 1,
+        candidates: [{ entryId: "entry-genuine", isEcho: false }],
+      });
+      expect(recalled.candidates).toHaveLength(1);
+      expect(recalled.warnings).toContain("1 recursive Mooncite echo(es) suppressed.");
+      expect(recalled.candidates[0]!.excerpt).toContain("genuine event marker");
+    } finally {
+      engine.close();
+    }
+  });
+
+  it("reports degraded and unavailable states without treating an incomplete miss as absence", async () => {
+    const f = await fixture();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    try {
+      const ready = engine.status();
+      expect(ready).toMatchObject({
+        outcome: "ready",
+        searchUsable: true,
+        next: null,
+        lastSuccessfulRefreshAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u),
+      });
+      await chmod(f.source, 0o000);
+      const missing = engine.recall({ query: "never-indexed-while-source-unreadable" });
+      expect(missing).toMatchObject({
+        outcome: "inconclusive",
+        conclusive: false,
+        coverage: "partial",
+        next: { action: "run", target: "mooncite rebuild" },
+      });
+      expect(engine.status()).toMatchObject({
+        outcome: "degraded",
+        searchUsable: true,
+        coverage: "partial",
+        next: { action: "run", target: "mooncite rebuild" },
+      });
+      await chmod(f.source, 0o600);
+    } finally {
+      await chmod(f.source, 0o600).catch(() => undefined);
+      engine.close();
+    }
+
+    const emptyRoot = join(f.home, "empty-sessions");
+    const emptyState = join(f.home, "empty-state");
+    await mkdir(emptyRoot);
+    const empty = new MoonciteEngine({ sessionsRoot: emptyRoot, stateDir: emptyState });
+    try {
+      expect(empty.status()).toMatchObject({
+        outcome: "unavailable",
+        searchUsable: false,
+        freshness: "unavailable",
+        next: { action: "run", target: "mooncite rebuild" },
+      });
+      expect(empty.recall({ query: "anything" })).toMatchObject({
+        outcome: "unavailable",
+        conclusive: false,
+        next: { action: "call", target: "mooncite_status" },
+      });
+    } finally {
+      empty.close();
+    }
+  });
+
   it("automatically discovers standard local histories and honors the process opt-out", async () => {
     const f = await fixture();
     const claudeProject = join(f.home, ".config", "claude-sol", "projects", "-automatic");
@@ -471,6 +645,19 @@ describe("Mooncite engine public seam", () => {
     } finally {
       adopted.close();
     }
+  });
+
+  it("refuses legacy state adoption when durable learned state lacks the owner marker", async () => {
+    const f = await fixture();
+    const options = { sessionsRoot: f.sessionsRoot, stateDir: f.stateDir };
+    const first = new MoonciteEngine(options);
+    first.close();
+    const learnedPath = join(f.stateDir, "learned-memory.sqlite");
+    await writeFile(learnedPath, "durable learned state", { mode: 0o600 });
+    await rm(join(f.stateDir, ".mooncite-state"));
+
+    expect(() => new MoonciteEngine(options)).toThrow(/not marked as Mooncite-owned/u);
+    expect(await readFile(learnedPath, "utf8")).toBe("durable learned state");
   });
 
   it("removes verified stale engine locks before opening the index", async () => {

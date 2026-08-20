@@ -13,6 +13,14 @@ import {
   uninstallMooncite,
   type InstallationOptions,
 } from "./lifecycle.js";
+import {
+  LearnedMemoryStore,
+  learnedMemoryDatabaseRetained,
+  loadLearnedMemoryMode,
+  resolveLearnedMemoryConfigPath,
+  setLearnedMemoryEnabled,
+  unavailableLearnedMemoryStatus,
+} from "./learned-memory.js";
 import { createMoonciteMcpServer } from "./mcp.js";
 import {
   addSourceRegistration,
@@ -80,7 +88,7 @@ export function resolveInstallationOptions(env: NodeJS.ProcessEnv = process.env)
 function writeResult(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
-const HELP_TEXT = "Mooncite commands: install, status, rebuild, source list, source add, source remove, disable, uninstall, purge, serve\n";
+const HELP_TEXT = "Mooncite commands: install, status, rebuild, source list, source add, source remove, memory enable, memory disable, memory status, disable, uninstall, purge, serve\n";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
@@ -119,8 +127,11 @@ async function main(): Promise<void> {
 
   if (command === "serve") {
     const handle = serveStdio(
-      () => createMoonciteMcpServer(engineOptions, () => registrations.diagnose()),
-      { onerror: (error) => process.stderr.write(`mooncite: ${error.message}\n`) },
+      () => createMoonciteMcpServer(
+        engineOptions,
+        () => registrations.diagnose(),
+        { configPath: resolveLearnedMemoryConfigPath() },
+      ),
     );
     await new Promise<void>((resolve) => {
       const finish = (): void => resolve();
@@ -130,6 +141,51 @@ async function main(): Promise<void> {
       process.once("SIGTERM", finish);
     });
     await handle.close();
+    return;
+  }
+  if (command === "memory") {
+    if (args.length !== 2 || !["enable", "disable", "status"].includes(args[1]!)) {
+      throw new Error("Usage: mooncite memory <enable|disable|status>");
+    }
+    const action = args[1]!;
+    const configPath = resolveLearnedMemoryConfigPath();
+    if (action === "enable" || action === "disable") {
+      const databaseRetained = learnedMemoryDatabaseRetained(engineOptions.stateDir);
+      const mode = setLearnedMemoryEnabled(configPath, action === "enable");
+      writeResult({
+        kind: "derived_memory_config",
+        ...mode,
+        databaseRetained,
+        reloadRequired: true,
+      });
+      return;
+    }
+    const mode = loadLearnedMemoryMode(configPath);
+    if (!mode.enabled) {
+      writeResult({
+        kind: "derived_memory_config",
+        ...mode,
+        databaseRetained: learnedMemoryDatabaseRetained(engineOptions.stateDir),
+        reloadRequired: false,
+      });
+      return;
+    }
+    const engine = new MoonciteEngine(engineOptions);
+    let store: LearnedMemoryStore | null = null;
+    try {
+      try {
+        store = new LearnedMemoryStore(engine, { stateDir: engineOptions.stateDir });
+        writeResult({ ...mode, ...store.status(), reloadRequired: false });
+      } catch (error) {
+        writeResult({ ...mode, ...unavailableLearnedMemoryStatus(error), reloadRequired: false });
+      }
+    } finally {
+      try {
+        store?.close();
+      } finally {
+        engine.close();
+      }
+    }
     return;
   }
   if (command === "install") {
@@ -152,10 +208,28 @@ async function main(): Promise<void> {
   }
   if (command === "status") {
     const engine = new MoonciteEngine(engineOptions);
+    let store: LearnedMemoryStore | null = null;
     try {
-      writeResult({ ...engine.status(), registrations: await registrations.diagnose() });
+      const status: Record<string, unknown> = { ...engine.status(), registrations: await registrations.diagnose() };
+      try {
+        if (loadLearnedMemoryMode(resolveLearnedMemoryConfigPath()).enabled) {
+          try {
+            store = new LearnedMemoryStore(engine, { stateDir: engineOptions.stateDir });
+            status.learnedMemory = store.status();
+          } catch (error) {
+            status.learnedMemory = unavailableLearnedMemoryStatus(error);
+          }
+        }
+      } catch {
+        // Optional learned-memory configuration failures do not alter evidence status.
+      }
+      writeResult(status);
     } finally {
-      engine.close();
+      try {
+        store?.close();
+      } finally {
+        engine.close();
+      }
     }
     return;
   }

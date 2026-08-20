@@ -4,14 +4,25 @@ Mooncite gives local coding agents bounded, citation-backed recall from authoriz
 
 ## Install
 
-Requires Linux with procfs, Node.js 24 or newer, and the `npm`/`npx` commands. Fetching the tagged package also requires access to GitHub. Mooncite fails closed when it cannot pin authorized source roots through Linux file descriptors.
+Requires Linux with procfs, Node.js 24 or newer, and the `npm` command. Fetching the tagged package also requires access to GitHub. Mooncite fails closed when it cannot pin authorized source roots through Linux file descriptors.
 
 ```bash
 npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.5 install
+```
+
+Optionally verify the installed launcher separately:
+
+```bash
 "$HOME/.local/bin/mooncite" status
 ```
 
 Tagged v4.0.5 is the current stable release and is distributed from GitHub rather than the npm registry.
+
+To try the current prerelease without replacing the stable tag:
+
+```bash
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6-preview.1001.0 install
+```
 
 A fresh install places a stable package under `$XDG_DATA_HOME/mooncite` (default `~/.local/share/mooncite`), builds the evidence index under `$XDG_STATE_HOME/mooncite` (default `~/.local/state/mooncite`), and creates an exact launcher link at `~/.local/bin/mooncite`. It configures each supported client it can verify:
 
@@ -37,17 +48,21 @@ Pi and OMP use their standard session roots. Optional automatic roots are `~/.cl
 
 Recall is an MCP tool used inside a registered client, not a `mooncite recall` shell command. After restarting a client whose registration is `exact`, paste this prompt:
 
-> Call `mooncite_status`. If Mooncite is ready, ask me for one distinctive phrase from an earlier conversation, pass that exact phrase to `mooncite_recall`, and pass the best candidate's `evidence_id` to `mooncite_inspect`. Rely on the source window only when the inspection outcome is `verified`; otherwise report the outcome. If recall returns no candidate, report that instead.
+> Call `mooncite_recall` with one distinctive phrase from an earlier conversation. Read its `outcome`, `conclusive`, `meaning`, candidate `match`, warnings, and `next`. If it returns a candidate, pass the best candidate's `evidence_id` to `mooncite_inspect`. Treat `verified` as physical provenance, not truth or current authority. If recall is `inconclusive` or `unavailable`, follow its next action instead of claiming the evidence is absent.
 
 ## Tools
 
-Mooncite exposes exactly three MCP tools:
+By default Mooncite exposes exactly three evidence MCP tools:
 
-- `mooncite_recall` — bounded lexical search over authorized local session history
-- `mooncite_inspect` — verify an evidence ID or URI and return a bounded physical source window
-- `mooncite_status` — report source counts by origin, index freshness, coverage, and registration health without transcript text
+- `mooncite_recall` — bounded lexical search with explicit `matches`, `weak_leads`, `no_match`, `inconclusive`, `invalid_scope`, and `unavailable` outcomes
+- `mooncite_inspect` — verify an evidence ID or URI against current physical bytes and return a bounded source window
+- `mooncite_status` — report ready, degraded, or unavailable health, source counts by origin, refresh time, grouped errors, and registration state without transcript text
 
-Use recall first, then inspect the returned `mooncite:<origin>:…` or `mooncite://<origin>/…` locator before relying on the evidence. Only a `verified` outcome contains a current-source-verified window. Origins are `pi`, `omp`, `claude-code`, `codex`, and `chatgpt`.
+Recall explains exact/phrase/term matching, matched and missing terms, excerpt truncation, duplicate collapse, recursive-output suppression, and a concrete next action. Start unscoped. Narrow only with the exact `project` or source-qualified `sessionId` copied from a candidate. Recall searches the current projection first and performs one bounded incremental refresh only on a miss; `mooncite rebuild` remains an explicit full operation.
+
+Use recall first, then inspect the returned `mooncite:<origin>:…` or `mooncite://<origin>/…` locator before relying on the evidence. A `verified` inspection means the cited physical bytes and identity match the active index; it does not establish that the quoted claim is correct or still authoritative. Origins are `pi`, `omp`, `claude-code`, `codex`, and `chatgpt`.
+
+This prerelease also has a separate, default-off learned-memory mode. `mooncite memory enable` writes a strict owner-private opt-in; after every client is restarted, it conditionally adds `mooncite_memory_recall`, `mooncite_memory_inspect`, `mooncite_memory_write`, and `mooncite_memory_delete`. These tools store explicit citation-backed **derived interpretations** in `$XDG_STATE_HOME/mooncite/learned-memory.sqlite`. They never add learned text to source evidence or to the disposable evidence index. Use `mooncite memory disable` to hide the tools while retaining learned state, and `mooncite memory status` to inspect readiness.
 
 ## Common operations
 
@@ -59,9 +74,9 @@ mooncite source list
 
 `source add` records an explicit local override without copying history; `source remove` removes only that override, so an available automatic root may become active again.
 
-`disable` removes only client registrations recorded as owned by the installation. `uninstall` also removes the recognized stable package and exact launcher link. Both preserve source history, source authorizations, and the evidence index. Fully restart or reload affected clients after either command so previously loaded tools stop running.
+`disable` removes only client registrations recorded as owned by the installation. `uninstall` also removes the recognized stable package and exact launcher link. Both preserve source history, source authorizations, the evidence index, learned-memory configuration, and any learned database. Fully restart or reload affected clients after either command so previously loaded tools stop running.
 
-`purge --yes` separately deletes only recognized Mooncite-owned derived state and refuses unknown entries. Run it before uninstall if you also want to remove the evidence index. Mooncite has no in-place cross-version updater. See [operations](docs/operations.md) for source commands, conservative removal order, failure handling, and version changes.
+`purge --yes` separately deletes only recognized Mooncite-owned derived state, including the evidence and learned-memory SQLite files, and refuses unknown entries. It leaves source history and both configuration files intact. Mooncite has no in-place cross-version updater. See [operations](docs/operations.md) for source commands, learned-memory retention, conservative removal order, failure handling, and version changes.
 
 ## ChatGPT desktop conversations
 

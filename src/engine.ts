@@ -114,6 +114,11 @@ const DATABASE_SCHEMA = `
     branch_state TEXT NOT NULL,
     compaction_state TEXT NOT NULL
   );
+  CREATE UNIQUE INDEX IF NOT EXISTS evidence_uri_lookup ON evidence(evidence_uri);
+  CREATE INDEX IF NOT EXISTS evidence_project_lookup ON evidence(project);
+  CREATE INDEX IF NOT EXISTS evidence_entry_lookup ON evidence(entry_id);
+  CREATE INDEX IF NOT EXISTS evidence_session_lookup ON evidence(source_origin, session_id, source_path);
+  CREATE INDEX IF NOT EXISTS evidence_source_position ON evidence(source_path, byte_start, evidence_id);
   CREATE VIRTUAL TABLE IF NOT EXISTS evidence_fts USING fts5(
     evidence_id UNINDEXED,
     text,
@@ -175,13 +180,23 @@ export interface EngineOptions {
 }
 
 export type RelevanceBand = "strong" | "partial" | "weak";
+export type MatchKind = "metadata_exact" | "phrase_exact" | "text_exact" | "terms";
 export type TrustState = "full_verified" | "append_trusted";
 export type CoverageState = "complete" | "partial";
+
+export interface EvidenceMatch {
+  kind: MatchKind;
+  band: RelevanceBand;
+  matchedTerms: string[];
+  missingTerms: string[];
+  termCoverage: number;
+}
 
 export interface EvidenceCandidate {
   evidenceId: string;
   evidenceUri: string;
   excerpt: string;
+  omittedBytes: number;
   project: string;
   sessionId: string;
   entryId: string;
@@ -192,11 +207,22 @@ export interface EvidenceCandidate {
   branchState: "current" | "off_branch";
   compactionState: "none" | "pre_compaction" | "summary" | "kept_after_compaction";
   duplicateSpanCount?: number;
-  relevance: { band: RelevanceBand; matchedTerms: string[] };
+  isEcho: boolean;
+  match: EvidenceMatch;
+}
+
+export interface MoonciteNextAction {
+  action: "call" | "run";
+  target: string;
+  arguments?: Record<string, string | number>;
+  reason: string;
 }
 
 export interface EvidenceBundle {
-  outcome: "matches" | "weak_leads" | "no_match" | "unavailable";
+  outcome: "matches" | "weak_leads" | "no_match" | "inconclusive" | "invalid_scope" | "unavailable";
+  conclusive: boolean;
+  meaning: string;
+  next: MoonciteNextAction | null;
   query: string;
   lexicalTerms: string[];
   scope: { project: string | null; sessionId: string | null; evidenceSpans: number };
@@ -204,13 +230,23 @@ export interface EvidenceBundle {
   trustState: TrustState;
   coverage: CoverageState;
   candidates: EvidenceCandidate[];
+  echoesSuppressed: number;
   warnings: string[];
 }
 
 export type RefreshOutcome = "not_run" | "published" | "unchanged" | "retained_last_good" | "unavailable";
 
+export interface MoonciteStatusErrorGroup {
+  origin: SourceOrigin | "unknown";
+  reason: "source_read_or_parse_failure";
+  count: number;
+  fatalCount: number;
+}
+
 export interface MoonciteStatus {
-  outcome: "ready" | "unavailable";
+  outcome: "ready" | "degraded" | "unavailable";
+  meaning: string;
+  next: MoonciteNextAction | null;
   freshness: "current" | "last_good" | "unavailable";
   generation: string;
   trustState: TrustState;
@@ -225,10 +261,12 @@ export interface MoonciteStatus {
   malformed: number;
   oversized: number;
   errors: number;
+  errorGroups: MoonciteStatusErrorGroup[];
   stateBytes: number;
+  lastSuccessfulRefreshAt: string | null;
   lastRefreshOutcome: RefreshOutcome;
   lastRebuildOutcome: RefreshOutcome;
-  lastGoodUsable: boolean;
+  searchUsable: boolean;
 }
 
 export type InspectionOutcome = "verified" | "stale" | "missing" | "excluded" | "corrupt" | "unavailable";
@@ -269,7 +307,42 @@ export interface EvidenceInspection {
   message?: string;
 }
 
-interface IndexedEvidence extends Omit<EvidenceCandidate, "relevance"> {
+export interface EvidenceAnchorRequest {
+  locator: string;
+  expectedSource?: {
+    sourceOrigin: SourceOrigin;
+    sourceRootDigest: string;
+  };
+}
+
+export interface EvidenceAnchorSnapshot {
+  evidenceId: string;
+  evidenceUri: string;
+  sourceOrigin: SourceOrigin;
+  sourceRootDigest: string;
+  project: string;
+  sessionId: string;
+  recordDigest: string;
+  spanDigest: string;
+  contextDigest: string;
+  role: string;
+  sourceKind: string;
+  parentId: string | null;
+  branchState: "current" | "off_branch";
+  compactionState: "none" | "pre_compaction" | "summary" | "kept_after_compaction";
+  isMoonciteRendering: boolean;
+}
+
+export interface EvidenceAnchorResolution {
+  locator: string;
+  outcome: "resolved" | "missing" | "deauthorized" | "unavailable";
+  freshness: "current" | "last_good" | "unavailable";
+  trustState: TrustState;
+  coverage: CoverageState;
+  anchor: EvidenceAnchorSnapshot | null;
+}
+
+interface IndexedEvidence extends Omit<EvidenceCandidate, "match" | "omittedBytes" | "isEcho"> {
   text: string;
   sourcePath: string;
   line: number;
@@ -392,17 +465,35 @@ function parsedQueryText(input: string): { text: string; phrase: boolean } {
   return { text: phrase ? value.slice(1, -1).trim() : value, phrase };
 }
 
-export function isMoonciteToolRendering(role: string, text: string): boolean {
-  if (role !== "toolResult") return false;
-  const head = text.slice(0, 4_096);
+function isMoonciteRenderingText(text: string): boolean {
+  const normalized = text
+    .slice(0, 4_096)
+    .replaceAll("\\u{a}", "\n")
+    .replaceAll("\\u{d}", "\r")
+    .replaceAll("\\n", "\n");
+  const offsets = new Set<number>([0]);
+  const marker = /Mooncite (?:recall|inspection|status|is |evidence is unavailable|learned-memory )|(?:Evidence for|Weak evidence leads for|No evidence matched|Verified evidence mooncite:|Evidence mooncite:|Evidence mooncite:\/\/|Derived Mooncite memories for|Derived memory mooncite-memory:|Stored derived memory|Deleted derived memory)/gu;
+  for (const match of normalized.matchAll(marker)) offsets.add(match.index);
   const scope = "(?:; scope(?: project=[^\\s\\]\\r\\n]{1,256})?(?: session_id=[^\\s\\]\\r\\n]{1,256})? contains [0-9]{1,12} indexed span\\(s\\))?";
   const trust = `\\[(?:full_verified|append_trusted); (?:complete|partial) coverage${scope}\\]`;
   const tail = "(?: Warnings: [^\\r\\n]{1,1024})?(?:\\n|$)";
-  return new RegExp(`^(?:Evidence for|Weak evidence leads for) “[\\s\\S]{0,2200}?”: {0,2}${trust}${tail}`, "u").test(head)
-    || new RegExp(`^(?:No evidence matched|Mooncite evidence is unavailable for) “[\\s\\S]{0,2200}?”\\. ${trust}${tail}`, "u").test(head)
-    || /^Verified evidence mooncite:(?:pi|omp|claude-code|codex|chatgpt):[^\n]{1,2200}:\n/u.test(head)
-    || /^Evidence (?:mooncite:(?:pi|omp|claude-code|codex|chatgpt):|mooncite:\/\/(?:pi|omp|claude-code|codex|chatgpt)\/)[^\n]{1,2200}: (?:stale|missing|excluded|corrupt|unavailable)\./u.test(head)
-    || /^Mooncite is (?:ready|unavailable) \((?:current|last_good|unavailable), (?:full_verified|append_trusted), (?:complete|partial) coverage\):/u.test(head);
+  return [...offsets].some((offset) => {
+    const head = normalized.slice(offset);
+    return /^Mooncite (?:recall|inspection|status):/u.test(head)
+      || new RegExp(`^(?:Evidence for|Weak evidence leads for) “[\\s\\S]{0,2200}?”: {0,2}${trust}${tail}`, "u").test(head)
+      || new RegExp(`^(?:No evidence matched|Mooncite evidence is unavailable for) “[\\s\\S]{0,2200}?”\\. ${trust}${tail}`, "u").test(head)
+      || /^Verified evidence mooncite:(?:pi|omp|claude-code|codex|chatgpt):[^\n]{1,2200}:\n/u.test(head)
+      || /^Evidence (?:mooncite:(?:pi|omp|claude-code|codex|chatgpt):|mooncite:\/\/(?:pi|omp|claude-code|codex|chatgpt)\/)[^\n]{1,2200}: (?:stale|missing|excluded|corrupt|unavailable)\./u.test(head)
+      || /^Mooncite is (?:ready|unavailable) \((?:current|last_good|unavailable), (?:full_verified|append_trusted), (?:complete|partial) coverage\):/u.test(head)
+      || /^Derived Mooncite memories for “[\s\S]{0,2200}?” \(interpretations, not source evidence\):/u.test(head)
+      || /^Derived memory mooncite-memory:[0-9a-f-]{36} revision [1-9][0-9]*:/u.test(head)
+      || /^(?:Stored|Deleted) derived memory mooncite-memory:[0-9a-f-]{36}/u.test(head)
+      || /^Mooncite learned-memory (?:recall|inspection|write|delete) failed\./u.test(head);
+  });
+}
+
+export function isMoonciteToolRendering(role: string, text: string): boolean {
+  return (role === "toolResult" || role === "tool") && isMoonciteRenderingText(text);
 }
 
 function isBoundedIdentifier(value: unknown, maxBytes = MAX_SOURCE_IDENTIFIER_BYTES): value is string {
@@ -1391,6 +1482,7 @@ export class MoonciteEngine {
   #appendBatchRecords = 0;
   #appendBatchEvidenceSpans = 0;
   #lastRebuildOutcome: RefreshOutcome = "not_run";
+  #lastSuccessfulRefreshAt: string | null = null;
 
   constructor(options: EngineOptions) {
     if (options.optionalSources && options.optionalSourcesProvider) {
@@ -1519,6 +1611,10 @@ export class MoonciteEngine {
     if (storedRebuild?.value && ["not_run", "published", "unchanged", "retained_last_good", "unavailable"].includes(storedRebuild.value)) {
       this.#lastRebuildOutcome = storedRebuild.value as RefreshOutcome;
     }
+    const storedRefreshAt = this.#db.prepare("SELECT value FROM metadata WHERE key = 'last_successful_refresh_at'").get() as { value?: string } | undefined;
+    if (storedRefreshAt?.value && Number.isFinite(Date.parse(storedRefreshAt.value))) {
+      this.#lastSuccessfulRefreshAt = storedRefreshAt.value;
+    }
     } catch (error) {
       try { database?.close(); } catch { /* Preserve the constructor failure. */ }
       rmSync(engineLockPath, { force: true });
@@ -1601,6 +1697,20 @@ export class MoonciteEngine {
   #setOperationOutcome(operation: "refresh" | "rebuild", outcome: RefreshOutcome): void {
     if (operation === "refresh") this.#lastRefreshOutcome = outcome;
     else this.#lastRebuildOutcome = outcome;
+    if (outcome === "published" || outcome === "unchanged") {
+      this.#lastSuccessfulRefreshAt = new Date().toISOString();
+      try {
+        this.#db.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('last_successful_refresh_at', ?)")
+          .run(this.#lastSuccessfulRefreshAt);
+      } catch {
+        // Refresh success remains valid when the optional diagnostic timestamp cannot be recorded.
+      }
+    }
+  }
+
+  #stateForInteractiveRead(): ScanResult {
+    if (this.#last.generation === "empty" && this.#last.sourceFiles === 0) return this.refresh();
+    return this.#last;
   }
 
   refresh(): ScanResult {
@@ -2562,13 +2672,39 @@ export class MoonciteEngine {
   }
 
   recall(input: { query: string; limit?: number; project?: string; sessionId?: string }): EvidenceBundle {
-    const state = this.refresh();
+    return this.#recall(input, true);
+  }
+
+  #recall(input: { query: string; limit?: number; project?: string; sessionId?: string }, refreshOnMiss: boolean): EvidenceBundle {
+    const state = this.#stateForInteractiveRead();
     const query = input.query.trim();
     const parsedQuery = parsedQueryText(query);
     const terms = queryTerms(parsedQuery.text);
     const exactText = parsedQuery.text;
     const limit = Math.min(20, Math.max(1, input.limit ?? 5));
-    const sessionScope = input.sessionId ? parseQualifiedSessionId(input.sessionId) : null;
+    const invalidScope = (message: string): EvidenceBundle => ({
+      outcome: "invalid_scope",
+      conclusive: false,
+      meaning: message,
+      next: {
+        action: "call",
+        target: "mooncite_recall",
+        arguments: { query, limit },
+        reason: "Retry unscoped, or copy an exact project or source-qualified session value from a candidate.",
+      },
+      query,
+      lexicalTerms: terms,
+      scope: { project: input.project ?? null, sessionId: input.sessionId ?? null, evidenceSpans: 0 },
+      generation: state.generation,
+      trustState: state.trustState,
+      coverage: state.coverage,
+      candidates: [],
+      echoesSuppressed: 0,
+      warnings: [message],
+    });
+    if (input.project && !/^project:[A-Za-z0-9._%~-]{1,160}-[a-f0-9]{16}$/u.test(input.project)) {
+      return invalidScope("The project scope is malformed. Copy the exact encoded project value from a recall candidate.");
+    }
     let authorizedRoots: Array<{ origin: SourceOrigin; rootDigest: string }>;
     try {
       authorizedRoots = this.#configuredRoots().map((source) => ({
@@ -2578,6 +2714,9 @@ export class MoonciteEngine {
     } catch {
       return {
         outcome: "unavailable",
+        conclusive: false,
+        meaning: "Source authorization could not be read, so Mooncite did not search the retained index.",
+        next: { action: "call", target: "mooncite_status", reason: "Check source and index health before retrying." },
         query,
         lexicalTerms: terms,
         scope: { project: input.project ?? null, sessionId: input.sessionId ?? null, evidenceSpans: 0 },
@@ -2585,8 +2724,36 @@ export class MoonciteEngine {
         trustState: state.trustState,
         coverage: "partial",
         candidates: [],
+        echoesSuppressed: 0,
         warnings: ["Source authorization is unavailable."],
       };
+    }
+    const authorizedRootKeys = new Set(authorizedRoots.map(({ origin, rootDigest }) => `${origin}\0${rootDigest}`));
+    let sessionScope = input.sessionId ? parseQualifiedSessionId(input.sessionId) : null;
+    let renderedSessionScope = input.sessionId ?? null;
+    if (input.sessionId && !sessionScope) {
+      const matchingSources = (this.#db.prepare(`
+        SELECT DISTINCT source_origin, source_root_digest, session_id
+        FROM source_files
+        WHERE session_id = ?
+        ORDER BY source_origin, source_root_digest
+      `).all(input.sessionId) as Array<{ source_origin: SourceOrigin; source_root_digest: string; session_id: string }>)
+        .filter((source) => authorizedRootKeys.has(`${source.source_origin}\0${source.source_root_digest}`));
+      if (matchingSources.length === 0 && refreshOnMiss) {
+        this.refresh();
+        return this.#recall(input, false);
+      }
+      if (matchingSources.length !== 1) {
+        return invalidScope(matchingSources.length === 0
+          ? "The session scope is not a source-qualified Mooncite session and no unique authorized session has that bare ID."
+          : "The bare session scope is ambiguous across authorized sources. Copy the exact source-qualified sessionId from a candidate.");
+      }
+      const source = matchingSources[0]!;
+      sessionScope = { origin: source.source_origin, rootDigest: source.source_root_digest, sessionId: source.session_id };
+      renderedSessionScope = qualifiedSessionId(sessionScope.origin, sessionScope.rootDigest, sessionScope.sessionId);
+    }
+    if (sessionScope && !authorizedRootKeys.has(`${sessionScope.origin}\0${sessionScope.rootDigest}`)) {
+      return invalidScope("The source-qualified session scope is not authorized in this process.");
     }
     const authorizationSql = `EXISTS (
       SELECT 1 FROM source_files sf
@@ -2596,32 +2763,54 @@ export class MoonciteEngine {
     const authorizationParams = authorizedRoots.flatMap((source) => [source.origin, source.rootDigest]);
     let scopeSql = `SELECT COUNT(*) AS count FROM evidence e WHERE ${authorizationSql}`;
     const scopeParams: string[] = [...authorizationParams];
-    if (input.project) { scopeSql += " AND e.project = ?"; scopeParams.push(input.project); }
-    if (input.sessionId) {
-      if (sessionScope) {
-        scopeSql += " AND EXISTS (SELECT 1 FROM source_files session_source WHERE session_source.source_path = e.source_path AND session_source.source_origin = ? AND session_source.source_root_digest = ?) AND e.session_id = ?";
-        scopeParams.push(sessionScope.origin, sessionScope.rootDigest, sessionScope.sessionId);
-      } else {
-        scopeSql += " AND 0 = 1";
-      }
+    if (input.project) {
+      scopeSql += " AND e.project = ?";
+      scopeParams.push(input.project);
+    }
+    if (sessionScope) {
+      scopeSql += " AND EXISTS (SELECT 1 FROM source_files session_source WHERE session_source.source_path = e.source_path AND session_source.source_origin = ? AND session_source.source_root_digest = ?) AND e.session_id = ?";
+      scopeParams.push(sessionScope.origin, sessionScope.rootDigest, sessionScope.sessionId);
     }
     const scopeCount = Number((this.#db.prepare(scopeSql).get(...scopeParams) as { count?: number } | undefined)?.count ?? 0);
-    const scope = { project: input.project ?? null, sessionId: input.sessionId ?? null, evidenceSpans: scopeCount };
+    const scope = { project: input.project ?? null, sessionId: renderedSessionScope, evidenceSpans: scopeCount };
     const scopeWarnings = (input.project || input.sessionId) && scopeCount === 0 ? ["Requested scope contains no indexed evidence."] : [];
     if (!state.retainedLastGood && scopeCount === 0 && (state.fatalErrors > 0 || state.sourceFiles === 0)) {
       const warning = state.errors > 0 ? `${state.errors} source error(s)` : "No usable registered session files";
-      return { outcome: "unavailable", query, lexicalTerms: terms, scope, generation: state.generation, trustState: state.trustState, coverage: state.coverage, candidates: [], warnings: [warning, ...scopeWarnings] };
+      return {
+        outcome: "unavailable",
+        conclusive: false,
+        meaning: "Mooncite has no usable evidence generation for this search.",
+        next: { action: "call", target: "mooncite_status", reason: "Check source and index health before retrying." },
+        query,
+        lexicalTerms: terms,
+        scope,
+        generation: state.generation,
+        trustState: state.trustState,
+        coverage: state.coverage,
+        candidates: [],
+        echoesSuppressed: 0,
+        warnings: [warning, ...scopeWarnings],
+      };
     }
-    let directSql = `SELECT e.*, -1000000.0 AS score FROM evidence e WHERE ${authorizationSql} AND (e.evidence_id = ? OR e.evidence_uri = ? OR e.project = ? OR (e.source_origin || ':' || substr(e.source_path, length(e.source_origin) + 2, 64) || ':' || e.session_id) = ? OR e.entry_id = ?)`;
-    const directParams: Array<string | number> = [...authorizationParams, query, query, query, query, query];
-    if (input.project) { directSql += " AND e.project = ?"; directParams.push(input.project); }
-    if (input.sessionId) {
-      if (sessionScope) {
-        directSql += " AND EXISTS (SELECT 1 FROM source_files session_source WHERE session_source.source_path = e.source_path AND session_source.source_origin = ? AND session_source.source_root_digest = ?) AND e.session_id = ?";
-        directParams.push(sessionScope.origin, sessionScope.rootDigest, sessionScope.sessionId);
-      } else {
-        directSql += " AND 0 = 1";
-      }
+    const directConditions = ["e.evidence_id = ?", "e.evidence_uri = ?", "e.entry_id = ?"];
+    const directParams: Array<string | number> = [...authorizationParams, query, query, query];
+    if (/^project:[A-Za-z0-9._%~-]{1,160}-[a-f0-9]{16}$/u.test(query)) {
+      directConditions.push("e.project = ?");
+      directParams.push(query);
+    }
+    const querySession = parseQualifiedSessionId(query);
+    if (querySession && authorizedRootKeys.has(`${querySession.origin}\0${querySession.rootDigest}`)) {
+      directConditions.push("e.source_origin = ? AND e.session_id = ? AND EXISTS (SELECT 1 FROM source_files direct_session_source WHERE direct_session_source.source_path = e.source_path AND direct_session_source.source_origin = ? AND direct_session_source.source_root_digest = ?)");
+      directParams.push(querySession.origin, querySession.sessionId, querySession.origin, querySession.rootDigest);
+    }
+    let directSql = `SELECT e.*, -1000000.0 AS score FROM evidence e WHERE ${authorizationSql} AND (${directConditions.join(" OR ")})`;
+    if (input.project) {
+      directSql += " AND e.project = ?";
+      directParams.push(input.project);
+    }
+    if (sessionScope) {
+      directSql += " AND EXISTS (SELECT 1 FROM source_files session_source WHERE session_source.source_path = e.source_path AND session_source.source_origin = ? AND session_source.source_root_digest = ?) AND e.session_id = ?";
+      directParams.push(sessionScope.origin, sessionScope.rootDigest, sessionScope.sessionId);
     }
     directSql += " ORDER BY e.evidence_id LIMIT ?";
     directParams.push(limit);
@@ -2631,48 +2820,67 @@ export class MoonciteEngine {
       const match = parsedQuery.phrase
         ? `"${exactText.replaceAll('"', '""')}"`
         : terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
-      let sql = `SELECT e.*, bm25(evidence_fts) AS score FROM evidence_fts JOIN evidence e ON e.evidence_id=evidence_fts.evidence_id WHERE evidence_fts MATCH ? AND ${authorizationSql}`;
+      let sql = `SELECT e.*, evidence_fts.rank AS score FROM evidence_fts JOIN evidence e ON e.evidence_id=evidence_fts.evidence_id WHERE evidence_fts MATCH ? AND ${authorizationSql}`;
       const params: Array<string | number> = [match, ...authorizationParams];
-      if (input.project) { sql += " AND e.project = ?"; params.push(input.project); }
-      if (input.sessionId) {
-        if (sessionScope) {
-          sql += " AND EXISTS (SELECT 1 FROM source_files session_source WHERE session_source.source_path = e.source_path AND session_source.source_origin = ? AND session_source.source_root_digest = ?) AND e.session_id = ?";
-          params.push(sessionScope.origin, sessionScope.rootDigest, sessionScope.sessionId);
-        } else {
-          sql += " AND 0 = 1";
-        }
+      if (input.project) {
+        sql += " AND e.project = ?";
+        params.push(input.project);
       }
-      sql += " ORDER BY CASE WHEN instr(lower(e.text), lower(?)) > 0 THEN 0 ELSE 1 END, score, e.evidence_id LIMIT ?";
-      params.push(exactText, Math.min(MAX_RECALL_RANKING_ROWS, Math.max(40, limit * 10)));
+      if (sessionScope) {
+        sql += " AND EXISTS (SELECT 1 FROM source_files session_source WHERE session_source.source_path = e.source_path AND session_source.source_origin = ? AND session_source.source_root_digest = ?) AND e.session_id = ?";
+        params.push(sessionScope.origin, sessionScope.rootDigest, sessionScope.sessionId);
+      }
+      sql += " ORDER BY evidence_fts.rank, e.evidence_id LIMIT ?";
+      params.push(Math.min(MAX_RECALL_RANKING_ROWS, Math.max(40, limit * 10)));
       const lexicalRows = this.#db.prepare(sql).all(...params) as Array<Record<string, string | number | null>>;
       for (const row of lexicalRows) if (!rowsById.has(String(row.evidence_id))) rowsById.set(String(row.evidence_id), row);
     }
-    const rows = [...rowsById.values()];
     const lowerQuery = exactText.toLowerCase();
-    const ranked = rows.map((row) => {
+    const rankedWithEchoes = [...rowsById.values()].map((row) => {
       const text = String(row.text);
       const lower = text.toLowerCase();
-      const metadataExact = [
-        row.evidence_id,
-        row.evidence_uri,
+      const directCitation = String(row.evidence_id) === query || String(row.evidence_uri) === query;
+      const metadataExact = directCitation || [
         row.project,
         qualifiedSessionId(parseSourceOrigin(row.source_origin), sourceRootDigestFromSourcePath(parseSourceOrigin(row.source_origin), String(row.source_path)), String(row.session_id)),
         row.entry_id,
       ].some((value) => String(value) === query);
-      const matchedTerms = metadataExact ? [query] : terms.filter((term) => lower.includes(term) || lower.includes(term.replace(/(ing|ed|s)$/u, "")));
-      const coverage = metadataExact ? 1 : terms.length === 0 ? 0 : matchedTerms.length / terms.length;
+      const matchedTerms = metadataExact ? [query] : terms.filter((term) =>
+        lower.includes(term) || lower.includes(term.replace(/(ing|ed|s)$/u, "")));
+      const termCoverage = metadataExact ? 1 : terms.length === 0 ? 0 : matchedTerms.length / terms.length;
       const exact = metadataExact || (lowerQuery.length > 0 && lower.includes(lowerQuery));
-      const memoryToolOutput = isMoonciteToolRendering(String(row.role), text);
-      const band: RelevanceBand = exact || coverage >= 0.6 ? "strong" : coverage >= 0.25 ? "partial" : "weak";
-      return { row, matchedTerms, coverage, exact, metadataExact, memoryToolOutput, band };
+      const isEcho = isMoonciteRenderingText(text);
+      const band: RelevanceBand = exact || termCoverage >= 0.6 ? "strong" : termCoverage >= 0.25 ? "partial" : "weak";
+      const kind: MatchKind = metadataExact
+        ? "metadata_exact"
+        : exact && parsedQuery.phrase
+          ? "phrase_exact"
+          : exact
+            ? "text_exact"
+            : "terms";
+      return {
+        row,
+        matchedTerms,
+        missingTerms: metadataExact ? [] : terms.filter((term) => !matchedTerms.includes(term)),
+        termCoverage,
+        exact,
+        metadataExact,
+        directCitation,
+        isEcho,
+        band,
+        kind,
+      };
     }).sort((a, b) =>
-      Number(b.metadataExact) - Number(a.metadataExact)
-      || Number(a.memoryToolOutput) - Number(b.memoryToolOutput)
+      Number(b.directCitation) - Number(a.directCitation)
+      || Number(b.metadataExact) - Number(a.metadataExact)
+      || Number(a.isEcho) - Number(b.isEcho)
       || Number(b.exact) - Number(a.exact)
-      || b.coverage - a.coverage
+      || b.termCoverage - a.termCoverage
       || Number(a.row.score) - Number(b.row.score)
       || String(a.row.evidence_id).localeCompare(String(b.row.evidence_id)),
     );
+    const echoesSuppressed = rankedWithEchoes.filter((candidate) => candidate.isEcho && !candidate.directCitation).length;
+    const ranked = rankedWithEchoes.filter((candidate) => !candidate.isEcho || candidate.directCitation);
     const duplicateBuckets = new Map<string, Map<string, typeof ranked[number] & { duplicateSpanCount: number }>>();
     const diverse: Array<typeof ranked[number] & { duplicateSpanCount: number }> = [];
     for (const item of ranked) {
@@ -2697,31 +2905,187 @@ export class MoonciteEngine {
       excerpts.set(text, selected);
       diverse.push(selected);
     }
-    const candidates = diverse.slice(0, limit).map(({ row, matchedTerms, band, duplicateSpanCount }) => ({
-      evidenceId: String(row.evidence_id),
-      evidenceUri: String(row.evidence_uri),
-      excerpt: truncateUtf8(String(row.text), 1_024).text,
-      project: String(row.project),
-      sessionId: qualifiedSessionId(parseSourceOrigin(row.source_origin), sourceRootDigestFromSourcePath(parseSourceOrigin(row.source_origin), String(row.source_path)), String(row.session_id)),
-      entryId: String(row.entry_id),
-      role: String(row.role),
-      sourceOrigin: parseSourceOrigin(row.source_origin),
-      sourceKind: String(row.source_kind),
-      parentId: row.parent_id === null ? null : String(row.parent_id),
-      branchState: String(row.branch_state) === "current" ? "current" as const : "off_branch" as const,
-      compactionState: ["pre_compaction", "summary", "kept_after_compaction"].includes(String(row.compaction_state))
-        ? String(row.compaction_state) as EvidenceCandidate["compactionState"]
-        : "none" as const,
-      ...(duplicateSpanCount > 1 ? { duplicateSpanCount } : {}),
-      relevance: { band, matchedTerms },
-    }));
-    const outcome = candidates.length === 0 ? "no_match" : candidates[0]!.relevance.band === "weak" ? "weak_leads" : "matches";
+    const candidates = diverse.slice(0, limit).map(({
+      row,
+      matchedTerms,
+      missingTerms,
+      termCoverage,
+      band,
+      kind,
+      isEcho,
+      duplicateSpanCount,
+    }): EvidenceCandidate => {
+      const excerpt = truncateUtf8(String(row.text), 1_024);
+      return {
+        evidenceId: String(row.evidence_id),
+        evidenceUri: String(row.evidence_uri),
+        excerpt: excerpt.text,
+        omittedBytes: excerpt.omittedBytes,
+        project: String(row.project),
+        sessionId: qualifiedSessionId(parseSourceOrigin(row.source_origin), sourceRootDigestFromSourcePath(parseSourceOrigin(row.source_origin), String(row.source_path)), String(row.session_id)),
+        entryId: String(row.entry_id),
+        role: String(row.role),
+        sourceOrigin: parseSourceOrigin(row.source_origin),
+        sourceKind: String(row.source_kind),
+        parentId: row.parent_id === null ? null : String(row.parent_id),
+        branchState: String(row.branch_state) === "current" ? "current" : "off_branch",
+        compactionState: ["pre_compaction", "summary", "kept_after_compaction"].includes(String(row.compaction_state))
+          ? String(row.compaction_state) as EvidenceCandidate["compactionState"]
+          : "none",
+        ...(duplicateSpanCount > 1 ? { duplicateSpanCount } : {}),
+        isEcho,
+        match: { kind, band, matchedTerms, missingTerms, termCoverage },
+      };
+    });
+    if (candidates.length === 0 && refreshOnMiss) {
+      this.refresh();
+      return this.#recall(input, false);
+    }
     const warnings = state.errors === 0
       ? [...scopeWarnings]
       : [state.retainedLastGood
         ? `${state.errors} source error(s); last good generation retained`
         : `${state.errors} source error(s)`, ...scopeWarnings];
-    return { outcome, query, lexicalTerms: terms, scope, generation: state.generation, trustState: state.trustState, coverage: state.coverage, candidates, warnings };
+    if (echoesSuppressed > 0) warnings.push(`${echoesSuppressed} recursive Mooncite echo(es) suppressed.`);
+    const incompleteMiss = candidates.length === 0
+      && (state.coverage === "partial" || state.retainedLastGood || state.errors > 0);
+    const outcome: EvidenceBundle["outcome"] = candidates.length === 0
+      ? incompleteMiss ? "inconclusive" : "no_match"
+      : candidates[0]!.match.band === "strong" ? "matches" : "weak_leads";
+    const conclusive = outcome === "matches" || outcome === "no_match";
+    const meaning = outcome === "matches"
+      ? "Mooncite found lexical matches. Inspect a cited source window before relying on any claim."
+      : outcome === "weak_leads"
+        ? "Mooncite found only partial or weak lexical leads. Refine the query or inspect a lead before using it."
+        : outcome === "inconclusive"
+          ? "The active index is partial or retained from a last-good generation, so an empty result does not prove the evidence is absent."
+          : "Mooncite searched the complete requested scope and found no lexical match.";
+    const next: MoonciteNextAction | null = candidates.length > 0
+      ? {
+        action: "call",
+        target: "mooncite_inspect",
+        arguments: { evidence_id: candidates[0]!.evidenceId },
+        reason: "Verify the physical source bytes for the best candidate.",
+      }
+      : outcome === "inconclusive"
+        ? {
+          action: "run",
+          target: "mooncite rebuild",
+          reason: "Refresh the derived index, then retry the same recall query.",
+        }
+        : null;
+    return {
+      outcome,
+      conclusive,
+      meaning,
+      next,
+      query,
+      lexicalTerms: terms,
+      scope,
+      generation: state.generation,
+      trustState: state.trustState,
+      coverage: state.coverage,
+      candidates,
+      echoesSuppressed,
+      warnings,
+    };
+  }
+
+  resolveEvidenceAnchors(requests: readonly EvidenceAnchorRequest[]): EvidenceAnchorResolution[] {
+    if (!Array.isArray(requests) || requests.length > 256) {
+      throw new Error("Mooncite anchor resolution accepts at most 256 locators.");
+    }
+    for (const request of requests) {
+      if (!request || typeof request !== "object" || !isBoundedIdentifier(request.locator, 2_048)) {
+        throw new Error("Mooncite evidence anchor locator is invalid.");
+      }
+      if (request.expectedSource
+        && (!SOURCE_ORIGINS.includes(request.expectedSource.sourceOrigin)
+          || !/^[a-f0-9]{64}$/u.test(request.expectedSource.sourceRootDigest))) {
+        throw new Error("Mooncite evidence anchor source expectation is invalid.");
+      }
+    }
+    const projection = { trustState: this.#last.trustState, coverage: this.#last.coverage };
+    let authorizedRoots: Set<string>;
+    try {
+      authorizedRoots = new Set(this.#configuredRoots().map((source) =>
+        `${source.origin}\0${sourceAuthorizationDigest(source.root, source.discovery)}`));
+    } catch {
+      return requests.map((request): EvidenceAnchorResolution => ({
+        locator: request.locator,
+        outcome: "unavailable",
+        freshness: "unavailable",
+        ...projection,
+        anchor: null,
+      }));
+    }
+    const freshness = this.#last.retainedLastGood ? "last_good" as const : "current" as const;
+    const statement = this.#db.prepare(`
+      SELECT e.*, sf.source_root_digest
+      FROM evidence e JOIN source_files sf ON sf.source_path = e.source_path
+      WHERE e.evidence_id = ? OR e.evidence_uri = ?
+      ORDER BY CASE WHEN e.evidence_id = ? THEN 0 ELSE 1 END
+      LIMIT 1
+    `);
+    return requests.map((request): EvidenceAnchorResolution => {
+      if (request.expectedSource
+        && !authorizedRoots.has(`${request.expectedSource.sourceOrigin}\0${request.expectedSource.sourceRootDigest}`)) {
+        return { locator: request.locator, outcome: "deauthorized", freshness, ...projection, anchor: null };
+      }
+      const row = statement.get(request.locator, request.locator, request.locator) as
+        Record<string, string | number | null> | undefined;
+      if (!row) return { locator: request.locator, outcome: "missing", freshness, ...projection, anchor: null };
+      const sourceOrigin = parseSourceOrigin(row.source_origin);
+      const sourceRootDigest = String(row.source_root_digest);
+      if (!authorizedRoots.has(`${sourceOrigin}\0${sourceRootDigest}`)) {
+        return { locator: request.locator, outcome: "deauthorized", freshness, ...projection, anchor: null };
+      }
+      const text = String(row.text);
+      const project = String(row.project);
+      const sessionId = qualifiedSessionId(sourceOrigin, sourceRootDigest, String(row.session_id));
+      const role = String(row.role);
+      const sourceKind = String(row.source_kind);
+      const parentId = row.parent_id === null ? null : String(row.parent_id);
+      const branchState = String(row.branch_state) === "current" ? "current" as const : "off_branch" as const;
+      const compactionState = ["pre_compaction", "summary", "kept_after_compaction"].includes(String(row.compaction_state))
+        ? String(row.compaction_state) as EvidenceAnchorSnapshot["compactionState"]
+        : "none" as const;
+      const contextDigest = sha256([
+        "anchor-context-v1",
+        sourceOrigin,
+        sourceRootDigest,
+        project,
+        sessionId,
+        role,
+        sourceKind,
+        parentId ?? "<null>",
+        branchState,
+        compactionState,
+      ].join("\0"));
+      return {
+        locator: request.locator,
+        outcome: "resolved",
+        freshness,
+        ...projection,
+        anchor: {
+          evidenceId: String(row.evidence_id),
+          evidenceUri: String(row.evidence_uri),
+          sourceOrigin,
+          sourceRootDigest,
+          project,
+          sessionId,
+          recordDigest: String(row.record_digest),
+          spanDigest: sha256(text),
+          contextDigest,
+          role,
+          sourceKind,
+          parentId,
+          branchState,
+          compactionState,
+          isMoonciteRendering: isMoonciteRenderingText(text),
+        },
+      };
+    });
   }
 
   inspect(input: { evidenceId: string; window?: number }): EvidenceInspection {
@@ -2876,12 +3240,59 @@ export class MoonciteEngine {
 
   #memoryStatus(state: ScanResult): MoonciteStatus {
     const stateBytes = statSync(this.#databasePath).size;
-    const outcome = !state.retainedLastGood && this.#lastEvidenceCount === 0 && (state.fatalErrors > 0 || state.sourceFiles === 0) ? "unavailable" : "ready";
+    const searchUsable = state.retainedLastGood || this.#lastEvidenceCount > 0 || (state.sourceFiles > 0 && state.fatalErrors === 0);
+    const outcome: MoonciteStatus["outcome"] = !searchUsable
+      ? "unavailable"
+      : state.retainedLastGood || state.coverage === "partial" || state.errors > 0
+        ? "degraded"
+        : "ready";
+    const freshness: MoonciteStatus["freshness"] = outcome === "unavailable"
+      ? "unavailable"
+      : state.retainedLastGood
+        ? "last_good"
+        : "current";
+    const meaning = outcome === "ready"
+      ? "Mooncite is ready with a current, completely covered evidence generation."
+      : outcome === "degraded"
+        ? "Mooncite can search retained evidence, but freshness or source coverage is degraded. Empty recall results are not conclusive."
+        : "Mooncite has no usable evidence generation.";
+    const next: MoonciteNextAction | null = outcome === "ready"
+      ? null
+      : {
+        action: "run",
+        target: "mooncite rebuild",
+        reason: "Rebuild the derived index from authorized source history, then check status again.",
+      };
     const sourceFilesByOrigin: Record<SourceOrigin, number> = { pi: 0, omp: 0, "claude-code": 0, codex: 0, chatgpt: 0 };
     for (const source of this.#storedSources()) sourceFilesByOrigin[source.source_origin]++;
+    const errorCounts = new Map<SourceOrigin, { count: number; fatalCount: number }>();
+    for (const source of this.#storedSources()) {
+      if (source.errors === 0 && source.fatal_errors === 0) continue;
+      const previous = errorCounts.get(source.source_origin) ?? { count: 0, fatalCount: 0 };
+      previous.count += source.errors;
+      previous.fatalCount += source.fatal_errors;
+      errorCounts.set(source.source_origin, previous);
+    }
+    const errorGroups = [...errorCounts.entries()].map(([origin, counts]): MoonciteStatusErrorGroup => ({
+      origin,
+      reason: "source_read_or_parse_failure",
+      count: counts.count,
+      fatalCount: counts.fatalCount,
+    }));
+    const attributedErrors = errorGroups.reduce((total, group) => total + group.count, 0);
+    if (state.errors > attributedErrors) {
+      errorGroups.push({
+        origin: "unknown",
+        reason: "source_read_or_parse_failure",
+        count: state.errors - attributedErrors,
+        fatalCount: Math.max(0, state.fatalErrors - errorGroups.reduce((total, group) => total + group.fatalCount, 0)),
+      });
+    }
     return {
       outcome,
-      freshness: outcome === "unavailable" ? "unavailable" : state.retainedLastGood ? "last_good" : "current",
+      meaning,
+      next,
+      freshness,
       generation: state.generation,
       trustState: state.trustState,
       coverage: state.coverage,
@@ -2895,10 +3306,12 @@ export class MoonciteEngine {
       malformed: state.malformed,
       oversized: state.oversized,
       errors: state.errors,
+      errorGroups,
       stateBytes,
+      lastSuccessfulRefreshAt: this.#lastSuccessfulRefreshAt,
       lastRefreshOutcome: this.#lastRefreshOutcome,
       lastRebuildOutcome: this.#lastRebuildOutcome,
-      lastGoodUsable: outcome === "ready",
+      searchUsable,
     };
   }
 

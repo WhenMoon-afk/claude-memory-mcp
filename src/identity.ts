@@ -1,4 +1,4 @@
-export const MOONCITE_VERSION = "4.0.5";
+export const MOONCITE_VERSION = "4.0.6-preview.1001.0";
 export const MOONCITE_PACKAGE_NAME = "@whenmoon-afk/mooncite";
 export const MOONCITE_MCP_NAME = "mooncite";
 export const MOONCITE_PRODUCT = "Mooncite";
