@@ -227,7 +227,9 @@ process.exit(1);
     throw new Error("packed source registry did not use the isolated XDG config home");
   }
   const configuredSources = JSON.parse((await run(process.execPath, [bootstrapCli, "source", "list"], { env })).stdout);
-  if (configuredSources.configured.length !== 3 || configuredSources.sources.length !== 3) throw new Error("packed source registry did not retain optional adapters");
+  if (configuredSources.configured.length !== 3
+    || configuredSources.automatic.length !== 4
+    || configuredSources.sources.length !== 7) throw new Error("packed source registry did not retain configured and automatic adapters");
   let helpText;
   for (const helpArgs of [[], ["help"], ["--help"], ["-h"], ["install", "--help"]]) {
     const result = await run(process.execPath, [bootstrapCli, ...helpArgs], { env, timeout: 5_000 });
@@ -283,35 +285,64 @@ process.exit(1);
     cwd: resolve(pluginPackageRoot, declaredServer.cwd),
   };
 
-  const child = spawn(resolvedServer.command, resolvedServer.args, { cwd: resolvedServer.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
-  let serverStderr = "";
-  child.stderr.setEncoding("utf8").on("data", (chunk) => { serverStderr += chunk; });
-  const serverClosed = new Promise((resolve, reject) => {
-    child.once("error", reject);
-    child.once("close", resolve);
-  });
-  const serverTimeout = setTimeout(() => child.kill("SIGKILL"), 30_000);
-  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
-  let id = 0;
-  const request = async (method, params) => {
-    const requestId = ++id;
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: requestId, method, ...(params ? { params } : {}) })}\n`);
-    while (true) {
-      const next = await lines.next();
-      if (next.done) throw new Error(`MCP server closed before response: ${serverStderr}`);
-      const response = JSON.parse(next.value);
-      if (response.id !== requestId) continue;
-      if (response.error) throw new Error(response.error.message);
-      return response.result;
+  const expectedToolNames = {
+    default: [
+      "mooncite_inspect",
+      "mooncite_recall",
+      "mooncite_status",
+    ],
+    enabled: [
+      "mooncite_inspect",
+      "mooncite_memory_delete",
+      "mooncite_memory_inspect",
+      "mooncite_memory_recall",
+      "mooncite_memory_write",
+      "mooncite_recall",
+      "mooncite_status",
+    ],
+  };
+  const withMcpServer = async (expectedTools, verify) => {
+    const child = spawn(resolvedServer.command, resolvedServer.args, { cwd: resolvedServer.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    let serverStderr = "";
+    child.stderr.setEncoding("utf8").on("data", (chunk) => { serverStderr += chunk; });
+    const serverClosed = new Promise((resolve, reject) => {
+      child.once("error", reject);
+      child.once("close", resolve);
+    });
+    const serverTimeout = setTimeout(() => child.kill("SIGKILL"), 30_000);
+    const lines = createInterface({ input: child.stdout, crlfDelay: Infinity })[Symbol.asyncIterator]();
+    let id = 0;
+    const request = async (method, params) => {
+      const requestId = ++id;
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: requestId, method, ...(params ? { params } : {}) })}\n`);
+      while (true) {
+        const next = await lines.next();
+        if (next.done) throw new Error(`MCP server closed before response: ${serverStderr}`);
+        const response = JSON.parse(next.value);
+        if (response.id !== requestId) continue;
+        if (response.error) throw new Error(response.error.message);
+        return response.result;
+      }
+    };
+    try {
+      await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "packed-receiver", version: "1" } });
+      child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
+      const listed = await request("tools/list");
+      const actualTools = listed.tools.map((tool) => tool.name).sort();
+      if (JSON.stringify(actualTools) !== JSON.stringify(expectedTools)) throw new Error(`unexpected tools: ${actualTools}`);
+      await verify(request);
+      return actualTools;
+    } finally {
+      child.kill("SIGTERM");
+      try {
+        await serverClosed;
+      } finally {
+        clearTimeout(serverTimeout);
+      }
     }
   };
-  let names = [];
-  try {
-    await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "packed-receiver", version: "1" } });
-    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
-    const listed = await request("tools/list");
-    names = listed.tools.map((tool) => tool.name).sort();
-    if (JSON.stringify(names) !== JSON.stringify(["mooncite_inspect", "mooncite_recall", "mooncite_status"])) throw new Error(`unexpected tools: ${names}`);
+
+  const names = await withMcpServer(expectedToolNames.default, async (request) => {
     const recallQueries = [
       ["violet-orbit-41", "pi"],
       ["cobalt-comet-63", "omp"],
@@ -342,20 +373,130 @@ process.exit(1);
       || status.structuredContent.sourceFilesByOrigin?.["claude-code"] !== 1
       || status.structuredContent.sourceFilesByOrigin?.codex !== 1
       || status.structuredContent.sourceFilesByOrigin?.chatgpt !== 1) throw new Error("status did not report all source origins");
-  } finally {
-    child.kill("SIGTERM");
-    try {
-      await serverClosed;
-    } finally {
-      clearTimeout(serverTimeout);
-    }
-  }
+  });
   if ((await readdir(join(stateHome, "mooncite"))).some((name) => name.startsWith(".engine-"))) {
     throw new Error("packed MCP server left an engine lock after shutdown");
   }
-  await run(process.execPath, [bootstrapCli, "source", "remove", "claude-code"], { env });
-  await run(process.execPath, [bootstrapCli, "source", "remove", "codex"], { env });
-  await run(process.execPath, [bootstrapCli, "source", "remove", "chatgpt"], { env });
+
+  const enabledMemory = JSON.parse((await run(stableLauncher, ["memory", "enable"], { env })).stdout);
+  if (enabledMemory.kind !== "derived_memory_config"
+    || enabledMemory.version !== 1
+    || enabledMemory.enabled !== true
+    || enabledMemory.configured !== true
+    || enabledMemory.reloadRequired !== true) {
+    throw new Error(`installed Mooncite launcher did not enable learned memory: ${JSON.stringify(enabledMemory)}`);
+  }
+  const learnedConfig = JSON.parse(await readFile(join(configHome, "mooncite", "learned-memory.json"), "utf8"));
+  if (JSON.stringify(learnedConfig) !== JSON.stringify({ version: 1, enabled: true })) {
+    throw new Error("learned-memory configuration did not use the isolated XDG config home");
+  }
+
+  const interpretation = "Packed learned-memory marker silver-cairn-86.";
+  const basisNote = "Created without source evidence by the isolated packaged smoke.";
+  const learnedNames = await withMcpServer(expectedToolNames.enabled, async (request) => {
+    const created = (await request("tools/call", {
+      name: "mooncite_memory_write",
+      arguments: {
+        operation: "create",
+        interpretation,
+        provenance: { kind: "unanchored", basis_note: basisNote },
+        scope: { kind: "global" },
+      },
+    })).structuredContent;
+    if (created?.kind !== "derived_memory_write"
+      || !created.memoryId?.startsWith("mooncite-memory:")
+      || created.outcome !== "created"
+      || created.revision !== 1
+      || created.interpretation !== interpretation
+      || created.scope?.kind !== "global"
+      || created.provenance?.kind !== "unanchored"
+      || created.provenance?.basisNote !== basisNote
+      || created.provenanceOutcome !== "not_evidence_backed"
+      || !Array.isArray(created.evidenceIds)
+      || created.evidenceIds.length !== 0
+      || !Array.isArray(created.evidenceUris)
+      || created.evidenceUris.length !== 0) {
+      throw new Error("packaged learned-memory write did not create one unanchored global revision");
+    }
+
+    const recalled = (await request("tools/call", {
+      name: "mooncite_memory_recall",
+      arguments: { query: created.memoryId },
+    })).structuredContent;
+    const candidate = recalled?.candidates?.[0];
+    if (recalled?.kind !== "derived_memory_recall"
+      || recalled.outcome !== "matches"
+      || recalled.query !== created.memoryId
+      || recalled.candidates?.length !== 1
+      || candidate?.kind !== "derived_memory"
+      || candidate.memoryId !== created.memoryId
+      || candidate.revision !== created.revision
+      || candidate.interpretation !== interpretation
+      || candidate.scope?.kind !== "global"
+      || candidate.provenance?.kind !== "unanchored"
+      || candidate.provenance?.basisNote !== basisNote
+      || candidate.provenanceState !== "not_evidence_backed"
+      || candidate.relevance?.kind !== "exact_id"
+      || !Array.isArray(candidate.anchors)
+      || candidate.anchors.length !== 0
+      || candidate.lifecycle?.state !== "active"
+      || candidate.lifecycle?.metadataVersion !== 1) {
+      throw new Error("packaged learned-memory exact-ID recall did not return the created revision");
+    }
+
+    const inspected = (await request("tools/call", {
+      name: "mooncite_memory_inspect",
+      arguments: {
+        kind: "revision",
+        memory_id: created.memoryId,
+        revision: created.revision,
+        window: 0,
+      },
+    })).structuredContent;
+    if (inspected?.kind !== "derived_memory"
+      || inspected.memoryId !== created.memoryId
+      || inspected.revision !== created.revision
+      || inspected.currentRevision !== created.revision
+      || inspected.isCurrent !== true
+      || inspected.interpretation !== interpretation
+      || inspected.scope?.kind !== "global"
+      || inspected.provenance?.kind !== "unanchored"
+      || inspected.provenance?.basisNote !== basisNote
+      || inspected.provenanceOutcome !== "not_evidence_backed"
+      || inspected.provenanceState !== "not_evidence_backed"
+      || inspected.evidenceProjection !== null
+      || !Array.isArray(inspected.anchors)
+      || inspected.anchors.length !== 0
+      || inspected.lifecycle?.state !== "active"
+      || inspected.lifecycle?.metadataVersion !== 1) {
+      throw new Error("packaged learned-memory inspection did not preserve the current unanchored revision");
+    }
+
+    const deleted = (await request("tools/call", {
+      name: "mooncite_memory_delete",
+      arguments: {
+        kind: "memory",
+        memory_id: created.memoryId,
+        expected_revision: inspected.revision,
+        expected_metadata_version: inspected.lifecycle.metadataVersion,
+      },
+    })).structuredContent;
+    if (deleted?.kind !== "derived_memory_delete"
+      || deleted.outcome !== "deleted"
+      || deleted.memoryId !== created.memoryId
+      || deleted.deletedRevisions !== 1) {
+      throw new Error("packaged learned-memory delete did not return the exact one-revision result");
+    }
+  });
+  if (!(await stat(join(stateHome, "mooncite", "learned-memory.sqlite"))).isFile()) {
+    throw new Error("learned-memory database did not use the isolated XDG state home");
+  }
+  if ((await readdir(join(stateHome, "mooncite"))).some((name) => name.startsWith(".engine-"))) {
+    throw new Error("packed learned-memory MCP server left an engine lock after shutdown");
+  }
+  await run(process.execPath, [bootstrapCli, "source", "remove", "claude-code", claudeRoot], { env });
+  await run(process.execPath, [bootstrapCli, "source", "remove", "codex", codexRoot], { env });
+  await run(process.execPath, [bootstrapCli, "source", "remove", "chatgpt", chatGptRoot], { env });
   const removedSources = JSON.parse((await run(process.execPath, [bootstrapCli, "source", "list"], { env })).stdout);
   if (removedSources.configured.length !== 0 || removedSources.automatic.length !== 4) throw new Error("packed source registry did not remove explicit adapters");
 
@@ -400,6 +541,7 @@ process.exit(1);
     ompMcpManifest: ".mcp.json",
     resolvedMcpCommand: [resolvedServer.command, ...resolvedServer.args],
     tools: names,
+    learnedMemoryTools: learnedNames,
     sourceUnchanged: true,
   }));
 } finally {

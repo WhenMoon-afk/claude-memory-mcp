@@ -1,7 +1,7 @@
 {
   "name": "@whenmoon-afk/mooncite",
   "version": "4.0.6-preview.1001.0",
-  "description": "Mooncite — local citation-backed recall for Pi, OMP, Claude Code, Codex, and ChatGPT history",
+  "description": "Local citation-backed context recall for coding agents. Learned memory is optional.",
   "type": "module",
   "os": [
     "linux"
@@ -27,7 +27,7 @@
     "LICENSE"
   ],
   "omp": {
-    "description": "Mooncite local citation-backed MCP server"
+    "description": "Local citation-backed context recall with optional learned memory"
   },
   "pi": {
     "extensions": [
@@ -77,13 +77,16 @@
     "mooncite",
     "claude-memory-mcp",
     "mcp",
+    "context-retrieval",
+    "conversation-history",
+    "learned-memory",
+    "local-first",
+    "citations",
     "pi",
     "omp",
     "codex",
     "claude-code",
-    "chatgpt",
-    "local-first",
-    "citations"
+    "chatgpt"
   ],
   "license": "MIT"
 }

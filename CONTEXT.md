@@ -1,37 +1,50 @@
 # Mooncite domain language
 
-**Mooncite** — A local citation-backed history retrieval product. It finds prior context; it does not decide what that context means or whether it remains authoritative.
+**Mooncite.** A local product for citation-backed conversation recall. It finds prior context. It does not interpret that context or decide whether it still applies.
 
-**Source history** — User-owned Pi, OMP, Claude Code, Codex, or ChatGPT conversation files. Pi and OMP use standard roots; narrow Claude Code, Codex, and ChatGPT roots are discovered automatically unless opted out, and configured roots can override them. Mooncite reads source history and never modifies or owns it.
+**Source history.** User-owned conversation files from Pi, OMP, Claude Code, Codex, or ChatGPT. Mooncite reads this history but never owns or changes it. Source authorization controls which roots Mooncite may read.
 
-**Evidence index** — A transactional, rebuildable SQLite FTS projection under Mooncite-owned state.
+**Evidence index.** A transactional SQLite FTS projection under Mooncite-owned state. The index is derived and rebuildable.
 
-**Evidence citation** — A deterministic source-qualified identifier and URI for one bounded normalized span. It remains stable while the source authorization, relative path, session, entry, and span remain unchanged.
+**Evidence citation.** A deterministic source-qualified ID and URI for one bounded normalized span. Its identity covers the source authorization, relative path, session, entry, and span. The citation stays stable while those values stay unchanged.
 
-**Recall** — A bounded lexical search returning cited matches, weak leads, no match, or unavailable.
+**Recall.** A bounded lexical search. Its outcomes are `matches`, `weak_leads`, `no_match`, `inconclusive`, `invalid_scope`, and `unavailable`. `no_match` reports absence only when `conclusive` is `true`.
 
-**Inspection** — Resolution of a citation in the active index generation and verification against current physical source bytes. Only a `verified` outcome contains a verified source window; any `target` on another outcome is last-indexed text.
+**Inspection.** Resolution of a citation in the active index generation against current physical source bytes. Only `verified` contains a checked source window. A `target` on any other outcome is last-indexed text.
 
-**Derived memory** — An explicit agent-authored interpretation stored only when it cites 1–8 physically verified evidence anchors. It is never source evidence, truth, policy, or current authority.
+**Learned memory.** An explicit agent-authored interpretation in the separate learned-memory database. It is never source evidence, verified truth, policy, or current authority.
 
-**Evidence anchor** — A learned revision's saved canonical evidence ID/URI plus record, normalized-span, source-root, project, session, role, source-kind, parent, branch, and compaction values. Locator identity alone is insufficient provenance.
+**Learned provenance.** Every learned revision has one form:
 
-**Learned revision** — One immutable interpretation, scope, derivation metadata, and anchor set in the separate durable learned-memory database. A correction appends the next revision behind a stale-write guard rather than overwriting history.
+- `verified` owns 1 to 8 physically verified evidence anchors.
+- `derived` links 1 to 8 exact parent revisions and may own up to 8 evidence anchors.
+- `current_context` records a bounded context note and may own up to 8 evidence anchors.
+- `unanchored` records a bounded basis and has no anchors or parent links.
 
-**Quarantine** — Continued retention but default recall suppression when a learned revision's evidence content/context changes, disappears, or becomes deauthorized. Mooncite never silently rebinds its saved anchors.
+**Evidence anchor.** A learned revision's saved canonical evidence ID or URI and its identity fields. These fields cover the record, normalized span, source root, project, session, role, source kind, parent, branch, and compaction values. Locator identity alone is not enough provenance.
 
-**Refresh** — Incremental admission of new files and Pi same-inode growth. A coherently read Pi suffix is labeled `append_trusted`; that path does not reread the already indexed prefix. Detectable Pi shrinkage, same-size rewrites, or identity changes retain the last-good generation. Every detected change to authorized OMP, Claude Code, Codex, or ChatGPT history transactionally replaces that source projection because those producers may rewrite mutable records or exports.
+**Learned revision.** One immutable interpretation, scope, provenance record, and derivation record. A correction appends a revision behind a stale-write guard. It never overwrites history. Existing v1 evidence-backed rows migrate exactly to `verified`.
 
-**Rebuild** — Full verified recreation of the evidence index from authorized source history.
+**Learned relation.** A `supports`, `contradicts`, `refines`, or `supersedes` link to one exact memory revision. Each link has an explicit reason. Recall may return a bounded one-hop related set. It never follows relations recursively.
 
-**Registration** — A client connection to the one local stdio MCP server. OMP's linked package exposes the packaged MCP manifest; Codex and Claude Code register the same server directly. Pi loads the packaged thin extension.
+**Learned lifecycle.** Explicit mutable metadata on a logical memory. It records active or archived state, metadata version, salience, last activation, and reinforcement count. Activate, reinforce, and archive are manual operations. They do not create revisions, decay automatically, or change source evidence.
 
-**Source authorization** — A narrow automatic root or an owner-only local configuration naming one absolute Claude Code, Codex, or ChatGPT root. Explicit authorization overrides the automatic root for that origin. Neither form copies history nor grants Mooncite network access.
+**Quarantine.** Retention with default recall suppression. Quarantine applies when a revision's own evidence content or context changes, disappears, or loses authorization. Parent health does not propagate to derived children. Mooncite never silently rebinds a saved anchor.
 
-**Disable** — Remove client registrations recorded as owned by this installation while preserving the package, source authorizations, evidence index, learned-memory config/database, and source history. `memory disable` separately hides learned tools while retaining learned state.
+**Skill candidate.** A bounded artifact proposed from exact learned revisions. It stays pending until explicit approval or rejection. Review never installs a skill.
 
-**Uninstall** — Refuse if an exact or conflicting unowned registration may still target the package; otherwise remove owned registrations, the exact command link, and the recognized stable package while preserving source authorizations, both databases, learned-memory configuration, and source history.
+**Refresh.** Incremental admission of new files and Pi same-inode growth. A coherent Pi suffix uses `append_trusted`. That path does not reread the indexed prefix. Detectable Pi shrinkage, same-size rewrite, or identity change keeps the last-good generation. Every detected OMP, Claude Code, Codex, or ChatGPT change replaces that source projection in one transaction. Those producers may rewrite mutable records or exports.
 
-**Purge** — Separately confirmed deletion of recognized Mooncite-owned evidence and learned SQLite state. It removes neither configuration nor source history.
+**Rebuild.** Full verified recreation of the evidence index from authorized source history.
 
-**Last-good generation** — The newest safely published evidence-index generation retained when refresh cannot publish complete coverage.
+**Registration.** A client connection to the one local stdio MCP server. OMP exposes the packaged MCP manifest. Codex and Claude Code register the same server directly. Pi loads the packaged thin extension.
+
+**Source authorization.** A narrow automatic root or owner-only local configuration for absolute Claude Code, Codex, or ChatGPT roots. Configured roots are additive. An exact configured origin and root suppresses only its matching automatic entry. Automatic sibling roots stay active. Authorization never copies history or gives Mooncite network access.
+
+**Disable.** Removal of client registrations recorded as owned by this installation. It keeps the package, source authorizations, evidence index, learned-memory configuration, learned-memory database, and source history. `memory disable` hides learned tools but keeps learned state.
+
+**Uninstall.** Removal of owned registrations, the exact command link, and the recognized stable package. It keeps source authorizations, both databases, learned-memory configuration, and source history. Uninstall refuses when an exact or conflicting unowned registration may still target the package.
+
+**Purge.** Separately confirmed deletion of recognized Mooncite-owned evidence and learned-memory SQLite state. It removes neither configuration nor source history.
+
+**Last-good generation.** The newest safely published evidence-index generation. Mooncite retains it when refresh cannot publish complete coverage.

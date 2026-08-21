@@ -1,23 +1,42 @@
 # Architecture
 
-Mooncite's evidence core is `MoonciteEngine`. Its interface is `refresh`, `recall`, `inspect`, `status`, `rebuild`, bounded canonical `resolveEvidenceAnchors`, and `close`; source adapters, coherent reads, SQLite transactions, FTS ranking, corruption recovery, and last-good retention stay behind that seam.
+## One engine
 
-Mooncite has five explicit source adapters: Pi session-format-v3 JSONL, compatible OMP JSONL, canonical Claude Code session JSONL, Codex rollout JSONL, and ChatGPT conversation JSON exports. OMP accepts its optional fixed-width title preamble. Claude Code scans project-level JSONL and excludes nested subagent and workflow copies. Codex indexes the user and assistant event stream rather than duplicate transport records. ChatGPT streams a single conversation object or top-level export array into per-conversation ingestion so large valid exports are not first materialized as one JavaScript value.
+`MoonciteEngine` owns source discovery, ingestion, the evidence index, citation identity, recall, inspection, status, rebuild, and last-good recovery. Its public operations are `refresh`, `recall`, `inspect`, `status`, `rebuild`, bounded canonical `resolveEvidenceAnchors`, and `close`.
 
-`mooncite serve` wraps the engine in one stdio MCP server. OMP's linked package exposes its package-root-safe `.mcp.json`; Codex and Claude Code register the same server directly. The packaged Pi extension only translates native tool calls to MCP methods and contains no retrieval behavior.
+Exactly five adapters feed the engine:
 
-Client registrations successfully configured by Mooncite are recorded in an owner-only installation journal. Reconstructing a missing journal requires all four client states to be diagnosable so ownership is never guessed. Disable removes only recorded registrations. Uninstall does the same, but refuses any exact or conflicting unowned registration that may still target the package so it cannot orphan that client. An unavailable unowned client does not block cleanup, while an unavailable owned client preserves the package for a safe retry.
+- Pi session-format-v3 JSONL
+- compatible OMP JSONL
+- Claude Code project JSONL
+- Codex rollout JSONL
+- ChatGPT conversation JSON exports
 
-SQLite is a derived projection. Full indexing publishes inside one immediate transaction with per-source savepoints. Incremental refresh admits Pi same-inode size growth as an `append_trusted` suffix after a coherent suffix read; it does not reread the previously indexed Pi prefix on that path. Detectable Pi shrinkage, same-size rewrites, or identity changes retain the last-good generation. Every detected OMP, Claude Code, Codex, or ChatGPT change replaces only that source projection transactionally; mutable producers never receive the Pi append assumption. Successful source removals also publish transactionally. When a usable generation exists, a failed scan or replacement retains it rather than publishing a partial overwrite; an initial build can report partial coverage if at least one source was indexed and another failed. A malformed or corrupt marked database is deleted and rebuilt; source files are never repaired or rewritten.
+`mooncite serve` runs one local stdio MCP server. Codex and Claude Code register it directly. OMP uses the packaged `.mcp.json`. Pi uses a thin extension that translates native tool calls to MCP and contains no retrieval logic.
 
-Interactive recall queries the active FTS projection before source discovery. Only a miss triggers one bounded incremental refresh and one retry; full rebuild remains explicit. Ranking distinguishes metadata, phrase, full-text, and term matches; exposes matched/missing terms and coverage; collapses exact duplicate spans; and removes recursively captured Mooncite renderings unless the caller directly names that rendering's evidence ID or URI. The result contract separates strong matches, weak leads, complete misses, incomplete misses, invalid scopes, and unavailability, and includes a concrete next action.
+## Evidence path
 
-Status performs an explicit incremental refresh and reports ready, degraded, or unavailable health. A retained last-good or partially covered generation remains searchable but cannot make conclusive absence claims. Inspection separately rereads bounded physical source ranges; `verified` describes byte and identity provenance only.
+1. Mooncite discovers authorized local roots and reads admitted source files through Linux file descriptors.
+2. It publishes searchable evidence to a derived SQLite and FTS5 projection in a transaction.
+3. `mooncite_recall` performs bounded lexical search over that projection.
+4. `mooncite_inspect` rereads the physical source bytes for one locator before returning a verified window.
 
-The optional `LearnedMemoryStore` is deliberately separate from the evidence core and its disposable `index.sqlite`. A valid explicit opt-in opens owner-private `learned-memory.sqlite` with schema-version metadata, logical memory rows, immutable revision rows, 1–8 saved canonical evidence-anchor snapshots per revision, and FTS5 over current interpretations only. No foreign key points into the evidence index, so evidence rebuild and corruption recovery cannot cascade into learned history.
+Recall checks the active index first. Only a miss triggers one bounded incremental refresh and retry. `status` always refreshes. `rebuild` performs the explicit full reread.
 
-Writing follows one synchronous path: refresh evidence once, physically inspect every supplied evidence locator, resolve each to its canonical ID/URI plus record/span/context digests without returning unbounded source text, reject recursive Mooncite renderings, then commit the revision and current FTS row atomically. Recall compares saved anchors with the current authorized projection and quarantines mismatches; inspection additionally performs a fresh physical inspection of every anchor. Corrections append revisions. Deletion is contained to the learned database.
+Pi same-inode growth may append a coherently read suffix as `append_trusted`. Changes from OMP, Claude Code, Codex, and ChatGPT replace that source's projection in a transaction. A shrink, rewrite, identity change, or failed replacement keeps the usable last-good generation. Mooncite does not publish known partial coverage over it.
 
-Learned-memory configuration and database initialization are process-scoped and fail independently. The default path does not open or create the learned database and retains the exact three evidence tools. A valid enabled process conditionally registers four learned tools in MCP and Pi. If its durable store cannot open, the learned tools/status report unavailability while evidence refresh, recall, inspection, and status remain usable.
+The evidence index is disposable and rebuildable. Source files are never repaired, rewritten, or treated as Mooncite-owned.
 
-Configured source roots are re-read on every refresh. Pi and OMP roots are fixed by their clients. Narrow automatic registrations cover the two standard Claude profiles, the standard Codex sessions directory, and the local ChatGPT archive directory. A configured root overrides automatic discovery for the same origin. A server process started with `MOONCITE_AUTO_SOURCES=0` has no automatic optional roots.
+## Source roots
+
+Pi and OMP use their client roots. Mooncite narrowly discovers the supported Claude Code, Codex, and local ChatGPT export roots. Owner-configured roots are additive. A configured origin/root pair suppresses only the automatic entry for that exact pair.
+
+Symlinks are excluded. Mooncite keeps authorized roots and opened files physically contained and identity-checked through Linux file descriptors.
+
+## Optional learned memory
+
+Learned memory is off by default. When enabled, `LearnedMemoryStore` opens a separate owner-private `learned-memory.sqlite`. A learned-store failure does not disable evidence recall or inspection. Learned memory depends on a running evidence engine for anchor checks.
+
+Learned revisions are immutable and declare one provenance kind: `verified`, `derived`, `current_context`, or `unanchored`. A revision's own anchors determine its quarantine state. Parent health never propagates to a derived child, and related recall stops after one hop.
+
+Lifecycle metadata changes only through explicit activate, reinforce, and archive operations. Skill promotion creates a review candidate but never installs it. Hard deletion fails while a surviving relation or candidate still depends on the memory.

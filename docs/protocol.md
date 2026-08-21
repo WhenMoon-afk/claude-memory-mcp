@@ -1,48 +1,113 @@
 # MCP protocol
 
-The stdio server exposes exactly `mooncite_recall`, `mooncite_inspect`, and `mooncite_status` by default. A valid explicit learned-memory enablement conditionally adds the four tools documented below; the three evidence tools keep their source-evidence-only behavior.
+The local stdio server exposes exactly three evidence tools by default:
+
+- `mooncite_recall`
+- `mooncite_inspect`
+- `mooncite_status`
+
+A valid learned-memory opt-in adds four `mooncite_memory_*` tools. It does not change the evidence tools.
+
+## Normal flow
+
+1. Call `mooncite_recall` without a scope and use a distinctive lexical query.
+2. Read `outcome`, `conclusive`, `meaning`, `warnings`, and `next`.
+3. Call `mooncite_inspect` on the best candidate's exact locator.
+4. Call `mooncite_status` only when recall reports a coverage or freshness problem.
 
 ## `mooncite_recall`
 
-Input: required `query`; optional `limit` from 1–20; optional exact `project` and source-qualified `session_id` scopes returned by a prior result (`<origin>:<64-hex-source-root-digest>:<source-session-id>`). A unique bare session ID is also accepted and normalized; malformed, ambiguous, and deauthorized scopes return `invalid_scope`.
+| Field | Required | Accepted value |
+| --- | --- | --- |
+| `query` | Yes | Lexical query |
+| `limit` | No | 1 to 20 |
+| `project` | No | Exact value copied from a candidate |
+| `session_id` | No | Exact source-qualified value copied from a candidate |
+| `after`, `before` | No | Inclusive ISO 8601 event time with explicit UTC offset |
+| `role` | No | `user`, `assistant`, `system`, `developer`, `tool`, `toolResult`, `summary`, or `unknown` |
+| `source_origin` | No | `pi`, `omp`, `claude-code`, `codex`, or `chatgpt` |
+| `order` | No | `relevance`, `newest`, or `oldest`. Default is `relevance` |
+| `debug_timing` | No | `true` to return server-side timing and a short-lived workflow ID |
 
-Output has one of six outcomes: `matches`, `weak_leads`, `no_match`, `inconclusive`, `invalid_scope`, or `unavailable`. Every envelope includes `conclusive`, human-readable `meaning`, structured `next`, generation, trust state, coverage, scope count, `echoesSuppressed`, and warnings. Candidates include exact project/session identities, a bounded excerpt with `omittedBytes`, duplicate count when collapsed, `isEcho`, and `match` (`kind`, relevance band, matched terms, missing terms, and term coverage). `full_verified` means the current projection came from a full source read or transactional mutable-source replacement. `append_trusted` means Pi same-inode size growth was admitted from a coherently read suffix without rereading the previously indexed prefix. A full `rebuild` rereads authorized sources and restores `full_verified`.
+A source-qualified session ID has the form `<origin>:<64-hex-source-root-digest>:<source-session-id>`. Mooncite accepts a bare session ID only when it is unique. Malformed, ambiguous, or deauthorized scopes return `invalid_scope`. Time bounds exclude untimestamped evidence.
 
-Every candidate renders both accepted locator forms:
+| Outcome | Meaning |
+| --- | --- |
+| `matches` | Strong lexical result |
+| `weak_leads` | Possible result that needs refinement or inspection |
+| `no_match` | Absence result only when `conclusive` is `true` |
+| `inconclusive` | Freshness or coverage prevents an absence claim |
+| `invalid_scope` | Retry with no scope or an exact copied scope |
+| `unavailable` | No usable generation could be searched |
 
-```text
-mooncite:<pi|omp|claude-code|codex|chatgpt>:<source-namespace>:<session-hash>:<entry-hash>:<span-ordinal>
-mooncite://<pi|omp|claude-code|codex|chatgpt>/<source-namespace>/<encoded-session-id>/<encoded-entry-id>/<span-ordinal>
-```
+Candidates include exact project and session identities. They include `evidence_id`, `evidence_uri`, a bounded excerpt, and match reasons. They also show matched and missing terms, omitted text, duplicate spans, and suppressed recursive output.
+
+`full_verified` means the projection came from a full source read or a transactional mutable-source replacement. `append_trusted` means Mooncite admitted coherent Pi same-inode growth without rereading the indexed prefix.
+
+Results larger than 8 KiB keep a useful slice inline and may link a `mooncite-result://artifact/<uuid>` resource. The complete result may remain in that server process for up to ten minutes. The server keeps at most 12 large-result artifacts and evicts the oldest when full. Pi receives the complete result inline because its native extension cannot read MCP resources.
 
 ## `mooncite_inspect`
 
-Input: `evidence_id` containing either rendered locator form; optional `window` from 0–10. The engine resolves the locator only in the active index generation. When the source is available, it reads physical byte ranges within one total capture budget and checks record digests and entry identity. Outcomes are `verified`, `stale`, `missing`, `excluded`, `corrupt`, or `unavailable`; the MCP envelope adds `conclusive`, `meaning`, and `next`. Only `verified` populates `window` with current-source-verified spans, and it verifies provenance rather than claim truth. A nonverified structured result can include `target` text from the active index; that text is not a verification of current source bytes. ChatGPT message citations verify both the containing conversation object and message identity in its mapping.
+| Field | Required | Accepted value |
+| --- | --- | --- |
+| `evidence_id` | Yes | Either rendered `mooncite:` or `mooncite://` locator |
+| `window` | No | 0 to 10 |
+| `debug_timing` | No | `true` to report inspection timing |
+| `workflow_id` | No | Nonexpired ID from a debug-timed recall |
+
+Inspection resolves a locator only in the active generation. It rereads bounded physical source bytes. It then checks record and entry identity. Its outcome is `verified`, `stale`, `missing`, `excluded`, `corrupt`, or `unavailable`.
+
+Only `verified` returns a window checked against the current source. It proves byte and identity provenance, not truth or current authority. A nonverified result may include indexed `target` text, but that text has not passed the current-source check.
 
 ## `mooncite_status`
 
-No input. Returns no transcript text or physical source path. It reports `ready`, `degraded`, or `unavailable`; meaning and next action; freshness, search usability, generation, trust, coverage, last successful refresh time, grouped source errors, source counts by Pi/OMP/Claude Code/Codex/ChatGPT origin, record counts, derived-state bytes, refresh/rebuild outcomes, and Pi/OMP/Codex/Claude Code registration diagnostics. `degraded` may remain searchable, but its empty recall results are inconclusive. Only when learned memory was enabled at server start, status adds owner-private learned-store readiness and counts. Learned-store failure is reported there but does not make evidence recall or inspection fail.
+No input. Status returns `ready`, `degraded`, or `unavailable`. It also reports freshness, search usability, coverage, counts, grouped errors, state size, and client registrations. It returns no transcript text or full physical source path.
 
-## Conditional learned-memory tools
+A degraded index may remain searchable, but its empty recall results are inconclusive. Learned-store failure appears separately and does not disable evidence recall or inspection.
 
-Learned recall candidates and inspections label interpretations as `kind: derived_memory`; mutation envelopes are `derived_memory_write` and `derived_memory_delete`. Source anchors remain ordinary `mooncite:…` / `mooncite://…` evidence. A `verified` learned-memory provenance outcome means every saved anchor still matches its retained record, normalized-span, and context digests and was physically inspected; it does not assert the interpretation is true or currently authoritative.
+## Optional learned-memory tools
 
-Learned-operation failures return `kind: derived_memory_error`, the operation, `failed` or `unavailable`, and a bounded safe message. Writes and deletes never report success unless their transaction committed; stale-revision errors report the expected and current revision.
+Learned results use `kind: derived_memory` to keep agent-authored interpretation separate from source evidence. `provenanceOutcome: verified` means every anchor owned by that revision passed physical inspection. It does not verify the interpretation. A revision with no own anchors reports `not_evidence_backed`.
 
 ### `mooncite_memory_recall`
 
-Input: required `query`; optional `limit` from 1–20; optional exact encoded `project`; optional `include_invalid`. The query is lexical or an exact `mooncite-memory:<uuid>` ID. A project scope returns that project plus global items. Normal recall omits quarantined items; `include_invalid: true` exposes content/context mismatches, unavailable anchors, and deauthorized anchors for review. Candidates include the current immutable revision, interpretation, scope, source evidence IDs/URIs, relevance, `provenanceState`, and `quarantined`.
+`query` is required. Optional inputs are `limit`, exact encoded `project`, `include_invalid`, `include_archived`, and `related_limit`. `limit` accepts 1 to 20. `related_limit` accepts 0 to 8. The query may be lexical text or an exact `mooncite-memory:<uuid>` ID.
+
+Normal recall returns active, nonquarantined memories. `include_invalid` includes revisions quarantined by their own anchors. `include_archived` includes archived identities. `related_limit` returns direct incoming and outgoing links only. It never traverses beyond one hop.
 
 ### `mooncite_memory_inspect`
 
-Input: required `memory_id`; optional positive `revision` (current by default); optional `window` from 0–2. The result keeps the derived interpretation separate from every saved source anchor, current canonical anchor metadata, and physical `mooncite_inspect` outcome. It resolves all anchors even if one fails. Historical revisions remain inspectable.
+- `{kind:"revision",memory_id,...}` inspects the current or named immutable revision and every anchor it owns. `window` accepts 0 to 2.
+- `{kind:"skill_candidate",candidate_id}` returns the review artifact, source revisions, review state, and `installed:false`.
 
 ### `mooncite_memory_write`
 
-Input: required `interpretation` (maximum 8 KiB UTF-8) and `evidence_ids` (1–8 unique Mooncite evidence IDs or URIs); optional `scope`; optional `memory_id` plus `expected_revision`. New same-project memory derives that exact project scope unless `global` is explicit; mixed-project creation requires explicit global scope. Every anchor is canonicalized and physically verified again before the transaction. Mooncite tool-result spans and memory-to-memory anchors are rejected.
+| Operation | Required content |
+| --- | --- |
+| `create` | `interpretation`, `provenance`, optional `scope` |
+| `revise` | Exact `memory_id`, `expected_revision`, replacement content |
+| `consolidate` | New interpretation, 2 to 8 exact parent revisions, and required `evidence_ids` with 0 to 8 locators |
+| `activate`, `archive` | Exact revision and lifecycle metadata guards |
+| `reinforce` | Same guards plus `salience` from 0 to 100 |
+| `propose_skill_candidate` | 1 to 8 exact source revisions and artifact fields |
+| `review_skill_candidate` | Exact pending candidate, decision, and review note |
 
-Omit `memory_id` and `expected_revision` to create. Supplying a `memory_id` requires its exact current `expected_revision` and appends revision N+1; it never updates or deletes the older revision. The scope schema is exactly `{kind:\"global\"}` or `{kind:\"project\",project:\"<exact encoded project>\"}`.
+Create and revise require exactly one provenance kind:
+
+| Kind | Requirement |
+| --- | --- |
+| `verified` | 1 to 8 unique evidence locators |
+| `derived` | 1 to 8 exact parents with `supports`, `contradicts`, `refines`, or `supersedes`, plus up to 8 own locators |
+| `current_context` | Bounded context note and up to 8 own locators |
+| `unanchored` | Bounded basis with no locators or parents |
+
+Mooncite physically verifies and canonicalizes supplied evidence before commit. It rejects recursive Mooncite output and duplicate canonical spans. Revisions append and never overwrite history. Lifecycle operations change metadata only. Candidate approval records review and never installs a skill.
+
+Scope is exactly `{kind:"global"}` or `{kind:"project",project:"<exact encoded project>"}`. Mooncite infers an omitted scope only when all dependencies belong to one project.
 
 ### `mooncite_memory_delete`
 
-Input: required `memory_id` and exact current `expected_revision`. It atomically deletes the logical learned item, all revisions, anchors, and learned FTS rows. It does not modify source files, source authorization, or `index.sqlite`.
+- `{kind:"memory",memory_id,expected_revision,expected_metadata_version}` deletes one logical memory and its revisions. It returns `blocked` while a surviving relation or skill candidate depends on that memory.
+- `{kind:"skill_candidate",candidate_id,expected_state}` deletes one candidate and releases that dependency.
+
+Learned writes and deletes change only `learned-memory.sqlite`. They never modify source files, authorization, or the evidence index.

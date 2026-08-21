@@ -28,8 +28,18 @@ interface SourceConfig {
   sources: SourceRegistration[];
 }
 
-const OPTIONAL_SOURCE_ORIGINS = new Set<OptionalSourceOrigin>(["claude-code", "codex", "chatgpt"]);
+const OPTIONAL_SOURCE_ORIGINS = new Set<string>(["claude-code", "codex", "chatgpt"]);
 const MAX_SOURCE_CONFIG_BYTES = 1024 * 1024;
+
+function sourceRegistrationKey(source: Pick<SourceRegistration, "origin" | "root">): string {
+  return `${source.origin}\0${source.root}`;
+}
+
+function compareSourceRegistrations(a: SourceRegistration, b: SourceRegistration): number {
+  if (a.origin !== b.origin) return a.origin < b.origin ? -1 : 1;
+  if (a.root === b.root) return 0;
+  return a.root < b.root ? -1 : 1;
+}
 
 function hasSymlinkComponent(path: string): boolean {
   let current = resolve(path);
@@ -100,21 +110,24 @@ function parseConfig(value: unknown): SourceConfig {
     throw new Error("Mooncite source configuration is invalid.");
   }
   const sources: SourceRegistration[] = [];
-  const origins = new Set<OptionalSourceOrigin>();
+  const registrations = new Set<string>();
   for (const item of record.sources) {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Mooncite source registration is invalid.");
     const source = item as Record<string, unknown>;
     if (Object.keys(source).sort().join(",") !== "origin,root"
       || typeof source.origin !== "string"
-      || !OPTIONAL_SOURCE_ORIGINS.has(source.origin as OptionalSourceOrigin)) {
+      || !isOptionalSourceOrigin(source.origin)) {
       throw new Error("Mooncite source registration is invalid.");
     }
-    const origin = source.origin as OptionalSourceOrigin;
-    if (origins.has(origin)) throw new Error(`Mooncite ${origin} source is registered more than once.`);
-    origins.add(origin);
-    sources.push({ origin, root: validateRoot(source.root) });
+    const registration = { origin: source.origin, root: validateRoot(source.root) };
+    const key = sourceRegistrationKey(registration);
+    if (registrations.has(key)) {
+      throw new Error(`Mooncite ${registration.origin} source root is registered more than once.`);
+    }
+    registrations.add(key);
+    sources.push(registration);
   }
-  return { version: 1, sources: sources.sort((a, b) => a.origin.localeCompare(b.origin)) };
+  return { version: 1, sources: sources.sort(compareSourceRegistrations) };
 }
 
 export function loadSourceRegistrations(configPath: string): SourceRegistration[] {
@@ -183,10 +196,12 @@ export function resolveSourceRegistrations(
   env: NodeJS.ProcessEnv = process.env,
 ): SourceRegistration[] {
   const configured = loadSourceRegistrations(configPath);
-  const configuredOrigins = new Set(configured.map((source) => source.origin));
+  const configuredRegistrations = new Set(configured.map(sourceRegistrationKey));
   return [
     ...configured,
-    ...discoverAutomaticSourceRegistrations(env).filter((source) => !configuredOrigins.has(source.origin)),
+    ...discoverAutomaticSourceRegistrations(env).filter(
+      (source) => !configuredRegistrations.has(sourceRegistrationKey(source)),
+    ),
   ];
 }
 
@@ -230,24 +245,27 @@ export function addSourceRegistration(configPath: string, registration: SourceRe
   const sources = loadSourceRegistrations(configPath);
   const source = parseConfig({ version: 1, sources: [registration] }).sources[0]!;
   validateRoot(source.root, true);
-  const existing = sources.find((item) => item.origin === source.origin);
-  if (existing) {
-    if (existing.root !== source.root) throw new Error(`Mooncite ${source.origin} source is already registered at another root.`);
-    return { added: false, source: existing };
-  }
+  const sourceKey = sourceRegistrationKey(source);
+  const existing = sources.find((item) => sourceRegistrationKey(item) === sourceKey);
+  if (existing) return { added: false, source: existing };
   writeConfig(configPath, [...sources, source]);
   return { added: true, source };
 }
 
-export function removeSourceRegistration(configPath: string, origin: OptionalSourceOrigin): { removed: boolean; origin: OptionalSourceOrigin } {
-  if (!OPTIONAL_SOURCE_ORIGINS.has(origin)) throw new Error(`Unsupported Mooncite source origin: ${origin}`);
+export function removeSourceRegistration(
+  configPath: string,
+  registration: Pick<SourceRegistration, "origin" | "root">,
+): { removed: boolean; origin: OptionalSourceOrigin; root: string } {
+  const source = parseConfig({ version: 1, sources: [registration] }).sources[0]!;
   const sources = loadSourceRegistrations(configPath);
-  const remaining = sources.filter((source) => source.origin !== origin);
-  if (remaining.length === sources.length) return { removed: false, origin };
+  const targetKey = sourceRegistrationKey(source);
+  const remaining = sources.filter((item) => sourceRegistrationKey(item) !== targetKey);
+  const result = { removed: remaining.length !== sources.length, origin: source.origin, root: source.root };
+  if (!result.removed) return result;
   writeConfig(configPath, remaining);
-  return { removed: true, origin };
+  return result;
 }
 
 export function isOptionalSourceOrigin(value: string): value is OptionalSourceOrigin {
-  return OPTIONAL_SOURCE_ORIGINS.has(value as OptionalSourceOrigin);
+  return OPTIONAL_SOURCE_ORIGINS.has(value);
 }

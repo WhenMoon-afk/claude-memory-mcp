@@ -10,7 +10,7 @@ Mooncite is a Linux/procfs-only, local, citation-backed retrieval tool for prior
 - The SQLite evidence index is owner-private, transactional, derived, disposable, and rebuildable from authorized sources.
 - Recall is bounded lexical retrieval. Inspection must re-read and verify the current physical source bytes before returning a bounded window. Status must not expose transcript text or full physical paths.
 - Mooncite has no history network transport, telemetry, upload, SSH/remote-copy path, account login, export automation, credential/cookie access, or opaque application-cache scraping. Text returned through MCP enters the receiving model's privacy boundary; do not imply otherwise.
-- Evidence retrieval is not an authority, policy, recommendation, truth-scoring, or durable-agent-memory layer. The owner-approved learned-memory mode is a separate, explicit, default-off layer for citation-backed **derived interpretations**; it must never relabel an interpretation as source evidence.
+- Evidence retrieval is not an authority, policy, recommendation, truth-scoring, or durable-agent-memory layer. The owner-approved learned-memory mode is a separate, explicit, default-off layer for agent-authored interpretations with verified, derived, current-context, or unanchored provenance; it must never relabel an interpretation as source evidence.
 
 ## Fixed architecture
 
@@ -21,11 +21,11 @@ Treat these counts and seams as closed contracts except for the owner-approved o
 - Exactly four client integrations: Pi, OMP, Codex, and Claude Code. They connect to one local stdio MCP server. ChatGPT is a source origin, not a client integration.
 - `MoonciteEngine` owns ingestion, source adapters, coherent reads, citation identity, SQLite/FTS, refresh/rebuild, inspection, last-good behavior, and the bounded canonical-anchor resolver. `LearnedMemoryStore` owns the separate durable `learned-memory.sqlite`; learned-store failure must not disable evidence retrieval.
 - The Pi extension is a thin native-to-MCP adapter. `.mcp.json`, Codex, and Claude Code registrations point to the same packaged server. Do not duplicate retrieval behavior in an integration.
-- Pi and OMP use their standard roots. Only the narrow supported Claude Code, Codex, and local ChatGPT-export roots may be automatically discovered; owner configuration may override one optional origin. Authorization grants local reads only.
+- Pi and OMP use their standard roots. Only the narrow supported Claude Code, Codex, and local ChatGPT-export roots may be automatically discovered. Owner configuration adds optional roots. A configured origin/root pair suppresses only the automatic registration with that exact pair. Automatic sibling roots remain active. Authorization grants local reads only.
 - Symlinks are excluded from source admission. Authorized roots and opened files remain physically contained and identity-checked through Linux file descriptors.
 - Incremental publication is transactional. Pi same-inode size growth may be admitted as `append_trusted` after a coherent suffix read; this path does not reread the already indexed prefix. Detectable Pi shrinkage, same-size rewrites, or identity changes retain the last-good generation. Every detected change from supported mutable OMP, Claude Code, Codex, and ChatGPT producers replaces that source projection transactionally. Never publish knowingly partial coverage over a usable generation.
 
-- Learned revisions require 1–8 physically verified canonical evidence anchors, retain immutable record/span/context digests, append corrections instead of overwriting history, and quarantine source changes or deauthorization rather than rebinding. Disable and uninstall retain learned state; explicit memory deletion changes learned state only; confirmed purge recognizes the separate learned database and its SQLite sidecars.
+- Learned revisions are immutable and carry one explicit provenance form: verified revisions own 1–8 physically verified canonical evidence anchors; derived revisions link 1–8 exact parent revisions and may own 0–8 anchors; current-context revisions carry an explicit note and may own 0–8 anchors; unanchored revisions carry an explicit basis and own no anchors or parent links. Only a revision's own anchors can quarantine it. Relations are exact and one-hop only. Lifecycle metadata is explicit/manual and never mutates revisions or source evidence. Skill promotion produces a reviewed candidate artifact only and never installs it. Disable and uninstall retain learned state; hard deletion fails closed on surviving relation or candidate dependencies; confirmed purge recognizes the separate learned database and its SQLite sidecars.
 
 Do not add, rename, alias, or silently generalize an origin, evidence tool, learned-memory tool, client, locator form, lifecycle operation, or transport as incidental work.
 
@@ -36,7 +36,7 @@ Edit the existing owner of a behavior; do not create a second path around it.
 - `CONTEXT.md`: canonical domain terms and lifecycle meanings.
 - `src/engine.ts`: engine contract, adapters, citations, indexing, refresh, rebuild, physical inspection, and bounded canonical anchor resolution.
 - `src/source-config.ts`: source authorization, discovery, and effective-root precedence.
-- `src/learned-memory.ts`: strict learned-memory opt-in, separate durable schema, revision/anchor invariants, lexical retrieval, quarantine, and learned-only mutation.
+- `src/learned-memory.ts`: strict learned-memory opt-in, separate durable schema and v1 migration, immutable provenance/relation invariants, lexical and one-hop retrieval, own-anchor quarantine, explicit lifecycle metadata, reviewed skill candidates, and learned-only mutation.
 - `src/mcp.ts`: the default three evidence schemas plus the four conditional learned-memory schemas and stdio surface.
 - `src/clients.ts`: supported-client discovery and exact registration ownership/mutation.
 - `src/lifecycle.ts`: install journal, staging, install/disable/uninstall/purge safety, and filesystem ownership.

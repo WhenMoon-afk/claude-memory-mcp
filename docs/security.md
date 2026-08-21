@@ -1,15 +1,27 @@
 # Security and data handling
 
-Mooncite is Linux-only and requires procfs so every source read can pin its authorized root through file descriptors and verify the opened file remains physically contained. It authorizes only expected conversation files below narrow source roots: `.jsonl` beneath Pi, OMP, Claude Code, and Codex roots, plus `conversation.json`, `conversations.json`, and numbered conversation exports beneath a ChatGPT root. Pi and OMP use standard roots. Claude Code, Codex, and the local ChatGPT archive use narrowly scoped automatic roots by default; `MOONCITE_AUTO_SOURCES=0` disables them, and explicit registrations override them. Directory and file symbolic links are excluded. Index reads verify file identity and coherent byte ranges. A `verified` inspection rechecks current source-record digests before populating its window; every nonverified outcome has an empty window, and any structured `target` is last-indexed text rather than verified current source text.
+## Source access
 
-The evidence index is derived local state with owner-only directory/file modes. Installation, state, and configuration paths reject unsafe writable ancestors unless an earlier owner-private directory or sticky directory prevents pathname replacement. A corrupt marked evidence index is disposable and rebuilt from source; an unmarked state directory must first prove its Mooncite identity. Refresh keeps a last-good generation rather than publishing incomplete replacement state.
+Mooncite runs only on Linux with procfs. It opens authorized roots and source files through Linux file descriptors. It rejects symlinks and checks that every file stays inside its authorized root.
 
-Recall excerpts and inspect windows are deliberately bounded. Control characters and bidirectional controls are rejected in rendered identifiers and query inputs, and visibly escaped in all returned transcript text and structured fields. Status contains counts and safe source labels, not transcript text or full physical source paths.
+It reads only supported conversation files from Pi, OMP, Claude Code, Codex, and ChatGPT export roots. Source history stays read-only. Mooncite never repairs, rewrites, moves, or deletes it.
 
-Learned memory is a separate explicit opt-in with a separate strict owner-private config and `learned-memory.sqlite`. It stores only the derived interpretation and canonical locator metadata/digests—not copied source windows. Every revision requires 1–8 source anchors that pass physical inspection immediately before commit. Mooncite tool renderings are rejected as anchors to prevent straightforward recall-to-retain recursion. There is no background extraction, model/network call, embedding, or automatic transcript capture.
+## Local state
 
-Saved record, normalized-span, source-root, project, session, role, source-kind, parent, branch, and compaction values are compared without automatic rebinding. Content/context change, missing evidence, or deauthorization quarantines the interpretation; `include_invalid` is required to recall it for repair. A physical learned inspection resolves every anchor and keeps returned source evidence separate from derived text. Learned-store corruption or an unsupported schema disables only learned operations and is never repaired by deleting the durable database.
+The evidence index is owner-private derived state. Mooncite can delete and rebuild it from unchanged sources. A failed refresh keeps a usable last-good index rather than replacing it with known partial coverage.
 
-Installation refuses an unrecognized or different-version install tree, conflicting client registrations, and an unrelated command at the launcher path; repair of a missing registration-ownership journal also refuses any unavailable client state rather than guessing ownership. Source, state, and configuration handling refuses unsafe path ownership, symbolic links, malformed source configuration, and overlapping source/state roots. Disable and uninstall refuse unverified cleanup of an owned registration; uninstall also refuses to orphan any exact or conflicting unowned registration that may still target the package. Both retain the learned opt-in and database. Confirmed purge recognizes the evidence and learned SQLite files and sidecars, but refuses invalid owner markers, hard-linked state files, live engines, aliased source/state roots, and unknown state entries. Purge never targets source history or either configuration file.
+Learned memory is a separate, default-off database for agent-authored interpretations. It stores provenance metadata and anchor digests, not copied source windows. Learned-store failure does not disable evidence search.
 
-When a client calls Mooncite, returned text enters that client's model context. Review the model provider's privacy policy. Mooncite itself uses no network transport for history and performs no telemetry or upload. It does not read ChatGPT credentials, browser cookies, or opaque application caches and cannot request an account export. Remote snapshots or mounts must be created and authenticated outside Mooncite before their local root is used.
+Recall excerpts and inspection windows are bounded. Mooncite escapes unsafe control text. Status reports counts and safe labels, never transcript text or full physical source paths.
+
+## Network and model boundary
+
+Mooncite does not transport or upload history. It has no telemetry, account login, or remote-copy command. It does not read ChatGPT credentials or browser cookies. It does not scrape opaque application caches.
+
+Text returned through an MCP call enters the receiving model's context. The model provider's data policy applies from that point. Copy or mount remote history locally with tools outside Mooncite before authorizing its root.
+
+## Install and removal
+
+Install and removal fail closed when Mooncite cannot prove safe ownership. Mooncite refuses unsafe paths, links, conflicting registrations, unrelated launchers, and unknown state entries. It does not overwrite or delete them.
+
+`disable` and `uninstall` preserve source history, configuration, the evidence index, and learned memory. Confirmed `purge --yes` removes only recognized derived SQLite state. Source history is never a purge target.

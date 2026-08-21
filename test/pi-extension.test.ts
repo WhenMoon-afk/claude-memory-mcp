@@ -29,9 +29,24 @@ describe("Mooncite Pi extension seam", () => {
       "mooncite_inspect",
       "mooncite_status",
     ]);
+    expect(Object.fromEntries(registered.map(({ name, description }) => [name, description]))).toEqual({
+      mooncite_inspect: "Verify one Mooncite locator against current source bytes and return a bounded window. Verification proves provenance, not truth.",
+      mooncite_recall: "Search authorized local history for bounded lexical evidence. Returns cited candidates, explicit outcomes, and next actions.",
+      mooncite_status: "Report source and index health without transcript text or full source paths.",
+    });
 
     const inputs = [
-      { query: "receiver phrase", limit: 3 },
+      {
+        query: "receiver phrase",
+        limit: 3,
+        project: "claude-memory-mcp",
+        session_id: "pi:session-123",
+        after: "2026-01-01T00:00:00.000Z",
+        before: "2026-08-20T23:59:59.999Z",
+        role: "assistant",
+        source_origin: "pi",
+        order: "newest",
+      },
       { evidence_id: "mooncite:pi:source:session:entry:0", window: 2 },
       {},
     ];
@@ -73,32 +88,131 @@ describe("Mooncite Pi extension seam", () => {
       "mooncite_memory_write",
       "mooncite_memory_delete",
     ]);
+    expect(Object.fromEntries(registered.map(({ name, description }) => [name, description]))).toMatchObject({
+      mooncite_memory_delete: "Delete one learned memory or skill candidate. Memory deletion fails while a surviving dependency remains.",
+      mooncite_memory_inspect: "Inspect one immutable memory revision and verify its own anchors, or inspect one skill candidate.",
+      mooncite_memory_recall: "Search agent-authored interpretations. Results are learned memory, not source evidence.",
+      mooncite_memory_write: "Write immutable learned-memory revisions, manage lifecycle metadata, or propose and review skill candidates. Candidate review never installs a skill.",
+    });
 
     const memoryId = "mooncite-memory:00000000-0000-4000-8000-000000000001";
+    const candidateId = "mooncite-skill-candidate:00000000-0000-4000-8000-000000000002";
+    const evidenceId = "mooncite:pi:source:session:entry:0";
     const inputs: Record<string, unknown>[] = [
-      { query: "durable interpretation", include_invalid: true },
-      { memory_id: memoryId, revision: 1, window: 2 },
       {
-        interpretation: "A citation-backed derived interpretation.",
-        evidence_ids: ["mooncite:pi:source:session:entry:0"],
+        query: "durable interpretation",
+        include_invalid: true,
+        include_archived: true,
+        related_limit: 2,
+      },
+      { kind: "revision", memory_id: memoryId, revision: 1, window: 2 },
+      {
+        operation: "create",
+        interpretation: "A verified learned interpretation.",
+        provenance: { kind: "verified", evidence_ids: [evidenceId] },
         scope: { kind: "global" },
       },
-      { memory_id: memoryId, expected_revision: 1 },
+      {
+        kind: "memory",
+        memory_id: memoryId,
+        expected_revision: 1,
+        expected_metadata_version: 1,
+      },
     ];
     for (let index = 0; index < inputs.length; index++) {
       const definition = registered[index + 3]!;
       expect(Value.Check(definition.parameters, inputs[index])).toBe(true);
       await definition.execute(`memory-${index}`, inputs[index]!, new AbortController().signal);
     }
-    expect(Value.Check(registered[3]!.parameters, { query: "x", include_invalid: "yes" })).toBe(false);
-    expect(Value.Check(registered[4]!.parameters, { memory_id: memoryId, window: 3 })).toBe(false);
-    expect(Value.Check(registered[5]!.parameters, { interpretation: "uncited", evidence_ids: [] })).toBe(false);
-    expect(Value.Check(registered[5]!.parameters, {
-      memory_id: memoryId,
-      interpretation: "missing stale guard",
-      evidence_ids: ["mooncite:pi:source:session:entry:0"],
+    const recallParameters = registered[3]!.parameters;
+    const inspectParameters = registered[4]!.parameters;
+    const writeParameters = registered[5]!.parameters;
+    const deleteParameters = registered[6]!.parameters;
+    expect(Value.Check(recallParameters, { query: "x", include_invalid: "yes" })).toBe(false);
+    expect(Value.Check(inspectParameters, { memory_id: memoryId, window: 2 })).toBe(false);
+    expect(Value.Check(inspectParameters, { kind: "revision", memory_id: memoryId, window: 3 })).toBe(false);
+    expect(Value.Check(inspectParameters, { kind: "skill_candidate", candidate_id: candidateId })).toBe(true);
+    expect(Value.Check(writeParameters, {
+      operation: "create",
+      interpretation: "Evidence is required for verified provenance.",
+      provenance: { kind: "verified", evidence_ids: [] },
+      scope: { kind: "global" },
     })).toBe(false);
-    expect(Value.Check(registered[6]!.parameters, { memory_id: memoryId })).toBe(false);
+    expect(Value.Check(writeParameters, {
+      operation: "create",
+      interpretation: "A current-context interpretation.",
+      provenance: { kind: "current_context", context_note: "Explicit current task.", evidence_ids: [] },
+      scope: { kind: "global" },
+    })).toBe(true);
+    expect(Value.Check(writeParameters, {
+      operation: "create",
+      interpretation: "An unanchored interpretation.",
+      provenance: { kind: "unanchored", basis_note: "Explicit working assumption." },
+      scope: { kind: "global" },
+    })).toBe(true);
+    expect(Value.Check(writeParameters, {
+      operation: "revise",
+      memory_id: memoryId,
+      expected_revision: 1,
+      interpretation: "A derived correction.",
+      provenance: {
+        kind: "derived",
+        parents: [{
+          memory_id: memoryId,
+          revision: 1,
+          relation: "refines",
+          reason: "The correction refines the prior exact revision.",
+        }],
+        evidence_ids: [],
+      },
+    })).toBe(true);
+    expect(Value.Check(writeParameters, {
+      operation: "reinforce",
+      memory_id: memoryId,
+      expected_revision: 1,
+      expected_metadata_version: 1,
+      salience: 75,
+    })).toBe(true);
+    expect(Value.Check(writeParameters, {
+      operation: "consolidate",
+      interpretation: "A consolidated interpretation.",
+      parents: [
+        { memory_id: memoryId, revision: 1, relation: "supports", reason: "First exact source." },
+        { memory_id: memoryId, revision: 2, relation: "supports", reason: "Second exact source." },
+      ],
+      evidence_ids: [],
+      scope: { kind: "global" },
+    })).toBe(true);
+    expect(Value.Check(writeParameters, {
+      operation: "propose_skill_candidate",
+      sources: [{ memory_id: memoryId, revision: 1 }],
+      artifact: {
+        name: "candidate",
+        description: "Reviewed candidate artifact.",
+        instructions: "Do not install automatically.",
+      },
+    })).toBe(true);
+    expect(Value.Check(writeParameters, {
+      operation: "review_skill_candidate",
+      candidate_id: candidateId,
+      expected_state: "pending_review",
+      decision: "approved",
+      review_note: "Explicitly reviewed.",
+    })).toBe(true);
+    expect(Value.Check(writeParameters, {
+      interpretation: "Old optional-field write bag.",
+      evidence_ids: [evidenceId],
+    })).toBe(false);
+    expect(Value.Check(deleteParameters, {
+      kind: "memory",
+      memory_id: memoryId,
+      expected_revision: 1,
+    })).toBe(false);
+    expect(Value.Check(deleteParameters, {
+      kind: "skill_candidate",
+      candidate_id: candidateId,
+      expected_state: "approved",
+    })).toBe(true);
     expect(calls.map(({ name }) => name)).toEqual(registered.slice(3).map(({ name }) => name));
   });
 });

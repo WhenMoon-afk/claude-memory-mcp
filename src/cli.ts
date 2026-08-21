@@ -26,7 +26,6 @@ import {
   addSourceRegistration,
   discoverAutomaticSourceRegistrations,
   isOptionalSourceOrigin,
-  loadSourceRegistrations,
   removeSourceRegistration,
   resolveSourceRegistrations as resolveConfiguredSources,
   type SourceRegistration,
@@ -101,24 +100,26 @@ async function main(): Promise<void> {
     const action = args[1] ?? "list";
     const configPath = resolveSourceConfigPath();
     if (action === "list") {
-      const configured = loadSourceRegistrations(configPath);
+      const sources = resolveSourceRegistrations();
       writeResult({
-        automatic: resolveAutomaticSourceRegistrations().filter((source) => !configured.some((item) => item.origin === source.origin)),
-        configured,
-        sources: resolveSourceRegistrations(),
+        automatic: sources.filter((source) => source.discovery === "automatic"),
+        configured: sources.filter((source) => source.discovery !== "automatic"),
+        sources,
       });
       return;
     }
     if (action !== "add" && action !== "remove") throw new Error("Usage: mooncite source <list|add|remove>");
     const origin = args[2];
     if (!origin || !isOptionalSourceOrigin(origin)) throw new Error("Mooncite source origin must be claude-code, codex, or chatgpt.");
+    const root = args[3];
+    if (!root) {
+      throw new Error(`Usage: mooncite source ${action} <claude-code|codex|chatgpt> <absolute-root>`);
+    }
     if (action === "add") {
-      const root = args[3];
-      if (!root) throw new Error("Usage: mooncite source add <claude-code|codex|chatgpt> <absolute-root>");
       writeResult(addSourceRegistration(configPath, { origin, root }));
       return;
     }
-    writeResult(removeSourceRegistration(configPath, origin));
+    writeResult(removeSourceRegistration(configPath, { origin, root }));
     return;
   }
   const engineOptions = resolveEngineOptions();

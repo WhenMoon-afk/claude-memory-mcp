@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { appendFile, chmod, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -38,6 +40,7 @@ function chatGptConversation(
         children: [assistantId, alternateId],
         message: {
           id: userId,
+          create_time: 1_893_456_001,
           author: { role: "user" },
           content: { content_type: "text", parts: [userMarker] },
         },
@@ -48,6 +51,7 @@ function chatGptConversation(
         children: [],
         message: {
           id: assistantId,
+          create_time: 1_893_456_002,
           author: { role: "assistant" },
           content: { content_type: "text", parts: [assistantMarker] },
         },
@@ -58,6 +62,7 @@ function chatGptConversation(
         children: [],
         message: {
           id: alternateId,
+          create_time: 1_893_456_003,
           author: { role: "assistant" },
           content: { content_type: "text", parts: [alternateMarker] },
         },
@@ -77,6 +82,10 @@ describe("Mooncite engine public seam", () => {
       const candidate = recalled.candidates[0]!;
       expect(candidate.evidenceId).toMatch(/^mooncite:pi:[a-f0-9]{24}:[a-f0-9]{24}:[a-f0-9]{24}:0$/u);
       expect(candidate.evidenceUri).toMatch(/^mooncite:\/\/pi\/[a-f0-9]{24}\/session-moon\/entry-a\/0$/u);
+      expect(candidate).toMatchObject({
+        eventTimestamp: "2030-01-01T00:00:01.000Z",
+        recordProvenance: "original",
+      });
       const [byId, byUri] = engine.resolveEvidenceAnchors([
         { locator: candidate.evidenceId },
         { locator: candidate.evidenceUri },
@@ -101,6 +110,10 @@ describe("Mooncite engine public seam", () => {
         const inspected = engine.inspect({ evidenceId: locator, window: 1 });
         expect(inspected.outcome).toBe("verified");
         expect(inspected.target?.text).toContain("silver-cedar-17");
+        expect(inspected.target).toMatchObject({
+          eventTimestamp: "2030-01-01T00:00:01.000Z",
+          recordProvenance: "original",
+        });
         expect(inspected.window.map((span) => span.relation)).toEqual(["target", "after"]);
       }
       expect(await digest(f.source)).toBe(f.sourceDigest);
@@ -109,18 +122,44 @@ describe("Mooncite engine public seam", () => {
     }
   });
 
+  it("keeps lexical search behavior without a duplicate FTS content table", async () => {
+    const f = await fixture();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    try {
+      expect(engine.recall({ query: "silver-cedar-17" })).toMatchObject({
+        outcome: "matches",
+        candidates: [{ excerpt: expect.stringContaining("silver-cedar-17") }],
+      });
+    } finally {
+      engine.close();
+    }
+    const database = new DatabaseSync(join(f.stateDir, "index.sqlite"), { readOnly: true });
+    try {
+      expect(database.prepare("SELECT name FROM sqlite_schema WHERE name = 'evidence_fts_content'").get()).toBeUndefined();
+      expect(database.prepare("SELECT name FROM sqlite_schema WHERE name = 'evidence_fts_data'").get()).toEqual({
+        name: "evidence_fts_data",
+      });
+    } finally {
+      database.close();
+    }
+  });
+
   it("incrementally admits a coherent append and rebuild restores full verification", async () => {
     const f = await fixture();
     const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
     try {
       expect(engine.status()).toMatchObject({ outcome: "ready", trustState: "full_verified", evidenceSpans: 2 });
-      await appendFile(f.source, jsonLine({ type: "message", id: "entry-c", parentId: "entry-b", message: { role: "user", content: "Incremental marker amber-river-29." } }));
+      await appendFile(f.source, jsonLine({ type: "message", id: "entry-c", parentId: "entry-b", timestamp: "2030-01-01T00:00:03-05:00", message: { role: "user", content: "Incremental marker amber-river-29." } }));
       const appended = engine.recall({ query: "amber-river-29" });
       expect(appended).toMatchObject({
         outcome: "matches",
         trustState: "append_trusted",
       });
       expect(appended.candidates[0]!.evidenceId).toMatch(/^mooncite:pi:[a-f0-9]{24}:[a-f0-9]{24}:[a-f0-9]{24}:0$/u);
+      expect(appended.candidates[0]).toMatchObject({
+        eventTimestamp: "2030-01-01T05:00:03.000Z",
+        recordProvenance: "original",
+      });
       expect(engine.rebuild()).toMatchObject({ outcome: "ready", trustState: "full_verified", lastRebuildOutcome: "published" });
     } finally {
       engine.close();
@@ -145,11 +184,11 @@ describe("Mooncite engine public seam", () => {
       const ompCandidate = engine.recall({ query: "violet-orbit-41" }).candidates[0]!;
       expect(piCandidate.evidenceId).toMatch(/^mooncite:pi:[a-f0-9]{24}:[a-f0-9]{24}:[a-f0-9]{24}:0$/u);
       expect(piCandidate.evidenceUri).toMatch(/^mooncite:\/\/pi\/[a-f0-9]{24}\/session-moon\/entry-a\/0$/u);
-      expect(piCandidate).toMatchObject({ sourceOrigin: "pi" });
+      expect(piCandidate).toMatchObject({ sourceOrigin: "pi", eventTimestamp: "2030-01-01T00:00:01.000Z", recordProvenance: "original" });
       expect(piCandidate.sessionId).toMatch(/^pi:[a-f0-9]{64}:session-moon$/u);
       expect(ompCandidate.evidenceId).toMatch(/^mooncite:omp:[a-f0-9]{24}:[a-f0-9]{24}:[a-f0-9]{24}:0$/u);
       expect(ompCandidate.evidenceUri).toMatch(/^mooncite:\/\/omp\/[a-f0-9]{24}\/session-moon\/entry-a\/0$/u);
-      expect(ompCandidate).toMatchObject({ sourceOrigin: "omp" });
+      expect(ompCandidate).toMatchObject({ sourceOrigin: "omp", eventTimestamp: "2030-01-02T00:00:01.000Z", recordProvenance: "original" });
       expect(ompCandidate.sessionId).toMatch(/^omp:[a-f0-9]{64}:session-moon$/u);
       expect(engine.recall({ query: "silver-cedar-17", sessionId: ompCandidate.sessionId }).outcome).toBe("no_match");
       expect(engine.inspect({ evidenceId: piCandidate.evidenceId })).toMatchObject({
@@ -230,8 +269,8 @@ describe("Mooncite engine public seam", () => {
     await mkdir(codexDirectory, { recursive: true });
     const claudeContent =
       jsonLine({ type: "queue-operation", operation: "enqueue", sessionId: "claude-session", content: "ignored queue metadata" }) +
-      jsonLine({ type: "user", sessionId: "claude-session", uuid: "claude-entry-a", parentUuid: null, cwd: "/receiver/project", message: { role: "user", content: "Claude marker lucid-fern-52." } }) +
-      jsonLine({ type: "assistant", sessionId: "claude-session", uuid: "claude-entry-b", parentUuid: "claude-entry-a", cwd: "/receiver/project", message: { role: "assistant", content: [{ type: "thinking", thinking: "not indexed" }, { type: "text", text: "Claude answer quiet-brook-73." }] } });
+      jsonLine({ type: "user", timestamp: "2030-01-01T02:00:01+02:00", sessionId: "claude-session", uuid: "claude-entry-a", parentUuid: null, cwd: "/receiver/project", message: { role: "user", content: "Claude marker lucid-fern-52." } }) +
+      jsonLine({ type: "assistant", timestamp: "2030-01-01T02:00:02+02:00", sessionId: "claude-session", uuid: "claude-entry-b", parentUuid: "claude-entry-a", cwd: "/receiver/project", message: { role: "assistant", content: [{ type: "thinking", thinking: "not indexed" }, { type: "text", text: "Claude answer quiet-brook-73." }] } });
     const codexContent =
       jsonLine({ type: "session_meta", timestamp: "2030-01-01T00:00:00Z", payload: { id: "codex-session", cwd: "/receiver/project" } }) +
       jsonLine({ type: "event_msg", timestamp: "2030-01-01T00:00:01Z", payload: { type: "user_message", message: "Codex marker bright-pine-64." } }) +
@@ -262,7 +301,11 @@ describe("Mooncite engine public seam", () => {
       const claude = engine.recall({ query: "lucid-fern-52" }).candidates[0]!;
       expect(claude.evidenceId).toMatch(/^mooncite:claude-code:[a-f0-9]{24}:[a-f0-9]{24}:[a-f0-9]{24}:0$/u);
       expect(claude.evidenceUri).toMatch(/^mooncite:\/\/claude-code\/[a-f0-9]{24}\/claude-session\/claude-entry-a\/0$/u);
-      expect(claude).toMatchObject({ sourceOrigin: "claude-code" });
+      expect(claude).toMatchObject({
+        sourceOrigin: "claude-code",
+        eventTimestamp: "2030-01-01T00:00:01.000Z",
+        recordProvenance: "original",
+      });
       expect(claude.sessionId).toMatch(/^claude-code:[a-f0-9]{64}:claude-session$/u);
       for (const locator of [claude.evidenceId, claude.evidenceUri]) {
         expect(engine.inspect({ evidenceId: locator, window: 0 })).toMatchObject({ outcome: "verified", locator: { sourceOrigin: "claude-code" } });
@@ -270,6 +313,10 @@ describe("Mooncite engine public seam", () => {
       const codex = engine.recall({ query: "bright-pine-64" }).candidates[0]!;
       expect(codex.evidenceId).toMatch(/^mooncite:codex:[a-f0-9]{24}:[a-f0-9]{24}:[a-f0-9]{24}:0$/u);
       expect(codex.evidenceUri).toMatch(/^mooncite:\/\/codex\/[a-f0-9]{24}\/codex-session\/line-2-[a-f0-9]{16}\/0$/u);
+      expect(codex).toMatchObject({
+        eventTimestamp: "2030-01-01T00:00:01.000Z",
+        recordProvenance: "original",
+      });
       expect(engine.inspect({ evidenceId: codex.evidenceUri, window: 0 })).toMatchObject({ outcome: "verified", locator: { sourceOrigin: "codex" } });
 
       await writeFile(claudeSource, claudeContent.replace("lucid-fern-52", "lucid-fern-53"));
@@ -318,7 +365,7 @@ describe("Mooncite engine public seam", () => {
         outcome: "matches",
         candidates: [{ sourceOrigin: "claude-code" }],
       });
-      removeSourceRegistration(configPath, "claude-code");
+      removeSourceRegistration(configPath, { origin: "claude-code", root: claudeRoot });
       expect(engine.recall({ query: "copper-harbor-48" }).outcome).toBe("no_match");
       expect(await digest(claudeSource)).toBe(before);
     } finally {
@@ -390,6 +437,115 @@ describe("Mooncite engine public seam", () => {
     }
   });
 
+  it("normalizes event time and applies inclusive filters with deterministic temporal ordering", async () => {
+    const f = await fixture();
+    await appendFile(
+      f.source,
+      jsonLine({
+        type: "message",
+        id: "timeline-old",
+        parentId: "entry-b",
+        timestamp: "2030-01-03T08:00:00-08:00",
+        message: { role: "user", content: "chronology-signal old Pi event" },
+      })
+      + jsonLine({
+        type: "message",
+        id: "timeline-tie-assistant",
+        parentId: "timeline-old",
+        timestamp: "2030-01-04T00:00:00Z",
+        message: { role: "assistant", content: "chronology-signal first tied Pi event" },
+      })
+      + jsonLine({
+        type: "message",
+        id: "timeline-tie-user",
+        parentId: "timeline-tie-assistant",
+        timestamp: "2030-01-04T00:00:00.000Z",
+        message: { role: "user", content: "chronology-signal second tied Pi event" },
+      })
+      + jsonLine({
+        type: "message",
+        id: "timeline-untimed",
+        parentId: "timeline-tie-user",
+        message: { role: "user", content: "chronology-signal untimestamped Pi event" },
+      }),
+    );
+    await appendFile(f.ompSource, jsonLine({
+      type: "message",
+      id: "timeline-omp",
+      parentId: "entry-b",
+      timestamp: "2030-01-05T00:00:00Z",
+      message: { role: "user", content: "chronology-signal OMP event" },
+    }));
+    const engine = new MoonciteEngine({
+      sessionsRoot: f.sessionsRoot,
+      ompSessionsRoot: f.ompSessionsRoot,
+      stateDir: f.stateDir,
+    });
+    try {
+      const defaultOrder = engine.recall({ query: "chronology-signal", limit: 10 });
+      const explicitRelevance = engine.recall({ query: "chronology-signal", limit: 10, order: "relevance" });
+      expect(defaultOrder.candidates.map(({ evidenceId }) => evidenceId))
+        .toEqual(explicitRelevance.candidates.map(({ evidenceId }) => evidenceId));
+
+      const newest = engine.recall({ query: "chronology-signal", limit: 10, order: "newest" });
+      expect(newest.candidates.map(({ entryId }) => entryId)).toEqual([
+        "timeline-omp",
+        "timeline-tie-assistant",
+        "timeline-tie-user",
+        "timeline-old",
+        "timeline-untimed",
+      ]);
+      expect(newest.candidates[3]).toMatchObject({ eventTimestamp: "2030-01-03T16:00:00.000Z" });
+      expect(newest.candidates[4]).toMatchObject({ eventTimestamp: null });
+
+      const oldest = engine.recall({ query: "chronology-signal", limit: 10, order: "oldest" });
+      expect(oldest.candidates.map(({ entryId }) => entryId)).toEqual([
+        "timeline-old",
+        "timeline-tie-assistant",
+        "timeline-tie-user",
+        "timeline-omp",
+        "timeline-untimed",
+      ]);
+
+      const inclusive = engine.recall({
+        query: "chronology-signal",
+        limit: 10,
+        sourceOrigin: "pi",
+        after: "2030-01-04T00:00:00Z",
+        before: "2030-01-04T00:00:00.000Z",
+        order: "oldest",
+      });
+      expect(inclusive.candidates.map(({ entryId }) => entryId)).toEqual([
+        "timeline-tie-assistant",
+        "timeline-tie-user",
+      ]);
+      expect(inclusive.scope.evidenceSpans).toBe(2);
+      expect(engine.recall({
+        query: "chronology-signal",
+        sourceOrigin: "pi",
+        role: "user",
+        after: "2030-01-04T00:00:00Z",
+        before: "2030-01-04T00:00:00Z",
+      }).candidates.map(({ entryId }) => entryId)).toEqual(["timeline-tie-user"]);
+      expect(engine.recall({
+        query: "chronology-signal",
+        sourceOrigin: "omp",
+        limit: 10,
+      }).candidates.map(({ entryId }) => entryId)).toEqual(["timeline-omp"]);
+      expect(engine.recall({ query: "chronology-signal", after: "not-a-timestamp" })).toMatchObject({
+        outcome: "invalid_scope",
+        candidates: [],
+      });
+      expect(engine.recall({
+        query: "chronology-signal",
+        after: "2030-01-05T00:00:00Z",
+        before: "2030-01-04T00:00:00Z",
+      })).toMatchObject({ outcome: "invalid_scope", candidates: [] });
+    } finally {
+      engine.close();
+    }
+  });
+
   it("suppresses recursive Mooncite renderings while preserving genuine source evidence", async () => {
     const f = await fixture();
     const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
@@ -418,11 +574,22 @@ describe("Mooncite engine public seam", () => {
         outcome: "matches",
         conclusive: true,
         echoesSuppressed: 1,
-        candidates: [{ entryId: "entry-genuine", isEcho: false }],
+        candidates: [{ entryId: "entry-genuine", isEcho: false, recordProvenance: "original" }],
       });
       expect(recalled.candidates).toHaveLength(1);
       expect(recalled.warnings).toContain("1 recursive Mooncite echo(es) suppressed.");
       expect(recalled.candidates[0]!.excerpt).toContain("genuine event marker");
+      const echoIdParts = recalled.candidates[0]!.evidenceId.split(":");
+      echoIdParts[4] = createHash("sha256").update("entry-echo").digest("hex").slice(0, 24);
+      expect(engine.recall({ query: echoIdParts.join(":") })).toMatchObject({
+        outcome: "matches",
+        echoesSuppressed: 0,
+        candidates: [{
+          entryId: "entry-echo",
+          isEcho: true,
+          recordProvenance: "original",
+        }],
+      });
     } finally {
       engine.close();
     }
@@ -595,11 +762,17 @@ describe("Mooncite engine public seam", () => {
         sourceOrigin: "chatgpt",
         sessionId: current.sessionId,
         branchState: "current",
+        eventTimestamp: "2030-01-01T00:00:02.000Z",
+        recordProvenance: "copy",
       });
       for (const locator of [current.evidenceId, current.evidenceUri]) {
         expect(engine.inspect({ evidenceId: locator, window: 1 })).toMatchObject({
           outcome: "verified",
           locator: { sourceOrigin: "chatgpt", sessionId: current.sessionId, entryId: "chat-one-assistant" },
+          target: {
+            eventTimestamp: "2030-01-01T00:00:02.000Z",
+            recordProvenance: "copy",
+          },
         });
       }
       expect(engine.recall({ query: "hidden-lantern-97" }).candidates[0]).toMatchObject({ branchState: "off_branch" });
