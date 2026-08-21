@@ -12,6 +12,8 @@ Exactly five adapters feed the engine:
 - Codex rollout JSONL
 - ChatGPT conversation JSON exports
 
+For OMP and Claude Code, Mooncite admits only project-level JSONL files. It ignores nested subagent, workflow, and command artifacts because they are not source conversations.
+
 `mooncite serve` runs one local stdio MCP server. Codex and Claude Code register it directly. OMP uses the packaged `.mcp.json`. Pi uses a thin extension that translates native tool calls to MCP and contains no retrieval logic.
 
 ## Evidence path

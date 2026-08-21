@@ -30,7 +30,7 @@ const MAX_APPEND_LINES = 4_096;
 const MAX_EVIDENCE_TEXT_BYTES = 256 * 1024;
 const MAX_INSPECTION_CAPTURE_BYTES = 16 * 1024 * 1024;
 const MAX_DISCOVERED_SOURCE_FILES = 10_000;
-const MAX_REFRESH_SOURCE_BYTES = 1024 * 1024 * 1024;
+const MAX_REFRESH_SOURCE_BYTES = 4 * 1024 * 1024 * 1024;
 const MAX_DISCOVERY_ENTRIES = 100_000;
 const MAX_REFRESH_RECORDS = 2_000_000;
 const MAX_REFRESH_WORK_UNITS = 2_000_000;
@@ -850,7 +850,7 @@ function sourceFileScan(files: string[], discoveryFailures: number, limitFailure
 }
 
 
-function listClaudeSessionFiles(root: string): SourceFileScan {
+function listProjectSessionFiles(root: string): SourceFileScan {
   if (hasSymlinkComponent(root) || !existsSync(root)) return sourceFileScan([], 0, 0);
   const rootState = lstatSync(root);
   if (rootState.isSymbolicLink() || !rootState.isDirectory()) return sourceFileScan([], 1, 0);
@@ -934,7 +934,7 @@ function listSessionFilesByName(root: string, accept: (name: string) => boolean)
 }
 
 function listSourceFiles(origin: SourceOrigin, root: string): SourceFileScan {
-  if (origin === "claude-code") return listClaudeSessionFiles(root);
+  if (origin === "omp" || origin === "claude-code") return listProjectSessionFiles(root);
   if (origin === "chatgpt") {
     return listSessionFilesByName(root, (name) =>
       name === "conversation.json" || name === "conversations.json" || /^conversations-\d+\.json$/u.test(name));

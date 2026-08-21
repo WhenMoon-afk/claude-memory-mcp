@@ -191,6 +191,12 @@ describe("Mooncite engine public seam", () => {
   });
   it("indexes Pi and OMP collisions independently and transactionally replaces OMP changes", async () => {
     const f = await fixture();
+    const ompArtifacts = join(f.ompSessionsRoot, "-moon-project", "session");
+    await mkdir(ompArtifacts);
+    await writeFile(join(ompArtifacts, "__advisor.jsonl"), jsonLine({
+      type: "message",
+      message: { role: "assistant", content: "Nested OMP helper output is not a source conversation." },
+    }));
     const engine = new MoonciteEngine({
       sessionsRoot: f.sessionsRoot,
       ompSessionsRoot: f.ompSessionsRoot,
@@ -203,6 +209,7 @@ describe("Mooncite engine public seam", () => {
         sourceFiles: 2,
         sourceFilesByOrigin: { pi: 1, omp: 1, "claude-code": 0, codex: 0, chatgpt: 0 },
         evidenceSpans: 4,
+        errorGroups: [],
       });
       const piCandidate = engine.recall({ query: "silver-cedar-17" }).candidates[0]!;
       const ompCandidate = engine.recall({ query: "violet-orbit-41" }).candidates[0]!;

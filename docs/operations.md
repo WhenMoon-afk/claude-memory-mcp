@@ -13,7 +13,7 @@ npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.5 install
 Current prerelease:
 
 ```bash
-npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6-preview.1002.0 install
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6-preview.1003.0 install
 ```
 
 The prerelease tag does not replace the stable tag. Untagged `main` builds are identified by commit SHA.
