@@ -16,6 +16,7 @@ import {
   statSync,
   type Dirent,
   type BigIntStats,
+  type Stats,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -270,9 +271,18 @@ export interface EvidenceBundle {
 
 export type RefreshOutcome = "not_run" | "published" | "unchanged" | "retained_last_good" | "unavailable";
 
+export type MoonciteStatusErrorReason =
+  | "source_configuration_failure"
+  | "source_root_unavailable"
+  | "source_discovery_failure"
+  | "source_limit_exceeded"
+  | "source_metadata_failure"
+  | "source_changed_during_refresh"
+  | "source_read_or_parse_failure";
+
 export interface MoonciteStatusErrorGroup {
   origin: SourceOrigin | "unknown";
-  reason: "source_read_or_parse_failure";
+  reason: MoonciteStatusErrorReason;
   count: number;
   fatalCount: number;
 }
@@ -440,6 +450,85 @@ interface ScanResult {
   trustState: TrustState;
   coverage: CoverageState;
   retainedLastGood: boolean;
+  errorGroups: MoonciteStatusErrorGroup[];
+}
+
+const STATUS_ERROR_REASONS: Record<MoonciteStatusErrorReason, true> = {
+  source_configuration_failure: true,
+  source_root_unavailable: true,
+  source_discovery_failure: true,
+  source_limit_exceeded: true,
+  source_metadata_failure: true,
+  source_changed_during_refresh: true,
+  source_read_or_parse_failure: true,
+};
+
+function mergeErrorGroups(...collections: MoonciteStatusErrorGroup[][]): MoonciteStatusErrorGroup[] {
+  const merged = new Map<string, MoonciteStatusErrorGroup>();
+  for (const group of collections.flat()) {
+    if (group.count <= 0) continue;
+    const key = `${group.origin}\0${group.reason}`;
+    const previous = merged.get(key);
+    if (previous) {
+      previous.count += group.count;
+      previous.fatalCount += group.fatalCount;
+    } else {
+      merged.set(key, { ...group });
+    }
+  }
+  return [...merged.values()].sort((left, right) =>
+    left.origin.localeCompare(right.origin) || left.reason.localeCompare(right.reason));
+}
+
+function sourceError(
+  origin: SourceOrigin | "unknown",
+  reason: MoonciteStatusErrorReason,
+  count = 1,
+  fatalCount = count,
+): MoonciteStatusErrorGroup {
+  return { origin, reason, count, fatalCount };
+}
+
+function errorGroupTotals(groups: MoonciteStatusErrorGroup[]): { count: number; fatalCount: number } {
+  return groups.reduce((totals, group) => ({
+    count: totals.count + group.count,
+    fatalCount: totals.fatalCount + group.fatalCount,
+  }), { count: 0, fatalCount: 0 });
+}
+
+function persistedErrorGroups(
+  value: unknown,
+  errors: number,
+  fatalErrors: number,
+): MoonciteStatusErrorGroup[] {
+  if (errors === 0) return [];
+  if (!Array.isArray(value)) return [sourceError("unknown", "source_read_or_parse_failure", errors, fatalErrors)];
+  const valid: MoonciteStatusErrorGroup[] = [];
+  for (const item of value) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) continue;
+    const candidate = item as Record<string, unknown>;
+    const origin = candidate.origin;
+    const reason = candidate.reason;
+    const count = candidate.count;
+    const fatalCount = candidate.fatalCount;
+    if ((origin !== "unknown" && !SOURCE_ORIGINS.includes(origin as SourceOrigin))
+      || typeof reason !== "string" || STATUS_ERROR_REASONS[reason as MoonciteStatusErrorReason] !== true
+      || !Number.isSafeInteger(count) || Number(count) <= 0
+      || !Number.isSafeInteger(fatalCount) || Number(fatalCount) < 0 || Number(fatalCount) > Number(count)) {
+      continue;
+    }
+    valid.push(sourceError(
+      origin as SourceOrigin | "unknown",
+      reason as MoonciteStatusErrorReason,
+      Number(count),
+      Number(fatalCount),
+    ));
+  }
+  const merged = mergeErrorGroups(valid);
+  const totals = errorGroupTotals(merged);
+  return totals.count === errors && totals.fatalCount === fatalErrors
+    ? merged
+    : [sourceError("unknown", "source_read_or_parse_failure", errors, fatalErrors)];
 }
 
 function sha256(value: Buffer | string): string {
@@ -482,6 +571,61 @@ function truncateUtf8(value: string, maxBytes: number): { text: string; omittedB
   while (end > 0) {
     try {
       return { text: decoder.decode(bytes.subarray(0, end)), omittedBytes: byteLength - end };
+    } catch {
+      end--;
+    }
+  }
+  return { text: "", omittedBytes: byteLength };
+}
+
+function literalCaseInsensitiveMatch(value: string, needle: string): { index: number; length: number } | null {
+  if (!needle) return null;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+  const match = new RegExp(escaped, "iu").exec(value);
+  return match ? { index: match.index, length: match[0].length } : null;
+}
+
+function matchedExcerpt(
+  value: string,
+  exactText: string,
+  matchedTerms: string[],
+  maxBytes: number,
+): { text: string; omittedBytes: number } {
+  const byteLength = Buffer.byteLength(value, "utf8");
+  if (byteLength <= maxBytes) return { text: value, omittedBytes: 0 };
+  const termVariants = matchedTerms.flatMap((term) => {
+    const stem = term.replace(/(ing|ed|s)$/u, "");
+    return stem.length > 1 && stem !== term ? [term, stem] : [term];
+  }).sort((left, right) => right.length - left.length);
+  const match = literalCaseInsensitiveMatch(value, exactText)
+    ?? termVariants.map((term) => literalCaseInsensitiveMatch(value, term)).find((item) => item !== null)
+    ?? null;
+  if (!match) return truncateUtf8(value, maxBytes);
+
+  const matchByteStart = Buffer.byteLength(value.slice(0, match.index), "utf8");
+  const searchBefore = Math.max(0, match.index - 1);
+  const escapedLf = value.lastIndexOf("\\u{a}", searchBefore);
+  const escapedCr = value.lastIndexOf("\\u{d}", searchBefore);
+  const lineStartIndex = Math.max(
+    value.lastIndexOf("\n", searchBefore) + 1,
+    escapedLf < 0 ? 0 : escapedLf + 5,
+    escapedCr < 0 ? 0 : escapedCr + 5,
+  );
+  const lineByteStart = Buffer.byteLength(value.slice(0, lineStartIndex), "utf8");
+  const precedingLineBytes = matchByteStart - lineByteStart;
+  let start = precedingLineBytes <= Math.floor(maxBytes / 4)
+    ? lineByteStart
+    : Math.max(0, matchByteStart - Math.floor(maxBytes / 8));
+  const bytes = Buffer.from(value, "utf8");
+  while (start < bytes.length && (bytes[start]! & 0xc0) === 0x80) start++;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let end = Math.min(bytes.length, start + maxBytes);
+  while (end > start) {
+    try {
+      return {
+        text: decoder.decode(bytes.subarray(start, end)),
+        omittedBytes: start + byteLength - end,
+      };
     } catch {
       end--;
     }
@@ -690,28 +834,40 @@ function pathsOverlap(left: string, right: string): boolean {
   return rightFromLeft === "" || (rightFromLeft !== ".." && !rightFromLeft.startsWith(`..${sep}`));
 }
 
-function listSessionFiles(root: string): { files: string[]; errors: number } {
-  return listSessionFilesByName(root, (name) => name.endsWith(".jsonl"));
+interface SourceFileScan {
+  files: string[];
+  errors: Array<{
+    reason: "source_discovery_failure" | "source_limit_exceeded";
+    count: number;
+  }>;
 }
 
-function listClaudeSessionFiles(root: string): { files: string[]; errors: number } {
-  if (hasSymlinkComponent(root) || !existsSync(root)) return { files: [], errors: 0 };
+function sourceFileScan(files: string[], discoveryFailures: number, limitFailures: number): SourceFileScan {
+  const errors: SourceFileScan["errors"] = [];
+  if (discoveryFailures > 0) errors.push({ reason: "source_discovery_failure", count: discoveryFailures });
+  if (limitFailures > 0) errors.push({ reason: "source_limit_exceeded", count: limitFailures });
+  return { files: files.sort(), errors };
+}
+
+
+function listClaudeSessionFiles(root: string): SourceFileScan {
+  if (hasSymlinkComponent(root) || !existsSync(root)) return sourceFileScan([], 0, 0);
   const rootState = lstatSync(root);
-  if (rootState.isSymbolicLink() || !rootState.isDirectory()) return { files: [], errors: 1 };
+  if (rootState.isSymbolicLink() || !rootState.isDirectory()) return sourceFileScan([], 1, 0);
   const canonicalRoot = resolve(root);
   const files: string[] = [];
   let visited = 0;
-  let errors = 0;
+  let discoveryFailures = 0;
   let projects: Dirent<string>[];
   try {
     projects = readdirSync(canonicalRoot, { withFileTypes: true });
   } catch {
-    return { files: [], errors: 1 };
+    return sourceFileScan([], 1, 0);
   }
   for (const project of projects) {
     visited++;
     if (visited > MAX_DISCOVERY_ENTRIES || files.length >= MAX_DISCOVERED_SOURCE_FILES) {
-      return { files: files.sort(), errors: errors + 1 };
+      return sourceFileScan(files, discoveryFailures, 1);
     }
     if (project.isSymbolicLink() || !project.isDirectory()) continue;
     const directory = join(canonicalRoot, project.name);
@@ -719,54 +875,51 @@ function listClaudeSessionFiles(root: string): { files: string[]; errors: number
     try {
       entries = readdirSync(directory, { withFileTypes: true });
     } catch {
-      errors++;
+      discoveryFailures++;
       continue;
     }
     for (const entry of entries) {
       visited++;
       if (visited > MAX_DISCOVERY_ENTRIES || files.length >= MAX_DISCOVERED_SOURCE_FILES) {
-        return { files: files.sort(), errors: errors + 1 };
+        return sourceFileScan(files, discoveryFailures, 1);
       }
       if (!entry.isFile() || entry.isSymbolicLink() || !entry.name.endsWith(".jsonl")) continue;
       const path = resolve(directory, entry.name);
       if (path.startsWith(`${canonicalRoot}${sep}`)) files.push(path);
     }
   }
-  return { files: files.sort(), errors };
+  return sourceFileScan(files, discoveryFailures, 0);
 }
 
-function listChatGptConversationFiles(root: string): { files: string[]; errors: number } {
-  return listSessionFilesByName(root, (name) =>
-    name === "conversation.json" || name === "conversations.json" || /^conversations-\d+\.json$/u.test(name));
-}
 
-function listSessionFilesByName(root: string, accept: (name: string) => boolean): { files: string[]; errors: number } {
-  if (hasSymlinkComponent(root) || !existsSync(root)) return { files: [], errors: 0 };
+function listSessionFilesByName(root: string, accept: (name: string) => boolean): SourceFileScan {
+  if (hasSymlinkComponent(root) || !existsSync(root)) return sourceFileScan([], 0, 0);
   const rootState = lstatSync(root);
-  if (rootState.isSymbolicLink() || !rootState.isDirectory()) return { files: [], errors: 1 };
+  if (rootState.isSymbolicLink() || !rootState.isDirectory()) return sourceFileScan([], 1, 0);
   const canonicalRoot = resolve(root);
   const files: string[] = [];
   const directories: Array<{ path: string; depth: number }> = [{ path: canonicalRoot, depth: 0 }];
   let directoryIndex = 0;
   let visited = 0;
-  let errors = 0;
+  let discoveryFailures = 0;
+  let limitFailures = 0;
   while (directoryIndex < directories.length) {
     const directory = directories[directoryIndex++]!;
     if (directory.depth > MAX_DISCOVERY_DEPTH) {
-      errors++;
+      limitFailures++;
       continue;
     }
     let entries: Dirent<string>[];
     try {
       entries = readdirSync(directory.path, { withFileTypes: true });
     } catch {
-      errors++;
+      discoveryFailures++;
       continue;
     }
     for (const entry of entries) {
       visited++;
       if (visited > MAX_DISCOVERY_ENTRIES || files.length >= MAX_DISCOVERED_SOURCE_FILES) {
-        return { files: files.sort(), errors: errors + 1 };
+        return sourceFileScan(files, discoveryFailures, limitFailures + 1);
       }
       const path = join(directory.path, entry.name);
       if (entry.isSymbolicLink()) continue;
@@ -777,14 +930,16 @@ function listSessionFilesByName(root: string, accept: (name: string) => boolean)
       }
     }
   }
-  return { files: files.sort(), errors };
+  return sourceFileScan(files, discoveryFailures, limitFailures);
 }
 
-
-function listSourceFiles(origin: SourceOrigin, root: string): { files: string[]; errors: number } {
+function listSourceFiles(origin: SourceOrigin, root: string): SourceFileScan {
   if (origin === "claude-code") return listClaudeSessionFiles(root);
-  if (origin === "chatgpt") return listChatGptConversationFiles(root);
-  return listSessionFiles(root);
+  if (origin === "chatgpt") {
+    return listSessionFilesByName(root, (name) =>
+      name === "conversation.json" || name === "conversations.json" || /^conversations-\d+\.json$/u.test(name));
+  }
+  return listSessionFilesByName(root, (name) => name.endsWith(".jsonl"));
 }
 
 function readRangesCoherently(path: string, root: string, ranges: Array<{ start: number; end: number }>): Buffer[] | null {
@@ -1221,8 +1376,14 @@ function sourceLocation(origin: SourceOrigin, root: string, path: string, discov
 function sourceMetadata(path: string, root: string): SourceMetadata | null {
   const canonicalRoot = resolve(root);
   const canonicalPath = resolve(path);
-  if (!canonicalPath.startsWith(`${canonicalRoot}${sep}`) || hasSymlinkComponent(canonicalRoot) || hasSymlinkComponent(canonicalPath)) return null;
-  const metadata = lstatSync(canonicalPath, { bigint: true });
+  if (!canonicalPath.startsWith(`${canonicalRoot}${sep}`)) return null;
+  let metadata: BigIntStats;
+  try {
+    if (hasSymlinkComponent(canonicalRoot) || hasSymlinkComponent(canonicalPath)) return null;
+    metadata = lstatSync(canonicalPath, { bigint: true });
+  } catch {
+    return null;
+  }
   if (!metadata.isFile() || metadata.isSymbolicLink()) return null;
   const size = Number(metadata.size);
   if (!Number.isSafeInteger(size) || size < 0) return null;
@@ -1552,7 +1713,7 @@ export class MoonciteEngine {
   readonly #databasePath: string;
   readonly #db: DatabaseSync;
   readonly #engineLockPath: string;
-  #last: ScanResult = { evidence: [], sourceFiles: 0, records: 0, eligibleRecords: 0, skipped: 0, malformed: 0, oversized: 0, errors: 0, fatalErrors: 0, generation: "empty", trustState: "full_verified", coverage: "complete", retainedLastGood: false };
+  #last: ScanResult = { evidence: [], sourceFiles: 0, records: 0, eligibleRecords: 0, skipped: 0, malformed: 0, oversized: 0, errors: 0, fatalErrors: 0, generation: "empty", trustState: "full_verified", coverage: "complete", retainedLastGood: false, errorGroups: [] };
   #lastEvidenceCount = 0;
   #lastRefreshOutcome: RefreshOutcome = "not_run";
   #ingestionBytes = 0;
@@ -1657,7 +1818,7 @@ export class MoonciteEngine {
     const stored = this.#db.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get() as { value?: string } | undefined;
     if (stored?.value) {
       try {
-        const state = JSON.parse(stored.value) as Omit<ScanResult, "evidence" | "malformed" | "oversized" | "trustState"> & {
+        const state = JSON.parse(stored.value) as Omit<ScanResult, "evidence" | "malformed" | "oversized" | "trustState" | "errorGroups"> & {
           evidenceSpans: number;
           malformed?: number;
           oversized?: number;
@@ -1665,6 +1826,7 @@ export class MoonciteEngine {
           lastRebuildOutcome?: RefreshOutcome;
           trustState?: TrustState;
           coverage?: CoverageState;
+          errorGroups?: unknown;
         };
         this.#last = {
           evidence: [],
@@ -1680,6 +1842,7 @@ export class MoonciteEngine {
           trustState: state.trustState ?? "full_verified",
           coverage: state.coverage ?? "complete",
           retainedLastGood: state.retainedLastGood,
+          errorGroups: persistedErrorGroups(state.errorGroups, state.errors, state.fatalErrors),
         };
         this.#lastEvidenceCount = state.evidenceSpans;
         this.#lastRefreshOutcome = state.lastRefreshOutcome ?? "not_run";
@@ -1818,38 +1981,56 @@ export class MoonciteEngine {
     }
   }
 
-  #scanSources(stored: StoredSourceRow[]): { locations: SourceLocation[]; errors: number; blocked: boolean } {
+  #scanSources(stored: StoredSourceRow[]): {
+    locations: SourceLocation[];
+    errorGroups: MoonciteStatusErrorGroup[];
+    blocked: boolean;
+  } {
     const locations: SourceLocation[] = [];
+    const errorGroups: MoonciteStatusErrorGroup[] = [];
     let discoveredBytes = 0;
-    let errors = 0;
     let blocked = false;
     let roots: Array<{ origin: SourceOrigin; root: string; discovery?: "automatic" }>;
     try {
       roots = this.#configuredRoots();
     } catch {
-      return { locations, errors: 1, blocked: true };
+      return {
+        locations,
+        errorGroups: [sourceError("unknown", "source_configuration_failure")],
+        blocked: true,
+      };
     }
     for (const configured of roots) {
       const rootExists = existsSync(configured.root);
-      const rootState = rootExists ? lstatSync(configured.root) : null;
+      let rootState: Stats | null = null;
+      try {
+        rootState = rootExists ? lstatSync(configured.root) : null;
+      } catch {
+        errorGroups.push(sourceError(configured.origin, "source_root_unavailable"));
+        blocked = true;
+        continue;
+      }
       const unauthorized = hasSymlinkComponent(configured.root)
         || Boolean(rootState && (rootState.isSymbolicLink() || !rootState.isDirectory()));
       if (unauthorized || (!rootExists && stored.some((source) =>
         source.source_root_digest === sourceAuthorizationDigest(configured.root, configured.discovery)))) {
+        errorGroups.push(sourceError(configured.origin, "source_root_unavailable"));
         blocked = true;
         continue;
       }
       if (!rootExists) continue;
       const scan = listSourceFiles(configured.origin, configured.root);
-      errors += scan.errors;
+      for (const error of scan.errors) {
+        errorGroups.push(sourceError(configured.origin, error.reason, error.count));
+      }
       for (const path of scan.files) {
         const metadata = sourceMetadata(path, configured.root);
         if (!metadata) {
-          errors++;
+          errorGroups.push(sourceError(configured.origin, "source_metadata_failure"));
           continue;
         }
         if (locations.length >= MAX_DISCOVERED_SOURCE_FILES || discoveredBytes + metadata.size > MAX_REFRESH_SOURCE_BYTES) {
-          errors++;
+          errorGroups.push(sourceError(configured.origin, "source_limit_exceeded"));
           continue;
         }
         locations.push(sourceLocation(configured.origin, configured.root, path, configured.discovery));
@@ -1857,7 +2038,7 @@ export class MoonciteEngine {
       }
     }
     locations.sort((a, b) => a.sourcePath.localeCompare(b.sourcePath));
-    return { locations, errors, blocked };
+    return { locations, errorGroups: mergeErrorGroups(errorGroups), blocked };
   }
 
 
@@ -1878,6 +2059,14 @@ export class MoonciteEngine {
       trustState: sources.some((source) => source.trust_state === "append_trusted") ? "append_trusted" : "full_verified",
       coverage: "complete",
       retainedLastGood: false,
+      errorGroups: mergeErrorGroups(...sources
+        .filter((source) => source.errors > 0)
+        .map((source) => [sourceError(
+          source.source_origin,
+          "source_read_or_parse_failure",
+          source.errors,
+          source.fatal_errors,
+        )])),
     };
   }
 
@@ -1891,6 +2080,7 @@ export class MoonciteEngine {
       oversized: state.oversized,
       errors: state.errors,
       fatalErrors: state.fatalErrors,
+      errorGroups: state.errorGroups,
       generation: state.generation,
       trustState: state.trustState,
       coverage: state.coverage,
@@ -2542,33 +2732,56 @@ export class MoonciteEngine {
     }
   }
 
-  #retainForSourceFailure(operation: "refresh" | "rebuild", count = 1): ScanResult {
-    const base = this.#storedSources().length > 0 ? this.#stateFromSourceFiles() : this.#last;
+  #retainForSourceFailure(
+    operation: "refresh" | "rebuild",
+    failures: MoonciteStatusErrorGroup[] = [sourceError("unknown", "source_read_or_parse_failure")],
+  ): ScanResult {
+    const transient = mergeErrorGroups(failures);
+    const totals = errorGroupTotals(transient);
+    const base: ScanResult = this.#storedSources().length > 0
+      ? this.#stateFromSourceFiles()
+      : {
+        evidence: [],
+        sourceFiles: 0,
+        records: 0,
+        eligibleRecords: 0,
+        skipped: 0,
+        malformed: 0,
+        oversized: 0,
+        errors: 0,
+        fatalErrors: 0,
+        generation: "empty",
+        trustState: "full_verified",
+        coverage: "complete",
+        retainedLastGood: false,
+        errorGroups: [],
+      };
     this.#last = {
       ...base,
-      skipped: base.skipped + count,
-      errors: base.errors + count,
-      fatalErrors: count,
+      skipped: base.skipped + totals.count,
+      errors: base.errors + totals.count,
+      fatalErrors: base.fatalErrors + totals.fatalCount,
       coverage: "partial",
       retainedLastGood: base.generation !== "empty",
+      errorGroups: mergeErrorGroups(base.errorGroups, transient),
     };
     this.#setOperationOutcome(operation, this.#last.retainedLastGood ? "retained_last_good" : "unavailable");
     return this.#last;
   }
 
 
-  #pruneDeauthorizedSources(operation: "refresh" | "rebuild"): boolean {
+  #pruneDeauthorizedSources(operation: "refresh" | "rebuild"): MoonciteStatusErrorGroup[] {
     let authorized: Set<string>;
     try {
       authorized = new Set(this.#configuredRoots().map((source) =>
         `${source.origin}:${sourceAuthorizationDigest(source.root, source.discovery)}`));
     } catch {
-      return false;
+      return [sourceError("unknown", "source_configuration_failure")];
     }
     const paths = this.#storedSources()
       .filter((source) => !authorized.has(`${source.source_origin}:${source.source_root_digest}`))
       .map((source) => source.source_path);
-    if (paths.length === 0) return true;
+    if (paths.length === 0) return [];
     try {
       this.#db.exec("BEGIN IMMEDIATE");
       for (const sourcePath of paths) {
@@ -2582,21 +2795,22 @@ export class MoonciteEngine {
       this.#last = state;
       this.#lastEvidenceCount = this.#storedSources().reduce((sum, source) => sum + source.evidence_spans, 0);
       this.#setOperationOutcome(operation, "published");
-      return true;
+      return [];
     } catch {
       try { this.#db.exec("ROLLBACK"); } catch { /* Preserve the authorization-pruning failure. */ }
-      return false;
+      return [sourceError("unknown", "source_read_or_parse_failure")];
     }
   }
   #performRefresh(operation: "refresh" | "rebuild", force: boolean): ScanResult {
     this.#resetIngestionBudget();
-    if (!this.#pruneDeauthorizedSources(operation)) return this.#retainForSourceFailure(operation);
+    const pruningErrors = this.#pruneDeauthorizedSources(operation);
+    if (pruningErrors.length > 0) return this.#retainForSourceFailure(operation, pruningErrors);
     if (force) return this.#performFullRefresh(operation);
     const stored = this.#storedSources();
     const scan = this.#scanSources(stored);
-    if (scan.blocked) return this.#retainForSourceFailure(operation);
+    if (scan.blocked) return this.#retainForSourceFailure(operation, scan.errorGroups);
     if (this.#last.generation === "empty" || stored.length === 0) return this.#performFullRefresh(operation);
-    if (scan.errors > 0) return this.#retainForSourceFailure(operation, scan.errors);
+    if (scan.errorGroups.length > 0) return this.#retainForSourceFailure(operation, scan.errorGroups);
     const byPath = new Map(stored.map((source) => [source.source_path, source]));
     const currentPaths = new Set(scan.locations.map((location) => location.sourcePath));
     const removedPaths = stored.map((source) => source.source_path).filter((sourcePath) => !currentPaths.has(sourcePath));
@@ -2610,7 +2824,10 @@ export class MoonciteEngine {
         continue;
       }
       const metadata = sourceMetadata(location.path, location.root);
-      if (!metadata) return this.#retainForSourceFailure(operation);
+      if (!metadata) return this.#retainForSourceFailure(
+        operation,
+        [sourceError(location.origin, "source_metadata_failure")],
+      );
       const exact = metadata.dev === previous.dev && metadata.ino === previous.ino && metadata.size === previous.observed_size && metadata.mtimeNs === previous.mtime_ns && metadata.ctimeNs === previous.ctime_ns;
       if (exact) continue;
       if (location.origin !== "pi") {
@@ -2618,7 +2835,10 @@ export class MoonciteEngine {
         continue;
       }
       const monotonicAppend = metadata.dev === previous.dev && metadata.ino === previous.ino && metadata.size > previous.observed_size;
-      if (!monotonicAppend) return this.#retainForSourceFailure(operation);
+      if (!monotonicAppend) return this.#retainForSourceFailure(
+        operation,
+        [sourceError(location.origin, "source_changed_during_refresh")],
+      );
       if (metadata.size - previous.admitted_bytes > MAX_APPEND_CAPTURE_BYTES) return this.#performFullRefresh(operation);
       appendPlans.push({ location, stored: previous });
     }
@@ -2634,7 +2854,10 @@ export class MoonciteEngine {
       const ids = new Set((this.#db.prepare("SELECT entry_id FROM source_records WHERE source_path = ?").all(plan.stored.source_path) as Array<{ entry_id: string }>).map((row) => row.entry_id));
       const source = parseAppend(plan.location, plan.stored, ids);
       if (source === "requires_full") return this.#performFullRefresh(operation);
-      if (!source) return this.#retainForSourceFailure(operation);
+      if (!source) return this.#retainForSourceFailure(
+        operation,
+        [sourceError(plan.location.origin, "source_read_or_parse_failure")],
+      );
       if (!this.#tryConsumeAppendBatch(
         source.admittedBytes - plan.stored.admitted_bytes,
         source.records - plan.stored.records,
@@ -2653,7 +2876,7 @@ export class MoonciteEngine {
   #performFullRefresh(operation: "refresh" | "rebuild"): ScanResult {
     const stored = this.#storedSources();
     const scan = this.#scanSources(stored);
-    if (scan.blocked) return this.#retainForSourceFailure(operation);
+    if (scan.blocked) return this.#retainForSourceFailure(operation, scan.errorGroups);
     try {
       this.#db.exec("BEGIN IMMEDIATE");
     } catch (error) {
@@ -2662,7 +2885,14 @@ export class MoonciteEngine {
           this.#last = { ...this.#last, retainedLastGood: true };
           this.#setOperationOutcome(operation, "retained_last_good");
         } else {
-          this.#last = { ...this.#last, skipped: 1, errors: 1, fatalErrors: 1, coverage: "partial" };
+          this.#last = {
+            ...this.#last,
+            skipped: 1,
+            errors: 1,
+            fatalErrors: 1,
+            coverage: "partial",
+            errorGroups: [sourceError("unknown", "source_read_or_parse_failure")],
+          };
           this.#setOperationOutcome(operation, "unavailable");
         }
         return this.#last;
@@ -2671,12 +2901,13 @@ export class MoonciteEngine {
     }
     try {
       this.#db.exec("DELETE FROM evidence; DELETE FROM source_records; DELETE FROM source_files;");
-      let fatalSourceErrors = scan.errors;
+      const fatalErrorGroups = [...scan.errorGroups];
       for (let index = 0; index < scan.locations.length; index++) {
+        const location = scan.locations[index]!;
         const savepoint = `source_${index}`;
         this.#db.exec(`SAVEPOINT ${savepoint}`);
         try {
-          const source = this.#indexFullSource(scan.locations[index]!);
+          const source = this.#indexFullSource(location);
           this.#writeSource(source);
           if (source.requiresRelabel) this.#relabelSource(source.sourcePath, source.leafEntryId, source.latestCompactionLine);
           source.sourceGeneration = this.#sourceGenerationFromDatabase(source.sourcePath);
@@ -2690,30 +2921,16 @@ export class MoonciteEngine {
             try { this.#db.exec("ROLLBACK"); } catch { /* The SQLite error may already have ended the transaction. */ }
             return this.#retainForSourceFailure(operation);
           }
-          fatalSourceErrors++;
+          fatalErrorGroups.push(sourceError(location.origin, "source_read_or_parse_failure"));
         }
       }
-      if (fatalSourceErrors > 0 && this.#last.generation !== "empty") {
+      const fatalSourceErrors = errorGroupTotals(fatalErrorGroups);
+      if (fatalSourceErrors.fatalCount > 0) {
         this.#db.exec("ROLLBACK");
-        this.#last = {
-          ...this.#last,
-          skipped: this.#last.skipped + fatalSourceErrors,
-          errors: this.#last.errors + fatalSourceErrors,
-          fatalErrors: fatalSourceErrors,
-          coverage: "partial",
-          retainedLastGood: true,
-        };
-        this.#setOperationOutcome(operation, "retained_last_good");
-        return this.#last;
+        return this.#retainForSourceFailure(operation, fatalErrorGroups);
       }
       const state = this.#stateFromSourceFiles();
-      if (fatalSourceErrors > 0) {
-        state.skipped += fatalSourceErrors;
-        state.errors += fatalSourceErrors;
-        state.fatalErrors += fatalSourceErrors;
-        state.coverage = "partial";
-      }
-      if (state.sourceFiles === 0 && (fatalSourceErrors > 0 || this.#last.generation === "empty")) {
+      if (state.sourceFiles === 0 && this.#last.generation === "empty") {
         this.#db.exec("ROLLBACK");
         this.#last = { ...state, generation: "empty", retainedLastGood: false };
         this.#lastEvidenceCount = 0;
@@ -3047,7 +3264,7 @@ export class MoonciteEngine {
       isEcho,
       duplicateSpanCount,
     }): EvidenceCandidate => {
-      const excerpt = truncateUtf8(String(row.text), 1_024);
+      const excerpt = matchedExcerpt(String(row.text), exactText, matchedTerms, 1_024);
       const sourceOrigin = parseSourceOrigin(row.source_origin);
       return {
         evidenceId: String(row.evidence_id),
@@ -3388,38 +3605,22 @@ export class MoonciteEngine {
       : outcome === "degraded"
         ? "Mooncite can search retained evidence, but freshness or source coverage is degraded. Empty recall results are not conclusive."
         : "Mooncite has no usable evidence generation.";
+    const nextReason = state.errorGroups.some((group) => group.reason === "source_limit_exceeded")
+      ? "Mooncite hit a bounded source-discovery or ingestion limit. Rebuilding alone will repeat it until the authorized source set or supported limit changes."
+      : state.errorGroups.some((group) =>
+        group.reason === "source_root_unavailable" || group.reason === "source_configuration_failure")
+        ? "Restore the authorized source root or configuration, then rebuild the derived index."
+        : "Rebuild the derived index from authorized source history, then check status again.";
     const next: MoonciteNextAction | null = outcome === "ready"
       ? null
       : {
         action: "run",
         target: "mooncite rebuild",
-        reason: "Rebuild the derived index from authorized source history, then check status again.",
+        reason: nextReason,
       };
     const sourceFilesByOrigin: Record<SourceOrigin, number> = { pi: 0, omp: 0, "claude-code": 0, codex: 0, chatgpt: 0 };
     for (const source of this.#storedSources()) sourceFilesByOrigin[source.source_origin]++;
-    const errorCounts = new Map<SourceOrigin, { count: number; fatalCount: number }>();
-    for (const source of this.#storedSources()) {
-      if (source.errors === 0 && source.fatal_errors === 0) continue;
-      const previous = errorCounts.get(source.source_origin) ?? { count: 0, fatalCount: 0 };
-      previous.count += source.errors;
-      previous.fatalCount += source.fatal_errors;
-      errorCounts.set(source.source_origin, previous);
-    }
-    const errorGroups = [...errorCounts.entries()].map(([origin, counts]): MoonciteStatusErrorGroup => ({
-      origin,
-      reason: "source_read_or_parse_failure",
-      count: counts.count,
-      fatalCount: counts.fatalCount,
-    }));
-    const attributedErrors = errorGroups.reduce((total, group) => total + group.count, 0);
-    if (state.errors > attributedErrors) {
-      errorGroups.push({
-        origin: "unknown",
-        reason: "source_read_or_parse_failure",
-        count: state.errors - attributedErrors,
-        fatalCount: Math.max(0, state.fatalErrors - errorGroups.reduce((total, group) => total + group.fatalCount, 0)),
-      });
-    }
+    const errorGroups = state.errorGroups.map((group) => ({ ...group }));
     return {
       outcome,
       meaning,

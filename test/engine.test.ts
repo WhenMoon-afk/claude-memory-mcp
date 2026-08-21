@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { appendFile, chmod, mkdir, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { MoonciteEngine } from "../src/engine.js";
@@ -141,6 +141,30 @@ describe("Mooncite engine public seam", () => {
       });
     } finally {
       database.close();
+    }
+  });
+
+  it("centers bounded recall excerpts on the lexical match instead of a generic record prefix", async () => {
+    const f = await fixture();
+    const entries = (await readFile(f.source, "utf8")).trimEnd().split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const message = entries[1]!.message as Record<string, unknown>;
+    message.content = `BEGIN-GENERIC-PREAMBLE\n${"Generic setup output without the answer.\n".repeat(60)}Useful matched context: excerpt-target-73 explains the actual decision.`;
+    await writeFile(f.source, `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+    const sourceDigest = await digest(f.source);
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    try {
+      const candidate = engine.recall({ query: "excerpt-target-73" }).candidates[0]!;
+      expect(candidate.excerpt).toContain("Useful matched context: excerpt-target-73");
+      expect(candidate.excerpt).not.toContain("BEGIN-GENERIC-PREAMBLE");
+      expect(candidate.omittedBytes).toBeGreaterThan(0);
+      expect(engine.inspect({ evidenceId: candidate.evidenceId })).toMatchObject({
+        outcome: "verified",
+        target: { text: expect.stringContaining("Useful matched context: excerpt-target-73") },
+      });
+      expect(await digest(f.source)).toBe(sourceDigest);
+    } finally {
+      engine.close();
     }
   });
 
@@ -644,6 +668,430 @@ describe("Mooncite engine public seam", () => {
       });
     } finally {
       empty.close();
+    }
+  });
+
+  it("reports refresh-time source configuration failures with stable safe diagnostics", async () => {
+    const f = await fixture();
+    let configurationAvailable = true;
+    const optionalSourcesProvider = () => {
+      if (!configurationAvailable) {
+        throw new Error(`Do not expose ${f.source} or silver-cedar-17.`);
+      }
+      return [];
+    };
+    const options = {
+      sessionsRoot: f.sessionsRoot,
+      stateDir: f.stateDir,
+      optionalSourcesProvider,
+    };
+    let engine: MoonciteEngine | null = new MoonciteEngine(options);
+    let reopened: MoonciteEngine | null = null;
+    const expectedGroup = {
+      origin: "unknown",
+      reason: "source_configuration_failure",
+      count: 1,
+      fatalCount: 1,
+    };
+    try {
+      const generation = engine.status().generation;
+      configurationAvailable = false;
+      const failed = engine.status();
+      expect(failed).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+        next: {
+          action: "run",
+          target: "mooncite rebuild",
+          reason: "Restore the authorized source root or configuration, then rebuild the derived index.",
+        },
+      });
+      expect(JSON.stringify(failed)).not.toContain(f.home);
+      expect(JSON.stringify(failed)).not.toContain("silver-cedar-17");
+      expect(engine.status()).toMatchObject({
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+      engine.close();
+      engine = null;
+
+      configurationAvailable = true;
+      reopened = new MoonciteEngine(options);
+      configurationAvailable = false;
+      expect(reopened.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+    } finally {
+      reopened?.close();
+      engine?.close();
+    }
+  });
+
+  it("reports a previously indexed root becoming unavailable without losing or inflating the group", async () => {
+    const f = await fixture();
+    const options = { sessionsRoot: f.sessionsRoot, stateDir: f.stateDir };
+    let engine: MoonciteEngine | null = new MoonciteEngine(options);
+    let reopened: MoonciteEngine | null = null;
+    const expectedGroup = {
+      origin: "pi",
+      reason: "source_root_unavailable",
+      count: 1,
+      fatalCount: 1,
+    };
+    try {
+      const generation = engine.status().generation;
+      await rename(f.sessionsRoot, join(f.home, "unavailable-pi-root"));
+      expect(engine.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+      expect(engine.status()).toMatchObject({
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+      engine.close();
+      engine = null;
+
+      reopened = new MoonciteEngine(options);
+      expect(reopened.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+    } finally {
+      reopened?.close();
+      engine?.close();
+    }
+  });
+
+  it("reports an unreadable discovery directory by origin across repeated status and reopen", async () => {
+    const f = await fixture();
+    const inaccessible = join(f.sessionsRoot, "inaccessible");
+    await mkdir(inaccessible);
+    const options = { sessionsRoot: f.sessionsRoot, stateDir: f.stateDir };
+    let engine: MoonciteEngine | null = new MoonciteEngine(options);
+    let reopened: MoonciteEngine | null = null;
+    const expectedGroup = {
+      origin: "pi",
+      reason: "source_discovery_failure",
+      count: 1,
+      fatalCount: 1,
+    };
+    try {
+      const generation = engine.status().generation;
+      await chmod(inaccessible, 0o000);
+      expect(engine.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+      expect(engine.status()).toMatchObject({
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+      engine.close();
+      engine = null;
+
+      reopened = new MoonciteEngine(options);
+      expect(reopened.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+    } finally {
+      reopened?.close();
+      engine?.close();
+      await chmod(inaccessible, 0o700).catch(() => undefined);
+    }
+  });
+
+  it("reports a non-append Pi source change by origin across repeated status and reopen", async () => {
+    const f = await fixture();
+    const options = { sessionsRoot: f.sessionsRoot, stateDir: f.stateDir };
+    let engine: MoonciteEngine | null = new MoonciteEngine(options);
+    let reopened: MoonciteEngine | null = null;
+    const expectedGroup = {
+      origin: "pi",
+      reason: "source_changed_during_refresh",
+      count: 1,
+      fatalCount: 1,
+    };
+    try {
+      const generation = engine.status().generation;
+      const original = await readFile(f.source, "utf8");
+      await writeFile(f.source, original.replace("silver-cedar-17", "silver-cedar-18"));
+      expect(engine.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+      expect(engine.status()).toMatchObject({
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+      engine.close();
+      engine = null;
+
+      reopened = new MoonciteEngine(options);
+      expect(reopened.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+    } finally {
+      reopened?.close();
+      engine?.close();
+    }
+  });
+
+  it("persists attributable source read-or-parse counts without promoting them to fatal", async () => {
+    const f = await fixture();
+    await appendFile(f.source, `malformed ${f.source} silver-cedar-17\n`);
+    const options = { sessionsRoot: f.sessionsRoot, stateDir: f.stateDir };
+    let engine: MoonciteEngine | null = new MoonciteEngine(options);
+    let reopened: MoonciteEngine | null = null;
+    const expectedGroup = {
+      origin: "pi",
+      reason: "source_read_or_parse_failure",
+      count: 1,
+      fatalCount: 0,
+    };
+    const expectedPersistedDiagnostics = {
+      errors: 1,
+      fatalErrors: 0,
+      errorGroups: [expectedGroup],
+    };
+    try {
+      const failed = engine.status();
+      expect(failed).toMatchObject({
+        outcome: "degraded",
+        freshness: "current",
+        errors: 1,
+        malformed: 1,
+        errorGroups: [expectedGroup],
+      });
+      expect(JSON.stringify(failed)).not.toContain(f.home);
+      expect(JSON.stringify(failed)).not.toContain("silver-cedar-17");
+      expect(engine.status()).toMatchObject({
+        errors: 1,
+        malformed: 1,
+        errorGroups: [expectedGroup],
+      });
+      const database = new DatabaseSync(join(f.stateDir, "index.sqlite"), { readOnly: true });
+      try {
+        const row = database.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get();
+        expect(row).toBeDefined();
+        const value = row?.value;
+        expect(typeof value).toBe("string");
+        if (typeof value !== "string") throw new Error("Expected metadata.last_good to contain serialized diagnostics.");
+        expect(JSON.parse(value)).toMatchObject(expectedPersistedDiagnostics);
+      } finally {
+        database.close();
+      }
+      engine.close();
+      engine = null;
+
+      reopened = new MoonciteEngine(options);
+      expect(reopened.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "current",
+        errors: 1,
+        malformed: 1,
+        errorGroups: [expectedGroup],
+      });
+      const reopenedDatabase = new DatabaseSync(join(f.stateDir, "index.sqlite"), { readOnly: true });
+      try {
+        const row = reopenedDatabase.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get();
+        expect(row).toBeDefined();
+        const value = row?.value;
+        expect(typeof value).toBe("string");
+        if (typeof value !== "string") throw new Error("Expected metadata.last_good to survive engine reopen.");
+        expect(JSON.parse(value)).toMatchObject(expectedPersistedDiagnostics);
+      } finally {
+        reopenedDatabase.close();
+      }
+    } finally {
+      reopened?.close();
+      engine?.close();
+    }
+  });
+
+  it("groups discovery-limit errors by origin without inflating or losing the count", async () => {
+    const f = await fixture();
+    const options = { sessionsRoot: f.sessionsRoot, stateDir: f.stateDir };
+    let engine: MoonciteEngine | null = new MoonciteEngine(options);
+    let reopened: MoonciteEngine | null = null;
+    try {
+      const generation = engine.status().generation;
+      let nested = f.sessionsRoot;
+      for (let depth = 0; depth < 66; depth++) {
+        nested = join(nested, `deep-${depth}`);
+        await mkdir(nested);
+      }
+      const expectedGroup = {
+        origin: "pi",
+        reason: "source_limit_exceeded",
+        count: 1,
+        fatalCount: 1,
+      };
+      expect(engine.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+        next: {
+          action: "run",
+          target: "mooncite rebuild",
+          reason: "Mooncite hit a bounded source-discovery or ingestion limit. Rebuilding alone will repeat it until the authorized source set or supported limit changes.",
+        },
+      });
+      expect(engine.status()).toMatchObject({
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+      engine.close();
+      engine = null;
+
+      reopened = new MoonciteEngine(options);
+      expect(reopened.status()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        generation,
+        errors: 1,
+        errorGroups: [expectedGroup],
+      });
+    } finally {
+      reopened?.close();
+      engine?.close();
+    }
+  });
+
+  it("rolls back every projection table when a first full refresh has one fatal source", async () => {
+    const f = await fixture();
+    const fatalProject = join(f.sessionsRoot, "zz-fatal-project");
+    const fatalSource = join(fatalProject, "fatal-session.jsonl");
+    await mkdir(fatalProject);
+    await writeFile(fatalSource, "{\"type\":\"session\",\"version\":3", { mode: 0o600 });
+    const fatalDigest = await digest(fatalSource);
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    try {
+      expect(engine.status()).toMatchObject({
+        outcome: "unavailable",
+        freshness: "unavailable",
+        generation: "empty",
+        coverage: "partial",
+        sourceFiles: 0,
+        records: 0,
+        evidenceSpans: 0,
+        errors: 1,
+        searchUsable: false,
+        lastSuccessfulRefreshAt: null,
+        lastRefreshOutcome: "unavailable",
+        errorGroups: [{
+          origin: "pi",
+          reason: "source_read_or_parse_failure",
+          count: 1,
+          fatalCount: 1,
+        }],
+      });
+      expect(engine.recall({ query: "silver-cedar-17" })).toMatchObject({
+        outcome: "unavailable",
+        conclusive: false,
+        generation: "empty",
+        scope: { evidenceSpans: 0 },
+        candidates: [],
+      });
+      const database = new DatabaseSync(join(f.stateDir, "index.sqlite"), { readOnly: true });
+      try {
+        expect(database.prepare("SELECT COUNT(*) AS count FROM evidence").get()).toEqual({ count: 0 });
+        expect(database.prepare("SELECT COUNT(*) AS count FROM source_files").get()).toEqual({ count: 0 });
+        expect(database.prepare("SELECT COUNT(*) AS count FROM source_records").get()).toEqual({ count: 0 });
+        expect(database.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get()).toBeUndefined();
+      } finally {
+        database.close();
+      }
+      expect(await Promise.all([digest(f.source), digest(fatalSource)]))
+        .toEqual([f.sourceDigest, fatalDigest]);
+    } finally {
+      engine.close();
+    }
+  });
+
+  it("retains a searchable last-good generation when a later full refresh has one fatal source", async () => {
+    const f = await fixture();
+    const engine = new MoonciteEngine({
+      sessionsRoot: f.sessionsRoot,
+      ompSessionsRoot: f.ompSessionsRoot,
+      stateDir: f.stateDir,
+    });
+    try {
+      expect(engine.status()).toMatchObject({
+        outcome: "ready",
+        freshness: "current",
+        sourceFiles: 2,
+        evidenceSpans: 4,
+      });
+      await writeFile(f.ompSource, "{\"type\":\"title\"", { mode: 0o600 });
+      const fatalDigest = await digest(f.ompSource);
+      expect(engine.rebuild()).toMatchObject({
+        outcome: "degraded",
+        freshness: "last_good",
+        coverage: "partial",
+        sourceFiles: 2,
+        evidenceSpans: 4,
+        searchUsable: true,
+        lastRebuildOutcome: "retained_last_good",
+        errorGroups: [{
+          origin: "omp",
+          reason: "source_read_or_parse_failure",
+          count: 1,
+          fatalCount: 1,
+        }],
+      });
+      expect(engine.recall({ query: "violet-orbit-41" })).toMatchObject({
+        outcome: "matches",
+        conclusive: true,
+        coverage: "partial",
+        candidates: [{ sourceOrigin: "omp" }],
+      });
+      const database = new DatabaseSync(join(f.stateDir, "index.sqlite"), { readOnly: true });
+      try {
+        expect(database.prepare("SELECT COUNT(*) AS count FROM source_files").get()).toEqual({ count: 2 });
+        expect(database.prepare("SELECT COUNT(*) AS count FROM evidence").get()).toEqual({ count: 4 });
+        expect(database.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get()).toBeDefined();
+      } finally {
+        database.close();
+      }
+      expect(await Promise.all([digest(f.source), digest(f.ompSource)]))
+        .toEqual([f.sourceDigest, fatalDigest]);
+    } finally {
+      engine.close();
     }
   });
 

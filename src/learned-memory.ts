@@ -1239,7 +1239,10 @@ export function unavailableLearnedMemoryStatus(error: unknown): LearnedMemorySta
     pendingSkillCandidates: 0,
     stateBytes: 0,
     errorCode,
-    message: "Learned memory is enabled but its separate store is unavailable.",
+    message: errorCode === "unsupported_schema"
+      ? "This Mooncite process does not support the learned-memory schema. "
+        + "Keep learned-memory.sqlite intact and run a Mooncite version that supports it."
+      : "Learned memory is enabled but its separate store is unavailable.",
   };
 }
 

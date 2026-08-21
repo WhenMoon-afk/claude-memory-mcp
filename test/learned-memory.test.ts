@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { MoonciteEngine, type EvidenceAnchorSnapshot } from "../src/engine.js";
+import { MOONCITE_STATE_MARKER_NAME } from "../src/identity.js";
 import {
   LearnedMemoryStore,
   type LearnedMemoryLifecycleResult,
@@ -13,6 +14,7 @@ import {
   loadLearnedMemoryMode,
   resolveLearnedMemoryConfigPath,
   setLearnedMemoryEnabled,
+  unavailableLearnedMemoryStatus,
 } from "../src/learned-memory.js";
 import { createFixture, digest, type Fixture } from "./fixture.js";
 
@@ -40,6 +42,16 @@ function lifecycleResult(result: LearnedMemoryWriteResult): LearnedMemoryLifecyc
 function skillCandidateResult(result: LearnedMemoryWriteResult): LearnedSkillCandidateWriteResult {
   if (result.kind !== "skill_candidate_write") throw new Error("Expected a skill-candidate result.");
   return result;
+}
+
+function learnedStoreOpenError(engine: MoonciteEngine, stateDir: string): unknown {
+  try {
+    const store = new LearnedMemoryStore(engine, { stateDir });
+    store.close();
+    return null;
+  } catch (error) {
+    return error;
+  }
 }
 
 function recallMemory(
@@ -814,6 +826,114 @@ describe("optional learned-memory vertical", () => {
     }
   });
 
+  it("reopens current v2 state without losing revisions, anchors, relations, candidates, or ownership", async () => {
+    const f = await fixture();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    let store = new LearnedMemoryStore(engine, { stateDir: f.stateDir });
+    const markerPath = join(f.stateDir, MOONCITE_STATE_MARKER_NAME);
+    const ownerMarker = await readFile(markerPath);
+    try {
+      const source = engine.recall({ query: "silver-cedar-17" }).candidates[0]!;
+      const original = storedMemory(store.write({
+        operation: "create",
+        interpretation: "The original v2 interpretation remains immutable.",
+        provenance: { kind: "verified", evidenceIds: [source.evidenceId] },
+        scope: null,
+      }));
+      const current = storedMemory(store.write({
+        operation: "revise",
+        memoryId: original.memoryId,
+        expectedRevision: 1,
+        interpretation: "The current v2 interpretation keeps its own source anchor.",
+        provenance: { kind: "verified", evidenceIds: [source.evidenceId] },
+        scope: null,
+      }));
+      const related = storedMemory(store.write({
+        operation: "create",
+        interpretation: "A related v2 interpretation keeps its parent relation.",
+        provenance: {
+          kind: "derived",
+          parents: [{
+            memoryId: original.memoryId,
+            revision: 1,
+            relation: "refines",
+            reason: "The related interpretation narrows the immutable first revision.",
+          }],
+          evidenceIds: [],
+        },
+        scope: null,
+      }));
+      const candidate = skillCandidateResult(store.write({
+        operation: "propose_skill_candidate",
+        sources: [
+          { memoryId: original.memoryId, revision: 1 },
+          { memoryId: related.memoryId, revision: 1 },
+        ],
+        artifact: {
+          name: "v2-reopen-check",
+          description: "A candidate retained across a supported schema reopen.",
+          instructions: "Inspect both source revisions before review.",
+        },
+      })).candidate;
+
+      store.close();
+      store = new LearnedMemoryStore(engine, { stateDir: f.stateDir });
+
+      expect(store.status()).toMatchObject({
+        outcome: "ready",
+        schemaVersion: 2,
+        memories: 2,
+        revisions: 3,
+        skillCandidates: 1,
+        pendingSkillCandidates: 1,
+      });
+      expect(store.inspect({
+        kind: "revision",
+        memoryId: original.memoryId,
+        revision: 1,
+        window: 0,
+      })).toMatchObject({
+        revision: 1,
+        currentRevision: current.revision,
+        isCurrent: false,
+        provenance: { kind: "verified" },
+        anchors: [{ evidenceId: source.evidenceId }],
+        skillCandidates: [{ candidateId: candidate.candidateId }],
+      });
+      expect(store.inspect({
+        kind: "revision",
+        memoryId: related.memoryId,
+        revision: null,
+        window: 0,
+      })).toMatchObject({
+        provenance: {
+          kind: "derived",
+          parents: [{
+            memoryId: original.memoryId,
+            revision: 1,
+            relation: "refines",
+          }],
+        },
+        skillCandidates: [{ candidateId: candidate.candidateId }],
+      });
+      expect(store.inspect({
+        kind: "skill_candidate",
+        candidateId: candidate.candidateId,
+      })).toMatchObject({
+        candidateId: candidate.candidateId,
+        review: { state: "pending_review" },
+        sources: [
+          { memoryId: original.memoryId, revision: 1 },
+          { memoryId: related.memoryId, revision: 1 },
+        ],
+      });
+      expect(await readFile(markerPath)).toEqual(ownerMarker);
+    } finally {
+      store.close();
+      engine.close();
+    }
+  });
+
   it("migrates exact v1 evidence-backed rows to v2 verified revisions", async () => {
     const f = await fixture();
     const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
@@ -822,6 +942,8 @@ describe("optional learned-memory vertical", () => {
     if (resolution.outcome !== "resolved" || resolution.anchor === null) {
       throw new Error("Expected the fixture evidence anchor to resolve.");
     }
+    const markerPath = join(f.stateDir, MOONCITE_STATE_MARKER_NAME);
+    const ownerMarker = await readFile(markerPath);
     const seeded = await seedVersionOneMemory(f.stateDir, resolution.anchor);
     const store = new LearnedMemoryStore(engine, { stateDir: f.stateDir });
     try {
@@ -844,8 +966,93 @@ describe("optional learned-memory vertical", () => {
         lifecycle: { state: "active", metadataVersion: 1 },
         anchors: [{ evidenceId: source.evidenceId }],
       });
+      expect(await readFile(markerPath)).toEqual(ownerMarker);
     } finally {
       store.close();
+      engine.close();
+    }
+  });
+
+  it("fails closed on a future learned-memory schema version without changing owner state", async () => {
+    const f = await fixture();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    const markerPath = join(f.stateDir, MOONCITE_STATE_MARKER_NAME);
+    const store = new LearnedMemoryStore(engine, { stateDir: f.stateDir });
+    store.close();
+    const ownerMarker = await readFile(markerPath);
+    const databasePath = join(f.stateDir, "learned-memory.sqlite");
+    const database = new DatabaseSync(databasePath);
+    database.prepare("UPDATE memory_metadata SET value = '3' WHERE key = 'schema_version'").run();
+    database.close();
+
+    try {
+      const error = learnedStoreOpenError(engine, f.stateDir);
+      expect(error).toBeInstanceOf(Error);
+      expect(unavailableLearnedMemoryStatus(error)).toMatchObject({
+        enabled: true,
+        outcome: "unavailable",
+        errorCode: "unsupported_schema",
+        message: expect.stringContaining("Keep learned-memory.sqlite intact"),
+      });
+      const retained = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        expect(retained.prepare("SELECT value FROM memory_metadata WHERE key = 'schema_version'").get())
+          .toEqual({ value: "3" });
+      } finally {
+        retained.close();
+      }
+      expect(await readFile(markerPath)).toEqual(ownerMarker);
+    } finally {
+      engine.close();
+    }
+  });
+
+  it("fails closed on a v2 schema fingerprint mismatch without changing retained memory", async () => {
+    const f = await fixture();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    const markerPath = join(f.stateDir, MOONCITE_STATE_MARKER_NAME);
+    const store = new LearnedMemoryStore(engine, { stateDir: f.stateDir });
+    const memory = storedMemory(store.write({
+      operation: "create",
+      interpretation: "This retained memory must survive an unsupported schema check.",
+      provenance: { kind: "unanchored", basisNote: "Explicit fingerprint test state." },
+      scope: { kind: "global" },
+    }));
+    store.close();
+    const ownerMarker = await readFile(markerPath);
+    const databasePath = join(f.stateDir, "learned-memory.sqlite");
+    const database = new DatabaseSync(databasePath);
+    database.exec("CREATE TABLE unsupported_learned_memory_extension(value TEXT NOT NULL)");
+    database.close();
+
+    try {
+      const error = learnedStoreOpenError(engine, f.stateDir);
+      expect(error).toBeInstanceOf(Error);
+      expect(unavailableLearnedMemoryStatus(error)).toMatchObject({
+        enabled: true,
+        outcome: "unavailable",
+        errorCode: "unsupported_schema",
+        message: expect.stringContaining("Keep learned-memory.sqlite intact"),
+      });
+      const retained = new DatabaseSync(databasePath, { readOnly: true });
+      try {
+        expect(retained.prepare("SELECT value FROM memory_metadata WHERE key = 'schema_version'").get())
+          .toEqual({ value: "2" });
+        expect(retained.prepare(`
+          SELECT interpretation FROM learned_memory_revisions
+          WHERE memory_id = ? AND revision = 1
+        `).get(memory.memoryId)).toEqual({
+          interpretation: "This retained memory must survive an unsupported schema check.",
+        });
+        expect(retained.prepare(`
+          SELECT COUNT(*) AS value FROM sqlite_schema
+          WHERE type = 'table' AND name = 'unsupported_learned_memory_extension'
+        `).get()).toEqual({ value: 1 });
+      } finally {
+        retained.close();
+      }
+      expect(await readFile(markerPath)).toEqual(ownerMarker);
+    } finally {
       engine.close();
     }
   });

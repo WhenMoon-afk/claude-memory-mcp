@@ -13,7 +13,7 @@ npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.5 install
 Current prerelease:
 
 ```bash
-npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6-preview.1001.0 install
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6-preview.1002.0 install
 ```
 
 The prerelease tag does not replace the stable tag. Untagged `main` builds are identified by commit SHA.
@@ -70,7 +70,11 @@ mooncite rebuild
 mooncite source list
 ```
 
-`status` refreshes authorized sources and reports health, coverage, counts, errors, and client registrations without transcript text. A degraded index may remain searchable, but an empty recall is then inconclusive. `rebuild` performs a full verified reread.
+`status` refreshes authorized sources and reports health, coverage, counts, client registrations, and errors grouped by safe source origin and failure reason. It omits transcript text, internal errors, and full source paths. A degraded index may remain searchable, but an empty recall is then inconclusive.
+
+For `source_configuration_failure` or `source_root_unavailable`, restore the authorized configuration or root before rebuilding. For `source_discovery_failure`, restore directory access. For metadata, source-change, or read-and-parse failures, preserve the source history and run `mooncite rebuild` after correcting the source access problem.
+
+For `source_limit_exceeded`, reduce the authorized source set or wait for a release with a higher supported limit. `mooncite rebuild` alone cannot fix the limit and will repeat the refusal. A rebuild performs a full verified reread only after the source set fits the supported bounds.
 
 Recall and inspection are MCP tools, not shell commands. See the [agent workflow](../skills/mooncite/SKILL.md) and [protocol](protocol.md).
 
@@ -87,6 +91,8 @@ mooncite memory disable
 Restart or reload every client after enable or disable. The first enabled use creates `$XDG_STATE_HOME/mooncite/learned-memory.sqlite`. Disabling learned memory hides its tools but keeps that database.
 
 Learned memory stores explicit agent-authored interpretations separately from source evidence. It performs no background extraction, model call, embedding, activation, reinforcement, or decay. See the [protocol](protocol.md) for provenance and mutation rules.
+
+`unsupported_schema` means that the learned-memory database does not match the schema supported by the running Mooncite process. An older client can report this error after a newer version migrates the database. Install or restore a Mooncite version that supports the existing database, fully restart every client, and run `mooncite memory status` again. Keep `learned-memory.sqlite` intact. Mooncite does not downgrade an unknown schema, and purge removes learned data rather than repairing it.
 
 ## Disable, uninstall, and purge
 

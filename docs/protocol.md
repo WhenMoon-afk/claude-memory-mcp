@@ -40,7 +40,7 @@ A source-qualified session ID has the form `<origin>:<64-hex-source-root-digest>
 | `invalid_scope` | Retry with no scope or an exact copied scope |
 | `unavailable` | No usable generation could be searched |
 
-Candidates include exact project and session identities. They include `evidence_id`, `evidence_uri`, a bounded excerpt, and match reasons. They also show matched and missing terms, omitted text, duplicate spans, and suppressed recursive output.
+Candidates include exact project and session identities. They include `evidence_id`, `evidence_uri`, a bounded excerpt, and match reasons. For long records, the excerpt starts near the exact query or the longest matched term instead of returning the record prefix; `omittedBytes` counts text omitted before and after that window. Candidates also show matched and missing terms, duplicate spans, and suppressed recursive output.
 
 `full_verified` means the projection came from a full source read or a transactional mutable-source replacement. `append_trusted` means Mooncite admitted coherent Pi same-inode growth without rereading the indexed prefix.
 
@@ -61,9 +61,25 @@ Only `verified` returns a window checked against the current source. It proves b
 
 ## `mooncite_status`
 
-No input. Status returns `ready`, `degraded`, or `unavailable`. It also reports freshness, search usability, coverage, counts, grouped errors, state size, and client registrations. It returns no transcript text or full physical source path.
+No input. Status returns `ready`, `degraded`, or `unavailable`. It also reports freshness, search usability, coverage, counts, state size, client registrations, and errors grouped by safe source origin and failure reason. Status returns no transcript text, internal exception text, or full physical source path.
 
-A degraded index may remain searchable, but its empty recall results are inconclusive. Learned-store failure appears separately and does not disable evidence recall or inspection.
+| Reason | Meaning | Group origin |
+| --- | --- | --- |
+| `source_configuration_failure` | Source configuration became unavailable or invalid during refresh. | `unknown` |
+| `source_root_unavailable` | An authorized root that backed indexed state is missing or fails the directory and symlink safety checks. | Configured source origin |
+| `source_discovery_failure` | Mooncite cannot enumerate a directory inside an otherwise valid root. | Configured source origin |
+| `source_limit_exceeded` | Discovery exceeds the supported depth, entry count, file count, or admitted source-byte limit. | Configured source origin |
+| `source_metadata_failure` | A discovered path fails the immediate containment, regular-file, or safe-size metadata check. | Configured source origin |
+| `source_changed_during_refresh` | An indexed Pi source no longer qualifies as same-file monotonic growth. | Configured source origin |
+| `source_read_or_parse_failure` | Mooncite cannot safely capture or parse a source, or cannot attribute an internal refresh failure more narrowly. | Configured source origin when attributable, otherwise `unknown` |
+
+`source_metadata_failure` is an internal race-safety fallback. Discovery only reaches it when a path changes between enumeration and metadata capture. Ordinary missing roots use `source_root_unavailable`. Unreadable directories use `source_discovery_failure`.
+
+`unknown/source_read_or_parse_failure` is the conservative internal fallback for an unattributable refresh failure. It also replaces persisted diagnostic groups when their validated totals do not match the persisted aggregate counters. Neither fallback returns the internal error or source value.
+
+`count` is the number of grouped failures. `fatalCount` is the subset that prevented source admission or refresh. Repeated status calls recompute transient failures and reuse persisted per-source parse counts, so counts do not accumulate. After reopen, Mooncite reloads the last-good generation and rediscovers any continuing transient failure.
+
+A degraded index may remain searchable, but its empty recall results are inconclusive. A source-limit group means rebuilding alone will repeat the refusal until the authorized source set or supported limit changes. Learned-store failure appears separately and does not disable evidence recall or inspection.
 
 ## Optional learned-memory tools
 

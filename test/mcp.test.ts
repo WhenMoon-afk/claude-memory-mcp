@@ -1,5 +1,6 @@
-import { appendFile, readFile, readdir, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { PassThrough } from "node:stream";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { afterEach, describe, expect, it } from "vitest";
@@ -345,25 +346,52 @@ describe("Mooncite stdio MCP seam", () => {
     expect(await readdir(sourceFixture.stateDir)).toContain("learned-memory.sqlite");
   });
 
-  it("keeps evidence tools available when the enabled learned store cannot open", async () => {
+  it("keeps every evidence tool available when the learned store has a future schema", async () => {
     const sourceFixture = await createFixture();
     fixtures.push(sourceFixture);
     const configPath = join(sourceFixture.home, ".config", "mooncite", "learned-memory.json");
     setLearnedMemoryEnabled(configPath, true);
     await rpc("tools/list", undefined, sourceFixture, configPath);
-    await writeFile(join(sourceFixture.stateDir, "learned-memory.sqlite"), "not a sqlite database", { mode: 0o600 });
+    const databasePath = join(sourceFixture.stateDir, "learned-memory.sqlite");
+    const database = new DatabaseSync(databasePath);
+    try {
+      database.prepare("UPDATE memory_metadata SET value = '3' WHERE key = 'schema_version'").run();
+    } finally {
+      database.close();
+    }
 
     const recalled = await callTool("mooncite_recall", { query: "silver-cedar-17" }, sourceFixture, configPath);
     expect(recalled.structuredContent).toMatchObject({ outcome: "matches" });
+    const recalledEvidence = z.object({
+      candidates: z.array(z.object({ evidenceId: z.string() })).min(1),
+    }).parse(recalled.structuredContent);
+    const evidenceId = recalledEvidence.candidates[0]!.evidenceId;
+    const inspected = await callTool("mooncite_inspect", {
+      evidence_id: evidenceId,
+      window: 0,
+    }, sourceFixture, configPath);
+    expect(inspected.structuredContent).toMatchObject({ outcome: "verified" });
     const status = await callTool("mooncite_status", {}, sourceFixture, configPath);
     expect(status.structuredContent).toMatchObject({
       outcome: "ready",
-      learnedMemory: { enabled: true, outcome: "unavailable" },
+      learnedMemory: {
+        enabled: true,
+        outcome: "unavailable",
+        errorCode: "unsupported_schema",
+        message: expect.stringContaining("Keep learned-memory.sqlite intact"),
+      },
     });
     const memory = await callTool("mooncite_memory_recall", { query: "silver cedar" }, sourceFixture, configPath);
     expect(memory).toMatchObject({ isError: true });
-  });
 
+    const retained = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      expect(retained.prepare("SELECT value FROM memory_metadata WHERE key = 'schema_version'").get())
+        .toEqual({ value: "3" });
+    } finally {
+      retained.close();
+    }
+  });
 
   it("supports the receiver recall-to-inspect flow with both rendered locator forms", async () => {
     const sourceFixture = await createFixture();
@@ -427,6 +455,36 @@ describe("Mooncite stdio MCP seam", () => {
       expect(inspectionText).toMatch(/^Time: .+ · .+$/mu);
       expect(inspectionText.indexOf("Verified target")).toBeLessThan(inspectionText.indexOf("Mooncite inspection:"));
     }
+  });
+
+  it("returns match-centered excerpts through the MCP recall-to-inspect boundary", async () => {
+    const sourceFixture = await createFixture();
+    fixtures.push(sourceFixture);
+    const entries = (await readFile(sourceFixture.source, "utf8")).trimEnd().split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    const message = entries[1]!.message as Record<string, unknown>;
+    message.content = `BEGIN-GENERIC-PREAMBLE\n${"Generic command output without the answer.\n".repeat(60)}Useful matched context: mcp-excerpt-target-84 explains the actual decision.`;
+    const physicalSource = `${entries.map((entry) => JSON.stringify(entry)).join("\n")}\n`;
+    await writeFile(sourceFixture.source, physicalSource);
+
+    const recalled = await callTool("mooncite_recall", { query: "mcp-excerpt-target-84" }, sourceFixture);
+    const structured = recalled.structuredContent as {
+      candidates: Array<{ evidenceId: string; excerpt: string; omittedBytes: number }>;
+    };
+    expect(structured.candidates[0]).toMatchObject({
+      excerpt: expect.stringContaining("Useful matched context: mcp-excerpt-target-84"),
+      omittedBytes: expect.any(Number),
+    });
+    expect(structured.candidates[0]!.excerpt).not.toContain("BEGIN-GENERIC-PREAMBLE");
+    expect((recalled.content as Array<{ text: string }>)[0]!.text)
+      .toContain("Excerpt: Useful matched context: mcp-excerpt-target-84");
+    expect((await callTool("mooncite_inspect", {
+      evidence_id: structured.candidates[0]!.evidenceId,
+    }, sourceFixture)).structuredContent).toMatchObject({
+      outcome: "verified",
+      evidenceId: structured.candidates[0]!.evidenceId,
+    });
+    expect(await readFile(sourceFixture.source, "utf8")).toBe(physicalSource);
   });
 
   it("spools long results and reports opt-in recall-to-inspect timing at the MCP receiver", async () => {
@@ -705,5 +763,115 @@ describe("Mooncite stdio MCP seam", () => {
     expect(result.structuredContent).not.toHaveProperty("learnedMemory");
     expect(JSON.stringify(result.structuredContent)).not.toContain("silver-cedar-17");
     expect((result.content as Array<{ text: string }>)[0]!.text).toContain("Mooncite status: ready;");
+  });
+
+  it("renders actionable source-error groups without transcript text or source paths", async () => {
+    const sourceFixture = await createFixture();
+    fixtures.push(sourceFixture);
+    expect((await callTool("mooncite_status", {}, sourceFixture)).structuredContent)
+      .toMatchObject({ outcome: "ready" });
+    let nested = sourceFixture.sessionsRoot;
+    for (let depth = 0; depth < 66; depth++) {
+      nested = join(nested, `deep-${depth}`);
+      await mkdir(nested);
+    }
+
+    const expectedGroup = {
+      origin: "pi",
+      reason: "source_limit_exceeded",
+      count: 1,
+      fatalCount: 1,
+    };
+    const expectedReason = "Mooncite hit a bounded source-discovery or ingestion limit. Rebuilding alone will repeat it until the authorized source set or supported limit changes.";
+    const result = await callTool("mooncite_status", {}, sourceFixture);
+    expect(result.structuredContent).toMatchObject({
+      outcome: "degraded",
+      errors: 1,
+      errorGroups: [expectedGroup],
+      next: {
+        action: "run",
+        target: "mooncite rebuild",
+        reason: expectedReason,
+      },
+    });
+    expect((await callTool("mooncite_status", {}, sourceFixture)).structuredContent).toMatchObject({
+      outcome: "degraded",
+      errors: 1,
+      errorGroups: [expectedGroup],
+    });
+    const rendered = (result.content as Array<{ text: string }>)[0]!.text;
+    expect(rendered).toContain("pi/source_limit_exceeded=1 (fatal=1)");
+    expect(rendered).toContain(expectedReason);
+    expect(rendered).not.toContain(sourceFixture.home);
+    expect(rendered).not.toContain("silver-cedar-17");
+  });
+
+  it("keeps a first-generation bounded refresh unavailable without exposing source details", async () => {
+    const sourceFixture = await createFixture();
+    fixtures.push(sourceFixture);
+    let nested = sourceFixture.sessionsRoot;
+    for (let depth = 0; depth < 66; depth++) {
+      nested = join(nested, `bounded-${depth}`);
+      await mkdir(nested);
+    }
+    const boundedSource = join(nested, "bounded-session.jsonl");
+    await writeFile(
+      boundedSource,
+      jsonLine({
+        type: "session",
+        version: 3,
+        id: "bounded-session",
+        timestamp: "2030-02-01T00:00:00.000Z",
+        cwd: "/work/bounded-project",
+      }) + jsonLine({
+        type: "message",
+        id: "bounded-entry",
+        parentId: null,
+        timestamp: "2030-02-01T00:00:01.000Z",
+        message: { role: "user", content: "Bounded private marker is hidden-canyon-91." },
+      }),
+      { mode: 0o600 },
+    );
+    const sourceBytes = await Promise.all([
+      readFile(sourceFixture.source),
+      readFile(boundedSource),
+    ]);
+
+    const status = await callTool("mooncite_status", {}, sourceFixture);
+    expect(status.structuredContent).toMatchObject({
+      outcome: "unavailable",
+      freshness: "unavailable",
+      coverage: "partial",
+      sourceFiles: 0,
+      records: 0,
+      evidenceSpans: 0,
+      errors: 1,
+      searchUsable: false,
+      lastSuccessfulRefreshAt: null,
+      lastRefreshOutcome: "unavailable",
+      errorGroups: [{
+        origin: "pi",
+        reason: "source_limit_exceeded",
+        count: 1,
+        fatalCount: 1,
+      }],
+    });
+    const renderedStatus = (status.content as Array<{ text: string }>)[0]!.text;
+    expect(renderedStatus).toContain("pi/source_limit_exceeded=1 (fatal=1)");
+    expect(JSON.stringify(status)).not.toContain(sourceFixture.home);
+    expect(JSON.stringify(status)).not.toContain("silver-cedar-17");
+    expect(JSON.stringify(status)).not.toContain("hidden-canyon-91");
+
+    const recall = await callTool("mooncite_recall", { query: "silver-cedar-17" }, sourceFixture);
+    expect(recall.structuredContent).toMatchObject({
+      outcome: "unavailable",
+      conclusive: false,
+      scope: { evidenceSpans: 0 },
+      candidates: [],
+    });
+    expect(await Promise.all([
+      readFile(sourceFixture.source),
+      readFile(boundedSource),
+    ])).toEqual(sourceBytes);
   });
 });
