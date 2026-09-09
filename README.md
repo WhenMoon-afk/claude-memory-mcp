@@ -46,9 +46,9 @@ Mooncite exposes exactly three tools:
 ## Read next
 
 - [Agent workflow](skills/mooncite/SKILL.md) tells an agent when to recall, narrow, inspect, and recover.
-- [MCP protocol](docs/protocol.md) lists exact tool inputs, outcomes, and learned-memory operations.
+- [MCP protocol](docs/protocol.md) lists exact tool inputs and outcomes.
 - [Operations](docs/operations.md) covers install, source configuration, status, rebuild, disable, uninstall, and purge.
-- [Architecture](docs/architecture.md) explains the engine, index, clients, and learned-memory boundary.
+- [Architecture](docs/architecture.md) explains the engine, index, and clients.
 - [Security](docs/security.md) explains source containment, local data handling, and deletion limits.
 
 Mooncite never writes source history. Text returned through MCP becomes model context and is subject to that model provider's data handling.

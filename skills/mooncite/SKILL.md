@@ -33,14 +33,4 @@ Do not mine raw transcripts after a conclusive `no_match`. Mine them only when:
 
 When a result links a `mooncite-result://artifact/...` resource, use the inline findings first. Read the full resource only when omitted detail matters. It expires after ten minutes.
 
-## Optional learned memory
-
-The four `mooncite_memory_*` tools appear only when learned memory is enabled. They return agent-authored interpretations, never source evidence or verified truth.
-
-1. Use `mooncite_memory_recall` only after evidence recall and only when a durable prior interpretation could help.
-2. Read the provenance kind. `verified` owns checked source anchors. `derived` links exact parent revisions. `current_context` records a bounded context note. `unanchored` records a basis with no evidence guarantee.
-3. Inspect consequential memory with `mooncite_memory_inspect`. `provenanceOutcome: verified` checks the revision's own anchors, not its interpretation. Parent health does not propagate to a child.
-4. Keep writes narrow and choose provenance explicitly. Revisions append instead of overwriting. Consolidation creates a new memory from exact parents.
-5. Activate, reinforce, archive, candidate review, and deletion change learned state only. Candidate approval never installs a skill. Hard deletion fails while a relation or candidate still depends on the memory.
-
 Use the mounted tool schema or [protocol](../../docs/protocol.md) for exact fields and limits.

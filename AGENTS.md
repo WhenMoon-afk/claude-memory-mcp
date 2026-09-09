@@ -25,9 +25,8 @@ Treat these counts and seams as closed contracts:
 - Symlinks are excluded from source admission. Authorized roots and opened files remain physically contained and identity-checked through Linux file descriptors.
 - Incremental publication is transactional. Pi same-inode size growth may be admitted as `append_trusted` after a coherent suffix read. OMP same-inode size growth may use the same bounded path after physically verifying the last indexed evidence record; a failed boundary check replaces that source projection. These paths do not reread the already indexed prefix. Detectable Pi shrinkage, same-size rewrites, or identity changes retain the last-good generation. Other detected OMP changes and every detected change from supported mutable Claude Code, Codex, and ChatGPT producers replace that source projection transactionally. Never publish knowingly partial coverage over a usable generation.
 
-- Learned revisions are immutable and carry one explicit provenance form: verified revisions own 1–8 physically verified canonical evidence anchors; derived revisions link 1–8 exact parent revisions and may own 0–8 anchors; current-context revisions carry an explicit note and may own 0–8 anchors; unanchored revisions carry an explicit basis and own no anchors or parent links. Only a revision's own anchors can quarantine it. Relations are exact and one-hop only. Lifecycle metadata is explicit/manual and never mutates revisions or source evidence. Skill promotion produces a reviewed candidate artifact only and never installs it. Disable and uninstall retain learned state; hard deletion fails closed on surviving relation or candidate dependencies; confirmed purge recognizes the separate learned database and its SQLite sidecars.
 
-Do not add, rename, alias, or silently generalize an origin, evidence tool, learned-memory tool, client, locator form, lifecycle operation, or transport as incidental work.
+Do not add, rename, alias, or silently generalize an origin, evidence tool, client, locator form, lifecycle operation, or transport as incidental work.
 
 ## Sources of truth
 
@@ -36,8 +35,7 @@ Edit the existing owner of a behavior; do not create a second path around it.
 - `CONTEXT.md`: canonical domain terms and lifecycle meanings.
 - `src/engine.ts`: engine contract, adapters, citations, indexing, refresh, rebuild, physical inspection, and bounded canonical anchor resolution.
 - `src/source-config.ts`: source authorization, discovery, and effective-root precedence.
-- `src/learned-memory.ts`: strict learned-memory opt-in, separate durable schema and v1 migration, immutable provenance/relation invariants, lexical and one-hop retrieval, own-anchor quarantine, explicit lifecycle metadata, reviewed skill candidates, and learned-only mutation.
-- `src/mcp.ts`: the default three evidence schemas plus the four conditional learned-memory schemas and stdio surface.
+- `src/mcp.ts`: the three evidence schemas and stdio surface.
 - `src/clients.ts`: supported-client discovery and exact registration ownership/mutation.
 - `src/lifecycle.ts`: install journal, staging, install/disable/uninstall/purge safety, and filesystem ownership.
 - `src/cli.ts`: public CLI routing and process behavior.
@@ -85,6 +83,6 @@ Exercise lifecycle scenarios only in disposable fixture homes. Never run install
 
 Tagged v4.0.6 is the documented stable install. The owner decides when a stable tag is ready. Current development identity is `4.0.7-preview.1010.0`. Untagged work is never published merely because files contain a candidate version. A version change must synchronize `src/identity.ts`, package manifests/lockfile, lifecycle expectations, and tests.
 
-Before a release is eligible, the full verification suite and packaged-artifact smoke must pass on the supported Linux/procfs and Node baseline; the candidate must also prove clean isolated install, all four client paths, the exact default three-tool surface, the conditional learned-memory tools when enabled, source preservation, conflict refusal, disable/uninstall ownership, and confirmed purge boundaries. Review the actual shipped file set and public docs, not only the working tree.
+Before a release is eligible, the full verification suite and packaged-artifact smoke must pass on the supported Linux/procfs and Node baseline; the candidate must also prove clean isolated install, all four client paths, the exact three-tool surface, source preservation, conflict refusal, disable/uninstall ownership, and confirmed purge boundaries. Review the actual shipped file set and public docs, not only the working tree.
 
 Committing, tagging, pushing, publishing, or touching a live installation are separate, explicit owner-authorized gates. Mooncite is distributed from the tagged GitHub repository, not npm, unless the owner deliberately changes that public contract.

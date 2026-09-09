@@ -35,10 +35,3 @@ Pi and OMP use their client roots. Mooncite narrowly discovers the supported Cla
 
 Symlinks are excluded. Mooncite keeps authorized roots and opened files physically contained and identity-checked through Linux file descriptors.
 
-## Optional learned memory
-
-Learned memory is off by default. When enabled, `LearnedMemoryStore` opens a separate owner-private `learned-memory.sqlite`. A learned-store failure does not disable evidence recall or inspection. Learned memory depends on a running evidence engine for anchor checks.
-
-Learned revisions are immutable and declare one provenance kind: `verified`, `derived`, `current_context`, or `unanchored`. A revision's own anchors determine its quarantine state. Parent health never propagates to a derived child, and related recall stops after one hop.
-
-Lifecycle metadata changes only through explicit activate, reinforce, and archive operations. Skill promotion creates a review candidate but never installs it. Hard deletion fails while a surviving relation or candidate still depends on the memory.
