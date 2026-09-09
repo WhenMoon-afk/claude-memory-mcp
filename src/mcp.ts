@@ -403,11 +403,11 @@ function renderRecall(bundle: EvidenceBundle): string {
       ...(candidate.omittedBytes > 0 ? [`omitted_bytes=${candidate.omittedBytes}`] : []),
     ].join("; ");
     return `Finding ${index + 1}\n`
+      + `Excerpt: ${candidate.excerpt}\n`
       + `Source: ${candidate.sourceOrigin}\n`
       + `Role: ${candidate.role}\n`
       + `Time: ${formatDisplayTimestamp(candidate.eventTimestamp, renderedAt)}\n`
       + `Record provenance: ${candidate.recordProvenance}\n`
-      + `Excerpt: ${candidate.excerpt}\n`
       + `What it establishes: ${renderEstablishment(candidate)}\n`
       + `Returned-context relationship: ${renderCandidateRelationship(bundle, index)}\n`
       + `Evidence ID: ${candidate.evidenceId}\n`

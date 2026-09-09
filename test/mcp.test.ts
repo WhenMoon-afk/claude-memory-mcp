@@ -425,7 +425,9 @@ describe("Mooncite stdio MCP seam", () => {
         match: { kind: "text_exact", band: "strong" },
       }],
     });
-    expect(content[0]!.text).toMatch(/^Finding 1\nSource: pi\nRole: user\n/u);
+    expect(content[0]!.text).toMatch(/^Finding 1\nExcerpt: /u);
+    expect(content[0]!.text.indexOf("Excerpt:")).toBeLessThan(content[0]!.text.indexOf("Source: pi"));
+    expect(content[0]!.text).toContain("Source: pi\nRole: user\n");
     expect(content[0]!.text).toMatch(/^Time: .+ · .+$/mu);
     expect(content[0]!.text).toContain("Record provenance: original");
     expect(content[0]!.text).toContain("What it establishes:");
