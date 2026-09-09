@@ -268,6 +268,40 @@ export interface EvidenceBundle {
   echoesSuppressed: number;
   warnings: string[];
 }
+type RecallRow = Record<string, string | number | null>;
+
+interface RecallQuery {
+  query: string;
+  parsed: { text: string; phrase: boolean };
+  terms: string[];
+  exactText: string;
+  limit: number;
+  order: RecallOrder;
+  after: string | null;
+  before: string | null;
+}
+
+interface RecallScope {
+  authorizationSql: string;
+  authorizationParams: string[];
+  evidenceSql: string;
+  evidenceParams: string[];
+  scope: EvidenceBundle["scope"];
+  warnings: string[];
+}
+
+interface RankedRecallRow {
+  row: RecallRow;
+  matchedTerms: string[];
+  missingTerms: string[];
+  termCoverage: number;
+  exact: boolean;
+  metadataExact: boolean;
+  directCitation: boolean;
+  isEcho: boolean;
+  band: RelevanceBand;
+  kind: MatchKind;
+}
 
 export type RefreshOutcome = "not_run" | "published" | "unchanged" | "retained_last_good" | "unavailable";
 
@@ -1157,7 +1191,6 @@ function readableChatGptSpans(entry: Record<string, unknown>): Array<{ role: Evi
   }
   return values.flatMap((text) => splitReadableText(text).map((span) => ({ role, text: span })));
 }
-
 interface ChatGptConversationSlice {
   bytes: Buffer;
   byteStart: number;
@@ -1171,6 +1204,143 @@ function isJsonWhitespace(byte: number): boolean {
 }
 
 
+interface ChatGptConversationScanState {
+  line: number;
+  lastByte: number | null;
+  root: "single" | "array" | null;
+  rootClosed: boolean;
+  completedSingle: boolean;
+  arrayState: "value-or-end" | "comma-or-end";
+  arrayHasValue: boolean;
+  capturing: boolean;
+  depth: number;
+  inString: boolean;
+  escaped: boolean;
+  objectStart: number;
+  objectLine: number;
+  objectBytes: number;
+  parts: Buffer[];
+  activeChunkStart: number | null;
+}
+
+function completeChatGptScannedConversation(
+  state: ChatGptConversationScanState,
+  chunk: Buffer,
+  index: number,
+  fileOffset: number,
+  visit: (conversation: ChatGptConversationSlice) => void,
+): void {
+  const segment = Buffer.from(chunk.subarray(state.activeChunkStart!, index + 1));
+  state.parts.push(segment);
+  state.objectBytes += segment.length;
+  if (state.objectBytes > MAX_CHATGPT_CONVERSATION_BYTES) throw new Error("Mooncite ChatGPT conversation exceeds the size limit.");
+  visit({
+    bytes: state.parts.length === 1 ? state.parts[0]! : Buffer.concat(state.parts, state.objectBytes),
+    byteStart: state.objectStart,
+    byteEnd: fileOffset + index + 1,
+    line: state.objectLine,
+  });
+  state.capturing = false;
+  state.activeChunkStart = null;
+  state.parts = [];
+  state.objectBytes = 0;
+  if (state.root === "single") state.completedSingle = true;
+  else state.arrayState = "comma-or-end";
+}
+
+function consumeChatGptCapturedByte(
+  state: ChatGptConversationScanState,
+  byte: number,
+  chunk: Buffer,
+  index: number,
+  fileOffset: number,
+  visit: (conversation: ChatGptConversationSlice) => void,
+): void {
+  if (state.inString) {
+    if (state.escaped) state.escaped = false;
+    else if (byte === 0x5c) state.escaped = true;
+    else if (byte === 0x22) state.inString = false;
+    return;
+  }
+  if (byte === 0x22) {
+    state.inString = true;
+    return;
+  }
+  if (byte === 0x7b || byte === 0x5b) {
+    state.depth++;
+    return;
+  }
+  if (byte !== 0x7d && byte !== 0x5d) return;
+  state.depth--;
+  if (state.depth < 0) throw new Error("Mooncite ChatGPT export has invalid JSON nesting.");
+  if (state.depth === 0) completeChatGptScannedConversation(state, chunk, index, fileOffset, visit);
+}
+
+function consumeChatGptStructuralByte(
+  state: ChatGptConversationScanState,
+  byte: number,
+  index: number,
+  fileOffset: number,
+): void {
+  if (isJsonWhitespace(byte)) return;
+  if (state.root === null) {
+    if (byte === 0x5b) state.root = "array";
+    else if (byte === 0x7b) {
+      state.root = "single";
+      state.capturing = true;
+      state.depth = 1;
+      state.objectStart = fileOffset + index;
+      state.objectLine = state.line;
+      state.activeChunkStart = index;
+    } else {
+      throw new Error("Mooncite ChatGPT export must contain an object or an array of objects.");
+    }
+    return;
+  }
+  if (state.root === "array" && !state.rootClosed) {
+    if (state.arrayState === "value-or-end" && byte === 0x7b) {
+      state.capturing = true;
+      state.depth = 1;
+      state.objectStart = fileOffset + index;
+      state.objectLine = state.line;
+      state.activeChunkStart = index;
+      state.arrayHasValue = true;
+    } else if (byte === 0x5d && (state.arrayState === "comma-or-end" || !state.arrayHasValue)) {
+      state.rootClosed = true;
+    } else if (state.arrayState === "comma-or-end" && byte === 0x2c) {
+      state.arrayState = "value-or-end";
+    } else {
+      throw new Error("Mooncite ChatGPT export array contains an unsupported value.");
+    }
+    return;
+  }
+  if (state.root === "single" && state.completedSingle) {
+    throw new Error("Mooncite ChatGPT export contains trailing data.");
+  }
+  if (state.rootClosed) throw new Error("Mooncite ChatGPT export contains trailing data.");
+}
+
+function consumeChatGptScanChunk(
+  state: ChatGptConversationScanState,
+  chunk: Buffer,
+  fileOffset: number,
+  visit: (conversation: ChatGptConversationSlice) => void,
+): void {
+  state.activeChunkStart = state.capturing ? 0 : null;
+  for (let index = 0; index < chunk.length; index++) {
+    const byte = chunk[index]!;
+    state.lastByte = byte;
+    if (state.capturing) consumeChatGptCapturedByte(state, byte, chunk, index, fileOffset, visit);
+    else consumeChatGptStructuralByte(state, byte, index, fileOffset);
+    if (byte === 0x0a) state.line++;
+  }
+  if (!state.capturing || state.activeChunkStart === null) return;
+  const segment = Buffer.from(chunk.subarray(state.activeChunkStart));
+  state.parts.push(segment);
+  state.objectBytes += segment.length;
+  if (state.objectBytes > MAX_CHATGPT_CONVERSATION_BYTES) throw new Error("Mooncite ChatGPT conversation exceeds the size limit.");
+}
+
 function scanChatGptConversations(
   path: string,
   metadata: SourceMetadata,
@@ -1181,117 +1351,307 @@ function scanChatGptConversations(
   const buffer = Buffer.alloc(1024 * 1024);
   const digest = createHash("sha256");
   let fileOffset = 0;
-  let line = 1;
-  let lastByte: number | null = null;
-  let root: "single" | "array" | null = null;
-  let rootClosed = false;
-  let completedSingle = false;
-  let arrayState: "value-or-end" | "comma-or-end" = "value-or-end";
-  let arrayHasValue = false;
-  let capturing = false;
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let objectStart = 0;
-  let objectLine = 1;
-  let objectBytes = 0;
-  let parts: Buffer[] = [];
+  const state: ChatGptConversationScanState = {
+    line: 1,
+    lastByte: null,
+    root: null,
+    rootClosed: false,
+    completedSingle: false,
+    arrayState: "value-or-end",
+    arrayHasValue: false,
+    capturing: false,
+    depth: 0,
+    inString: false,
+    escaped: false,
+    objectStart: 0,
+    objectLine: 1,
+    objectBytes: 0,
+    parts: [],
+    activeChunkStart: null,
+  };
   try {
     while (fileOffset < metadata.size) {
       const count = readSync(fd, buffer, 0, Math.min(buffer.length, metadata.size - fileOffset), fileOffset);
       if (count === 0) break;
       const chunk = buffer.subarray(0, count);
       digest.update(chunk);
-      let activeChunkStart: number | null = capturing ? 0 : null;
-      for (let index = 0; index < count; index++) {
-        const byte = chunk[index]!;
-        lastByte = byte;
-        if (capturing) {
-          if (inString) {
-            if (escaped) escaped = false;
-            else if (byte === 0x5c) escaped = true;
-            else if (byte === 0x22) inString = false;
-          } else if (byte === 0x22) {
-            inString = true;
-          } else if (byte === 0x7b || byte === 0x5b) {
-            depth++;
-          } else if (byte === 0x7d || byte === 0x5d) {
-            depth--;
-            if (depth < 0) throw new Error("Mooncite ChatGPT export has invalid JSON nesting.");
-            if (depth === 0) {
-              const segment = Buffer.from(chunk.subarray(activeChunkStart!, index + 1));
-              parts.push(segment);
-              objectBytes += segment.length;
-              if (objectBytes > MAX_CHATGPT_CONVERSATION_BYTES) throw new Error("Mooncite ChatGPT conversation exceeds the size limit.");
-              visit({
-                bytes: parts.length === 1 ? parts[0]! : Buffer.concat(parts, objectBytes),
-                byteStart: objectStart,
-                byteEnd: fileOffset + index + 1,
-                line: objectLine,
-              });
-              capturing = false;
-              activeChunkStart = null;
-              parts = [];
-              objectBytes = 0;
-              if (root === "single") completedSingle = true;
-              else arrayState = "comma-or-end";
-            }
-          }
-        } else if (!isJsonWhitespace(byte)) {
-          if (root === null) {
-            if (byte === 0x5b) root = "array";
-            else if (byte === 0x7b) {
-              root = "single";
-              capturing = true;
-              depth = 1;
-              objectStart = fileOffset + index;
-              objectLine = line;
-              activeChunkStart = index;
-            } else {
-              throw new Error("Mooncite ChatGPT export must contain an object or an array of objects.");
-            }
-          } else if (root === "array" && !rootClosed) {
-            if (arrayState === "value-or-end" && byte === 0x7b) {
-              capturing = true;
-              depth = 1;
-              objectStart = fileOffset + index;
-              objectLine = line;
-              activeChunkStart = index;
-              arrayHasValue = true;
-            } else if (byte === 0x5d && (arrayState === "comma-or-end" || !arrayHasValue)) {
-              rootClosed = true;
-            } else if (arrayState === "comma-or-end" && byte === 0x2c) {
-              arrayState = "value-or-end";
-            } else {
-              throw new Error("Mooncite ChatGPT export array contains an unsupported value.");
-            }
-          } else if (root === "single" && completedSingle) {
-            throw new Error("Mooncite ChatGPT export contains trailing data.");
-          } else if (rootClosed) {
-            throw new Error("Mooncite ChatGPT export contains trailing data.");
+      consumeChatGptScanChunk(state, chunk, fileOffset, visit);
+      fileOffset += count;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  if (fileOffset !== metadata.size || state.capturing || state.root === null
+    || (state.root === "single" && !state.completedSingle) || (state.root === "array" && !state.rootClosed)) {
+    throw new Error("Mooncite ChatGPT export could not be captured completely.");
+  }
+  return {
+    digest: digest.digest("hex"),
+    physicalLines: metadata.size === 0 ? 0 : state.lastByte === 0x0a ? state.line - 1 : state.line,
+  };
+}
+interface ChatGptDocument {
+  document: Record<string, unknown>;
+  sessionId: string;
+  mapping: Record<string, unknown>;
+}
+
+interface ChatGptNode {
+  nodeId: string;
+  parentNodeId: string | null;
+  messageId: string;
+  message: Record<string, unknown>;
+}
+
+function parseChatGptConversation(bytes: Buffer): ChatGptDocument {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8")) as unknown;
+  } catch {
+    throw new Error("Mooncite ChatGPT conversation is invalid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("Mooncite ChatGPT export contains an invalid conversation.");
+  }
+  const document = parsed as Record<string, unknown>;
+  const sessionId = isBoundedIdentifier(document.conversation_id)
+    ? document.conversation_id
+    : isBoundedIdentifier(document.id) ? document.id : null;
+  const mapping = document.mapping;
+  if (sessionId === null || !mapping || typeof mapping !== "object" || Array.isArray(mapping)) {
+    throw new Error("Mooncite ChatGPT conversation identity or message graph is invalid.");
+  }
+  return { document, sessionId, mapping: mapping as Record<string, unknown> };
+}
+
+function currentChatGptNode(document: Record<string, unknown>): string | null {
+  if (isBoundedIdentifier(document.current_node)) return document.current_node;
+  return isBoundedIdentifier(document.currentNode) ? document.currentNode : null;
+}
+
+function currentChatGptBranch(mapping: Record<string, unknown>, currentNode: string | null): Set<string> {
+  const branch = new Set<string>();
+  let cursor = currentNode;
+  while (cursor !== null && !branch.has(cursor)) {
+    branch.add(cursor);
+    const raw: unknown = mapping[cursor];
+    cursor = raw && typeof raw === "object" && !Array.isArray(raw) && isBoundedIdentifier((raw as Record<string, unknown>).parent)
+      ? String((raw as Record<string, unknown>).parent)
+      : null;
+  }
+  return branch;
+}
+
+function chatGptParentMessageId(
+  node: ChatGptNode,
+  nodes: Map<string, ChatGptNode>,
+  mapping: Record<string, unknown>,
+  cache: Map<string, string | null>,
+): string | null {
+  const path: string[] = [];
+  const visited = new Set<string>();
+  let cursor = node.parentNodeId;
+  let result: string | null = null;
+  while (cursor !== null && !visited.has(cursor)) {
+    const cached = cache.get(cursor);
+    if (cached !== undefined || cache.has(cursor)) {
+      result = cached ?? null;
+      break;
+    }
+    visited.add(cursor);
+    path.push(cursor);
+    const parent = nodes.get(cursor);
+    if (parent) {
+      result = parent.messageId;
+      break;
+    }
+    const raw: unknown = mapping[cursor];
+    cursor = raw && typeof raw === "object" && !Array.isArray(raw) && isBoundedIdentifier((raw as Record<string, unknown>).parent)
+      ? String((raw as Record<string, unknown>).parent)
+      : null;
+  }
+  for (const traversed of path) cache.set(traversed, result);
+  return result;
+}
+interface FullSourceLine {
+  bytes: Buffer | null;
+  start: number;
+  end: number;
+  oversized: boolean;
+}
+
+interface FullSourceScan {
+  digest: string;
+  prefixDigest: string;
+  admittedBytes: number;
+}
+
+interface FullSourceRecord {
+  entryId: string;
+  parentId: string | null;
+  sourceKind: string;
+  spans: Array<{ role: EvidenceRole; text: string }>;
+}
+
+function scanFullSourceLines(
+  path: string,
+  metadata: SourceMetadata,
+  visit: (line: FullSourceLine) => void,
+): FullSourceScan {
+  const buffer = Buffer.alloc(1024 * 1024);
+  const captureHash = createHash("sha256");
+  const prefixHash = createHash("sha256");
+  let admittedHash = prefixHash.copy();
+  const fd = openVerifiedSource(path, metadata);
+  if (fd === null) throw new Error("Mooncite source changed identity before indexing.");
+  let fileOffset = 0;
+  let lineStart = 0;
+  let lineLength = 0;
+  let lineOversized = false;
+  let lineParts: Buffer[] = [];
+  try {
+    while (fileOffset < metadata.size) {
+      const count = readSync(fd, buffer, 0, Math.min(buffer.length, metadata.size - fileOffset), fileOffset);
+      if (count === 0) break;
+      const chunk = buffer.subarray(0, count);
+      captureHash.update(chunk);
+      let cursor = 0;
+      while (cursor < count) {
+        const newline = chunk.indexOf(0x0a, cursor);
+        const end = newline < 0 ? count : newline;
+        const segment = chunk.subarray(cursor, end);
+        prefixHash.update(segment);
+        lineLength += segment.length;
+        if (!lineOversized) {
+          if (lineLength <= MAX_LINE_BYTES) lineParts.push(Buffer.from(segment));
+          else {
+            lineOversized = true;
+            lineParts = [];
           }
         }
-        if (byte === 0x0a) line++;
-      }
-      if (capturing && activeChunkStart !== null) {
-        const segment = Buffer.from(chunk.subarray(activeChunkStart, count));
-        parts.push(segment);
-        objectBytes += segment.length;
-        if (objectBytes > MAX_CHATGPT_CONVERSATION_BYTES) throw new Error("Mooncite ChatGPT conversation exceeds the size limit.");
+        if (newline < 0) break;
+        prefixHash.update("\n");
+        admittedHash = prefixHash.copy();
+        const bytes = lineOversized ? null : lineParts.length === 1 ? lineParts[0]! : Buffer.concat(lineParts, lineLength);
+        visit({ bytes, start: lineStart, end: fileOffset + newline, oversized: lineOversized });
+        lineStart = fileOffset + newline + 1;
+        lineLength = 0;
+        lineOversized = false;
+        lineParts = [];
+        cursor = newline + 1;
       }
       fileOffset += count;
     }
   } finally {
     closeSync(fd);
   }
-  if (fileOffset !== metadata.size || capturing || root === null
-    || (root === "single" && !completedSingle) || (root === "array" && !rootClosed)) {
-    throw new Error("Mooncite ChatGPT export could not be captured completely.");
-  }
+  if (fileOffset !== metadata.size) throw new Error("Mooncite source could not be captured completely.");
   return {
-    digest: digest.digest("hex"),
-    physicalLines: metadata.size === 0 ? 0 : lastByte === 0x0a ? line - 1 : line,
+    digest: captureHash.digest("hex"),
+    prefixDigest: admittedHash.digest("hex"),
+    admittedBytes: lineStart,
   };
+}
+
+function parseFullSourceLine(bytes: Buffer, physicalLine: number): Record<string, unknown> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8")) as unknown;
+  } catch {
+    if (physicalLine === 1) throw new Error("Mooncite session header is malformed.");
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (physicalLine === 1) throw new Error("Mooncite session header is malformed.");
+    return null;
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function parseCodexFullSourceHeader(
+  location: SourceLocation,
+  entry: Record<string, unknown>,
+  physicalLine: number,
+): { sessionId: string; project: string } {
+  const payload = entry.payload;
+  if (physicalLine !== 1 || entry.type !== "session_meta" || !payload || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new Error("Mooncite Codex session header is unsupported.");
+  }
+  const metadata = payload as Record<string, unknown>;
+  const identifier = isBoundedIdentifier(metadata.id)
+    ? metadata.id
+    : isBoundedIdentifier(metadata.session_id) ? metadata.session_id : null;
+  if (identifier === null) throw new Error("Mooncite Codex session identity is invalid.");
+  return {
+    sessionId: identifier,
+    project: projectIdentity(typeof metadata.cwd === "string" ? metadata.cwd : location.relativePath),
+  };
+}
+
+function parseFullSourceHeader(
+  location: SourceLocation,
+  entry: Record<string, unknown>,
+  physicalLine: number,
+): "preamble" | { sessionId: string; project: string } {
+  const ompTitlePreamble = location.origin === "omp"
+    && physicalLine === 1
+    && entry.type === "title"
+    && entry.v === 1
+    && typeof entry.title === "string";
+  if (ompTitlePreamble) return "preamble";
+  if (location.origin === "codex") return parseCodexFullSourceHeader(location, entry, physicalLine);
+  if (entry.type !== "session" || entry.version !== 3 || !isBoundedIdentifier(entry.id)) {
+    throw new Error("Mooncite session header is unsupported.");
+  }
+  if (location.origin === "pi" && physicalLine !== 1) throw new Error("Mooncite Pi session header must be the first record.");
+  if (location.origin === "omp" && physicalLine > 2) throw new Error("Mooncite OMP session header must follow only its optional title preamble.");
+  const projectSource = typeof entry.cwd === "string" ? entry.cwd : location.relativePath.split("/")[0] ?? "unknown";
+  return { sessionId: entry.id, project: projectIdentity(projectSource) };
+}
+
+function fullSourceProject(location: SourceLocation, entry: Record<string, unknown>, current: string): string {
+  if (location.origin === "claude-code" && typeof entry.cwd === "string" && entry.cwd.trim()) {
+    return projectIdentity(entry.cwd);
+  }
+  return current;
+}
+
+function extractFullSourceRecord(
+  location: SourceLocation,
+  entry: Record<string, unknown>,
+  physicalLine: number,
+  bytes: Buffer,
+  leafEntryId: string | null,
+): FullSourceRecord | "malformed" | null {
+  let entryId: string | null;
+  let parentId: string | null | undefined;
+  let sourceKind: string | null;
+  let spans: Array<{ role: EvidenceRole; text: string }>;
+  if (location.origin === "claude-code") {
+    entryId = recordIdentity(location.origin, entry, physicalLine, bytes);
+    if (entryId === null) return entry.type === "user" || entry.type === "assistant" ? "malformed" : null;
+    parentId = entry.parentUuid === null || entry.parentUuid === undefined
+      ? null
+      : isBoundedIdentifier(entry.parentUuid) ? entry.parentUuid : undefined;
+    sourceKind = isBoundedIdentifier(entry.type, MAX_SOURCE_KIND_BYTES) ? entry.type : null;
+    spans = readableClaudeSpans(entry);
+  } else if (location.origin === "codex") {
+    spans = readableCodexSpans(entry);
+    if (spans.length === 0) return null;
+    entryId = recordIdentity(location.origin, entry, physicalLine, bytes);
+    parentId = leafEntryId;
+    const payload = entry.payload as Record<string, unknown>;
+    sourceKind = isBoundedIdentifier(payload.type, MAX_SOURCE_KIND_BYTES) ? payload.type : null;
+  } else {
+    entryId = recordIdentity(location.origin, entry, physicalLine, bytes);
+    parentId = entry.parentId === null || entry.parentId === undefined
+      ? null
+      : isBoundedIdentifier(entry.parentId) ? entry.parentId : undefined;
+    sourceKind = isBoundedIdentifier(entry.type, MAX_SOURCE_KIND_BYTES) ? entry.type : null;
+    spans = readableSpans(entry);
+  }
+  if (entryId === null || sourceKind === null || parentId === undefined) return "malformed";
+  return { entryId, parentId, sourceKind, spans };
 }
 
 function recordIdentity(origin: SourceOrigin, entry: Record<string, unknown>, physicalLine: number, bytes: Buffer): string | null {
@@ -1469,6 +1829,61 @@ function coherentAppend(path: string, root: string, start: number): { bytes: Buf
   };
 }
 
+type AppendPhysicalLine = { bytes: Buffer; start: number; end: number };
+type JsonObject = Record<string, unknown>;
+
+function appendPhysicalLines(bytes: Buffer, admittedBytes: number): AppendPhysicalLine[] | "requires_full" {
+  const lines: AppendPhysicalLine[] = [];
+  let start = 0;
+  for (let index = 0; index < bytes.length; index++) {
+    if (bytes[index] !== 0x0a) continue;
+    if (lines.length >= MAX_APPEND_LINES) return "requires_full";
+    lines.push({
+      bytes: bytes.subarray(start, index),
+      start: admittedBytes + start,
+      end: admittedBytes + index,
+    });
+    start = index + 1;
+  }
+  return lines;
+}
+
+function parseJsonObject(bytes: Buffer): JsonObject | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bytes.toString("utf8")) as unknown;
+  } catch {
+    return null;
+  }
+  return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    ? parsed as JsonObject
+    : null;
+}
+
+function finalizeAppendEvidence(
+  evidence: IndexedEvidence[],
+  linearAppend: boolean,
+  latestCompactionLine: number | null,
+  requiresRelabel: boolean,
+  storedGeneration: string,
+): string {
+  for (const item of evidence) {
+    item.branchState = linearAppend ? "current" : "off_branch";
+    item.compactionState = item.sourceKind === "compaction" || item.sourceKind === "branch_summary"
+      ? "summary"
+      : latestCompactionLine === null
+        ? "none"
+        : item.line < latestCompactionLine
+          ? "pre_compaction"
+          : "kept_after_compaction";
+  }
+  return requiresRelabel
+    ? storedGeneration
+    : evidence.length === 0
+      ? storedGeneration
+      : sha256(`append-generation-v1:${storedGeneration}:${evidenceGeneration(evidence)}`);
+}
+
 function parseAppend(
   location: SourceLocation,
   stored: StoredSourceRow,
@@ -1476,18 +1891,8 @@ function parseAppend(
 ): SourceSnapshot | "requires_full" | null {
   const captured = coherentAppend(location.path, location.root, stored.admitted_bytes);
   if (!captured) return null;
-  const lines: Array<{ bytes: Buffer; start: number; end: number }> = [];
-  let start = 0;
-  for (let index = 0; index < captured.bytes.length; index++) {
-    if (captured.bytes[index] !== 0x0a) continue;
-    if (lines.length >= MAX_APPEND_LINES) return "requires_full";
-    lines.push({
-      bytes: captured.bytes.subarray(start, index),
-      start: stored.admitted_bytes + start,
-      end: stored.admitted_bytes + index,
-    });
-    start = index + 1;
-  }
+  const lines = appendPhysicalLines(captured.bytes, stored.admitted_bytes);
+  if (lines === "requires_full") return lines;
   const entries: SourceRecord[] = [];
   const evidence: IndexedEvidence[] = [];
   let records = stored.records;
@@ -1514,22 +1919,13 @@ function parseAppend(
       oversized++;
       continue;
     }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(physical.bytes.toString("utf8")) as unknown;
-    } catch {
+    const entry = parseJsonObject(physical.bytes);
+    if (!entry) {
       skipped++;
       malformed++;
       errors++;
       continue;
     }
-    if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-      skipped++;
-      malformed++;
-      errors++;
-      continue;
-    }
-    const entry = parsed as Record<string, unknown>;
     records++;
     const parentId = entry.parentId === null || entry.parentId === undefined
       ? null
@@ -1582,21 +1978,13 @@ function parseAppend(
 
   const compactionChanged = latestCompactionLine !== stored.latest_compaction_line;
   const requiresRelabel = !linearAppend || compactionChanged;
-  for (const item of evidence) {
-    item.branchState = linearAppend ? "current" : "off_branch";
-    item.compactionState = item.sourceKind === "compaction" || item.sourceKind === "branch_summary"
-      ? "summary"
-      : latestCompactionLine === null
-        ? "none"
-        : item.line < latestCompactionLine
-          ? "pre_compaction"
-          : "kept_after_compaction";
-  }
-  const sourceGeneration = requiresRelabel
-    ? stored.source_generation
-    : evidence.length === 0
-      ? stored.source_generation
-      : sha256(`append-generation-v1:${stored.source_generation}:${evidenceGeneration(evidence)}`);
+  const sourceGeneration = finalizeAppendEvidence(
+    evidence,
+    linearAppend,
+    latestCompactionLine,
+    requiresRelabel,
+    stored.source_generation,
+  );
 
   return {
     sourceOrigin: location.origin,
@@ -1706,6 +2094,112 @@ function isDatabaseBusy(error: unknown): boolean {
   return /database is locked|database is busy|SQLITE_BUSY/iu.test(message);
 }
 
+interface PersistedLastGoodState extends Omit<ScanResult, "evidence" | "malformed" | "oversized" | "trustState" | "coverage" | "errorGroups"> {
+  evidenceSpans: number;
+  malformed?: number;
+  oversized?: number;
+  lastRefreshOutcome?: RefreshOutcome;
+  lastRebuildOutcome?: RefreshOutcome;
+  trustState?: TrustState;
+  coverage?: CoverageState;
+  errorGroups?: unknown;
+}
+
+function assertEngineConfiguration(options: EngineOptions): void {
+  if (options.optionalSources && options.optionalSourcesProvider) {
+    throw new Error("Mooncite optional sources must use either a fixed list or a provider.");
+  }
+  if (process.platform !== "linux" || !existsSync("/proc/self/fd")) {
+    throw new Error("Mooncite requires Linux procfs for race-safe source containment.");
+  }
+}
+
+function assertStatePathHasNoSymlink(stateDir: string): void {
+  if (hasSymlinkComponent(stateDir)) throw new Error("Mooncite state path contains a symbolic-link component.");
+}
+
+function initializeStateDirectory(stateDir: string, databasePath: string): OwnedDirectoryIdentity {
+  if (existsSync(stateDir)) {
+    const state = lstatSync(stateDir);
+    if (state.isSymbolicLink() || !state.isDirectory()) throw new Error("Mooncite state path is not an owned regular directory.");
+  }
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
+  const stateIdentity = assertOwnedStateDirectory(stateDir);
+  const stateMarkerPath = join(stateDir, MOONCITE_STATE_MARKER_NAME);
+  if (!existsSync(stateMarkerPath)) {
+    if (readdirSync(stateDir).length !== 0) {
+      assertLegacyMoonciteStateDirectory(stateDir, databasePath);
+    }
+    try {
+      writeFileSync(stateMarkerPath, MOONCITE_STATE_MARKER_CONTENT, { encoding: "utf8", flag: "wx", mode: 0o600 });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    }
+  }
+  assertStateMarker(stateMarkerPath);
+  return stateIdentity;
+}
+
+function acquireEngineLock(stateDir: string, engineLockPath: string): void {
+  if (existsSync(join(stateDir, ".purge.lock"))) throw new Error("Mooncite state purge is in progress.");
+  cleanupStaleEngineLocks(stateDir);
+  writeFileSync(engineLockPath, `${process.pid}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  if (existsSync(join(stateDir, ".purge.lock"))) throw new Error("Mooncite state purge is in progress.");
+}
+
+function ensureDatabaseFile(databasePath: string): void {
+  if (!existsSync(databasePath)) {
+    const databaseFd = openSync(databasePath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600);
+    closeSync(databaseFd);
+  }
+  if (existsSync(databasePath)) {
+    assertOwnedStateFile(databasePath);
+    chmodSync(databasePath, 0o600);
+  }
+}
+
+function openRecoverableDatabase(
+  stateDir: string,
+  databasePath: string,
+  stateIdentity: OwnedDirectoryIdentity,
+): DatabaseSync {
+  try {
+    assertOwnedStateDirectory(stateDir, stateIdentity);
+    return openInitializedDatabase(databasePath);
+  } catch (error) {
+    assertOwnedStateDirectory(stateDir, stateIdentity);
+    if (!existsSync(databasePath) || !isRecoverableDatabaseCorruption(error)) throw error;
+    assertOwnedStateFile(databasePath);
+    const sidecars = ["-journal", "-shm", "-wal"].map((suffix) => `${databasePath}${suffix}`);
+    for (const sidecar of sidecars) {
+      if (existsSync(sidecar)) assertOwnedStateFile(sidecar);
+    }
+    rmSync(databasePath, { force: true });
+    for (const sidecar of sidecars) rmSync(sidecar, { force: true });
+    assertOwnedStateDirectory(stateDir, stateIdentity);
+    const replacementFd = openSync(databasePath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600);
+    closeSync(replacementFd);
+    return openInitializedDatabase(databasePath);
+  }
+}
+
+function migrateDatabaseDerivation(database: DatabaseSync): void {
+  const derivation = database.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value?: string } | undefined;
+  if (derivation?.value === DERIVATION_VERSION) return;
+  database.exec("BEGIN IMMEDIATE");
+  try {
+    const current = database.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value?: string } | undefined;
+    if (current?.value !== DERIVATION_VERSION) {
+      database.exec("DELETE FROM evidence; DELETE FROM source_records; DELETE FROM source_files; DELETE FROM metadata WHERE key = 'last_good';");
+      database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('derivation_version', ?)").run(DERIVATION_VERSION);
+    }
+    database.exec("COMMIT");
+  } catch (error) {
+    database.exec("ROLLBACK");
+    throw error;
+  }
+}
+
 export class MoonciteEngine {
   readonly #baseRoots: Array<{ origin: SourceOrigin; root: string; discovery?: "automatic" }>;
   readonly #optionalSourcesProvider: () => SourceRegistration[];
@@ -1727,12 +2221,7 @@ export class MoonciteEngine {
   #lastSuccessfulRefreshAt: string | null = null;
 
   constructor(options: EngineOptions) {
-    if (options.optionalSources && options.optionalSourcesProvider) {
-      throw new Error("Mooncite optional sources must use either a fixed list or a provider.");
-    }
-    if (process.platform !== "linux" || !existsSync("/proc/self/fd")) {
-      throw new Error("Mooncite requires Linux procfs for race-safe source containment.");
-    }
+    assertEngineConfiguration(options);
     this.#baseRoots = [
       { origin: "pi", root: resolve(options.sessionsRoot) },
       ...(options.ompSessionsRoot ? [{ origin: "omp" as const, root: resolve(options.ompSessionsRoot) }] : []),
@@ -1740,129 +2229,73 @@ export class MoonciteEngine {
     const fixedOptionalSources = [...(options.optionalSources ?? [])];
     this.#optionalSourcesProvider = options.optionalSourcesProvider ?? (() => fixedOptionalSources);
     this.#stateDir = resolve(options.stateDir);
-    if (hasSymlinkComponent(this.#stateDir)) throw new Error("Mooncite state path contains a symbolic-link component.");
+    assertStatePathHasNoSymlink(this.#stateDir);
     this.#configuredRoots();
-    if (existsSync(this.#stateDir)) {
-      const state = lstatSync(this.#stateDir);
-      if (state.isSymbolicLink() || !state.isDirectory()) throw new Error("Mooncite state path is not an owned regular directory.");
-    }
-    mkdirSync(this.#stateDir, { recursive: true, mode: 0o700 });
-    const stateIdentity = assertOwnedStateDirectory(this.#stateDir);
     this.#databasePath = join(this.#stateDir, "index.sqlite");
-    const stateMarkerPath = join(this.#stateDir, MOONCITE_STATE_MARKER_NAME);
-    if (!existsSync(stateMarkerPath)) {
-      if (readdirSync(this.#stateDir).length !== 0) {
-        assertLegacyMoonciteStateDirectory(this.#stateDir, this.#databasePath);
-      }
-      try {
-        writeFileSync(stateMarkerPath, MOONCITE_STATE_MARKER_CONTENT, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      }
-    }
-    assertStateMarker(stateMarkerPath);
+    const stateIdentity = initializeStateDirectory(this.#stateDir, this.#databasePath);
     const engineLockPath = join(this.#stateDir, `.engine-${process.pid}-${randomUUID()}.lock`);
     let database: DatabaseSync | null = null;
     try {
-      if (existsSync(join(this.#stateDir, ".purge.lock"))) throw new Error("Mooncite state purge is in progress.");
-      cleanupStaleEngineLocks(this.#stateDir);
-      writeFileSync(engineLockPath, `${process.pid}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-      if (existsSync(join(this.#stateDir, ".purge.lock"))) throw new Error("Mooncite state purge is in progress.");
+      acquireEngineLock(this.#stateDir, engineLockPath);
       this.#engineLockPath = engineLockPath;
-    if (!existsSync(this.#databasePath)) {
-      const databaseFd = openSync(this.#databasePath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600);
-      closeSync(databaseFd);
-    }
-    if (existsSync(this.#databasePath)) {
+      ensureDatabaseFile(this.#databasePath);
+      database = openRecoverableDatabase(this.#stateDir, this.#databasePath, stateIdentity);
+      assertOwnedStateDirectory(this.#stateDir, stateIdentity);
       assertOwnedStateFile(this.#databasePath);
+      if (database === null) throw new Error("Mooncite index initialization failed.");
+      this.#db = database;
       chmodSync(this.#databasePath, 0o600);
-    }
-    try {
-      assertOwnedStateDirectory(this.#stateDir, stateIdentity);
-      database = openInitializedDatabase(this.#databasePath);
-    } catch (error) {
-      assertOwnedStateDirectory(this.#stateDir, stateIdentity);
-      if (!existsSync(this.#databasePath) || !isRecoverableDatabaseCorruption(error)) throw error;
-      assertOwnedStateFile(this.#databasePath);
-      const sidecars = ["-journal", "-shm", "-wal"].map((suffix) => `${this.#databasePath}${suffix}`);
-      for (const sidecar of sidecars) {
-        if (existsSync(sidecar)) assertOwnedStateFile(sidecar);
-      }
-      rmSync(this.#databasePath, { force: true });
-      for (const sidecar of sidecars) rmSync(sidecar, { force: true });
-      assertOwnedStateDirectory(this.#stateDir, stateIdentity);
-      const replacementFd = openSync(this.#databasePath, constants.O_CREAT | constants.O_EXCL | constants.O_RDWR, 0o600);
-      closeSync(replacementFd);
-      database = openInitializedDatabase(this.#databasePath);
-    }
-    assertOwnedStateDirectory(this.#stateDir, stateIdentity);
-    assertOwnedStateFile(this.#databasePath);
-    if (database === null) throw new Error("Mooncite index initialization failed.");
-    this.#db = database;
-    chmodSync(this.#databasePath, 0o600);
-    const derivation = this.#db.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value?: string } | undefined;
-    if (derivation?.value !== DERIVATION_VERSION) {
-      this.#db.exec("BEGIN IMMEDIATE");
-      try {
-        const current = this.#db.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value?: string } | undefined;
-        if (current?.value !== DERIVATION_VERSION) {
-          this.#db.exec("DELETE FROM evidence; DELETE FROM source_records; DELETE FROM source_files; DELETE FROM metadata WHERE key = 'last_good';");
-          this.#db.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('derivation_version', ?)").run(DERIVATION_VERSION);
-        }
-        this.#db.exec("COMMIT");
-      } catch (error) {
-        this.#db.exec("ROLLBACK");
-        throw error;
-      }
-    }
-    const stored = this.#db.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get() as { value?: string } | undefined;
-    if (stored?.value) {
-      try {
-        const state = JSON.parse(stored.value) as Omit<ScanResult, "evidence" | "malformed" | "oversized" | "trustState" | "errorGroups"> & {
-          evidenceSpans: number;
-          malformed?: number;
-          oversized?: number;
-          lastRefreshOutcome?: RefreshOutcome;
-          lastRebuildOutcome?: RefreshOutcome;
-          trustState?: TrustState;
-          coverage?: CoverageState;
-          errorGroups?: unknown;
-        };
-        this.#last = {
-          evidence: [],
-          sourceFiles: state.sourceFiles,
-          records: state.records,
-          eligibleRecords: state.eligibleRecords ?? state.records,
-          skipped: state.skipped,
-          malformed: state.malformed ?? 0,
-          oversized: state.oversized ?? 0,
-          errors: state.errors,
-          fatalErrors: state.fatalErrors,
-          generation: state.generation,
-          trustState: state.trustState ?? "full_verified",
-          coverage: state.coverage ?? "complete",
-          retainedLastGood: state.retainedLastGood,
-          errorGroups: persistedErrorGroups(state.errorGroups, state.errors, state.fatalErrors),
-        };
-        this.#lastEvidenceCount = state.evidenceSpans;
-        this.#lastRefreshOutcome = state.lastRefreshOutcome ?? "not_run";
-        this.#lastRebuildOutcome = state.lastRebuildOutcome ?? "not_run";
-      } catch {
-        // A malformed derived metadata row is rebuildable and carries no authority.
-      }
-    }
-    const storedRebuild = this.#db.prepare("SELECT value FROM metadata WHERE key = 'last_rebuild_outcome'").get() as { value?: string } | undefined;
-    if (storedRebuild?.value && ["not_run", "published", "unchanged", "retained_last_good", "unavailable"].includes(storedRebuild.value)) {
-      this.#lastRebuildOutcome = storedRebuild.value as RefreshOutcome;
-    }
-    const storedRefreshAt = this.#db.prepare("SELECT value FROM metadata WHERE key = 'last_successful_refresh_at'").get() as { value?: string } | undefined;
-    if (storedRefreshAt?.value && Number.isFinite(Date.parse(storedRefreshAt.value))) {
-      this.#lastSuccessfulRefreshAt = storedRefreshAt.value;
-    }
+      migrateDatabaseDerivation(this.#db);
+      this.#restoreLastGoodState();
+      this.#restoreLastRebuildOutcome();
+      this.#restoreLastSuccessfulRefreshAt();
     } catch (error) {
       try { database?.close(); } catch { /* Preserve the constructor failure. */ }
       rmSync(engineLockPath, { force: true });
       throw error;
+    }
+  }
+
+  #restoreLastGoodState(): void {
+    const stored = this.#db.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get() as { value?: string } | undefined;
+    if (!stored?.value) return;
+    try {
+      const state = JSON.parse(stored.value) as PersistedLastGoodState;
+      this.#last = {
+        evidence: [],
+        sourceFiles: state.sourceFiles,
+        records: state.records,
+        eligibleRecords: state.eligibleRecords ?? state.records,
+        skipped: state.skipped,
+        malformed: state.malformed ?? 0,
+        oversized: state.oversized ?? 0,
+        errors: state.errors,
+        fatalErrors: state.fatalErrors,
+        generation: state.generation,
+        trustState: state.trustState ?? "full_verified",
+        coverage: state.coverage ?? "complete",
+        retainedLastGood: state.retainedLastGood,
+        errorGroups: persistedErrorGroups(state.errorGroups, state.errors, state.fatalErrors),
+      };
+      this.#lastEvidenceCount = state.evidenceSpans;
+      this.#lastRefreshOutcome = state.lastRefreshOutcome ?? "not_run";
+      this.#lastRebuildOutcome = state.lastRebuildOutcome ?? "not_run";
+    } catch {
+      // A malformed derived metadata row is rebuildable and carries no authority.
+    }
+  }
+
+  #restoreLastRebuildOutcome(): void {
+    const stored = this.#db.prepare("SELECT value FROM metadata WHERE key = 'last_rebuild_outcome'").get() as { value?: string } | undefined;
+    if (stored?.value && ["not_run", "published", "unchanged", "retained_last_good", "unavailable"].includes(stored.value)) {
+      this.#lastRebuildOutcome = stored.value as RefreshOutcome;
+    }
+  }
+
+  #restoreLastSuccessfulRefreshAt(): void {
+    const stored = this.#db.prepare("SELECT value FROM metadata WHERE key = 'last_successful_refresh_at'").get() as { value?: string } | undefined;
+    if (stored?.value && Number.isFinite(Date.parse(stored.value))) {
+      this.#lastSuccessfulRefreshAt = stored.value;
     }
   }
   #resetIngestionBudget(): void {
@@ -2112,6 +2545,25 @@ export class MoonciteEngine {
       );
     }
   }
+  #chatGptNodes(entries: Array<[string, unknown]>): Map<string, ChatGptNode> {
+    const nodes = new Map<string, ChatGptNode>();
+    for (const [nodeId, rawNode] of entries) {
+      this.#consumeIngestionRecord();
+      if (!isBoundedIdentifier(nodeId) || !rawNode || typeof rawNode !== "object" || Array.isArray(rawNode)) continue;
+      const node = rawNode as Record<string, unknown>;
+      const message = node.message;
+      if (!message || typeof message !== "object" || Array.isArray(message)) continue;
+      const messageId = isBoundedIdentifier((message as Record<string, unknown>).id)
+        ? String((message as Record<string, unknown>).id)
+        : null;
+      const parentNodeId = node.parent === null || node.parent === undefined
+        ? null
+        : isBoundedIdentifier(node.parent) ? node.parent : null;
+      if (messageId === null) continue;
+      nodes.set(nodeId, { nodeId, parentNodeId, messageId, message: message as Record<string, unknown> });
+    }
+    return nodes;
+  }
 
   #indexFullChatGptSource(location: SourceLocation): SourceSnapshot {
     const { path, sourcePath } = location;
@@ -2137,23 +2589,7 @@ export class MoonciteEngine {
 
     const scanned = scanChatGptConversations(path, metadata, (conversation) => {
       this.#consumeIngestionWork();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(conversation.bytes.toString("utf8")) as unknown;
-      } catch {
-        throw new Error("Mooncite ChatGPT conversation is invalid JSON.");
-      }
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-        throw new Error("Mooncite ChatGPT export contains an invalid conversation.");
-      }
-      const document = parsed as Record<string, unknown>;
-      const sessionId = isBoundedIdentifier(document.conversation_id)
-        ? document.conversation_id
-        : isBoundedIdentifier(document.id) ? document.id : null;
-      const mapping = document.mapping;
-      if (sessionId === null || !mapping || typeof mapping !== "object" || Array.isArray(mapping)) {
-        throw new Error("Mooncite ChatGPT conversation identity or message graph is invalid.");
-      }
+      const { document, sessionId, mapping } = parseChatGptConversation(conversation.bytes);
       conversationCount++;
       this.#consumeIngestionRecord();
       records++;
@@ -2162,71 +2598,12 @@ export class MoonciteEngine {
       const project = projectIdentity(title);
       firstProject ??= project;
 
-      interface ChatGptNode {
-        nodeId: string;
-        parentNodeId: string | null;
-        messageId: string;
-        message: Record<string, unknown>;
-      }
-      const nodes = new Map<string, ChatGptNode>();
-      for (const [nodeId, rawNode] of Object.entries(mapping as Record<string, unknown>)) {
-        this.#consumeIngestionRecord();
-        records++;
-        if (!isBoundedIdentifier(nodeId) || !rawNode || typeof rawNode !== "object" || Array.isArray(rawNode)) continue;
-        const node = rawNode as Record<string, unknown>;
-        const message = node.message;
-        if (!message || typeof message !== "object" || Array.isArray(message)) continue;
-        const messageId = isBoundedIdentifier((message as Record<string, unknown>).id)
-          ? String((message as Record<string, unknown>).id)
-          : null;
-        const parentNodeId = node.parent === null || node.parent === undefined
-          ? null
-          : isBoundedIdentifier(node.parent) ? node.parent : null;
-        if (messageId === null) continue;
-        const value: ChatGptNode = { nodeId, parentNodeId, messageId, message: message as Record<string, unknown> };
-        nodes.set(nodeId, value);
-      }
-      const currentNode = isBoundedIdentifier(document.current_node)
-        ? document.current_node
-        : isBoundedIdentifier(document.currentNode) ? document.currentNode : null;
-      const currentBranch = new Set<string>();
-      if (currentNode !== null) {
-        let cursor: string | null = currentNode;
-        while (cursor !== null && !currentBranch.has(cursor)) {
-          currentBranch.add(cursor);
-          const raw: unknown = (mapping as Record<string, unknown>)[cursor];
-          cursor = raw && typeof raw === "object" && !Array.isArray(raw) && isBoundedIdentifier((raw as Record<string, unknown>).parent)
-            ? String((raw as Record<string, unknown>).parent)
-            : null;
-        }
-      }
+      const mappingEntries = Object.entries(mapping);
+      const nodes = this.#chatGptNodes(mappingEntries);
+      records += mappingEntries.length;
+      const currentNode = currentChatGptNode(document);
+      const currentBranch = currentChatGptBranch(mapping, currentNode);
       const nearestMessageAncestor = new Map<string, string | null>();
-      const parentMessageId = (node: ChatGptNode): string | null => {
-        const path: string[] = [];
-        const visited = new Set<string>();
-        let cursor = node.parentNodeId;
-        let result: string | null = null;
-        while (cursor !== null && !visited.has(cursor)) {
-          const cached = nearestMessageAncestor.get(cursor);
-          if (cached !== undefined || nearestMessageAncestor.has(cursor)) {
-            result = cached ?? null;
-            break;
-          }
-          visited.add(cursor);
-          path.push(cursor);
-          const parent = nodes.get(cursor);
-          if (parent) {
-            result = parent.messageId;
-            break;
-          }
-          const raw: unknown = (mapping as Record<string, unknown>)[cursor];
-          cursor = raw && typeof raw === "object" && !Array.isArray(raw) && isBoundedIdentifier((raw as Record<string, unknown>).parent)
-            ? String((raw as Record<string, unknown>).parent)
-            : null;
-        }
-        for (const traversed of path) nearestMessageAncestor.set(traversed, result);
-        return result;
-      };
 
       const conversationDigest = sha256(conversation.bytes);
       for (const node of nodes.values()) {
@@ -2243,7 +2620,7 @@ export class MoonciteEngine {
           ? (content as Record<string, unknown>).content_type
           : null;
         const sourceKind = isBoundedIdentifier(contentType, MAX_SOURCE_KIND_BYTES) ? contentType : "message";
-        const parentId = parentMessageId(node);
+        const parentId = chatGptParentMessageId(node, nodes, mapping, nearestMessageAncestor);
         const branchState = currentNode === null || currentBranch.has(node.nodeId) ? "current" : "off_branch";
         const spans = readableChatGptSpans(message);
         const timestamp = eventTimestamp("chatgpt", message);
@@ -2334,17 +2711,6 @@ export class MoonciteEngine {
     if (!metadata) throw new Error("Mooncite source is not a regular file.");
     this.#consumeIngestion(metadata.size, 0, 0);
     const captureSize = metadata.size;
-    const captureHash = createHash("sha256");
-    const prefixHash = createHash("sha256");
-    let admittedHash = prefixHash.copy();
-    const buffer = Buffer.alloc(1024 * 1024);
-    const fd = openVerifiedSource(path, metadata);
-    if (fd === null) throw new Error("Mooncite source changed identity before indexing.");
-    let fileOffset = 0;
-    let lineStart = 0;
-    let lineLength = 0;
-    let lineOversized = false;
-    let lineParts: Buffer[] = [];
     let physicalLines = 0;
     let records = 0;
     let eligibleRecords = 0;
@@ -2369,123 +2735,46 @@ export class MoonciteEngine {
     const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const findEvidence = this.#db.prepare("SELECT 1 AS found FROM evidence WHERE evidence_id = ?");
 
-    const processLine = (end: number): void => {
+    const processLine = (line: FullSourceLine): void => {
       this.#consumeIngestionWork();
       physicalLines++;
       const physicalLine = physicalLines;
-      if (lineOversized) {
+      if (line.oversized) {
         if (physicalLine === 1) throw new Error("Mooncite session header exceeds the line limit.");
         skipped++;
         oversized++;
         return;
       }
-      const bytes = lineParts.length === 1 ? lineParts[0]! : Buffer.concat(lineParts, lineLength);
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(bytes.toString("utf8")) as unknown;
-      } catch {
-        if (physicalLine === 1) throw new Error("Mooncite session header is malformed.");
+      const bytes = line.bytes!;
+      const entry = parseFullSourceLine(bytes, physicalLine);
+      if (entry === null) {
         skipped++;
         malformed++;
         errors++;
         return;
       }
-      if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-        if (physicalLine === 1) throw new Error("Mooncite session header is malformed.");
-        skipped++;
-        malformed++;
-        errors++;
-        return;
-      }
-      const entry = parsed as Record<string, unknown>;
       if (sessionId === null) {
-        const ompTitlePreamble = location.origin === "omp"
-          && physicalLine === 1
-          && entry.type === "title"
-          && entry.v === 1
-          && typeof entry.title === "string";
-        if (ompTitlePreamble) {
-          this.#consumeIngestionRecord();
-          records++;
-          return;
-        }
-        if (location.origin === "codex") {
-          const payload = entry.payload;
-          if (physicalLine !== 1
-            || entry.type !== "session_meta"
-            || !payload
-            || typeof payload !== "object"
-            || Array.isArray(payload)) {
-            throw new Error("Mooncite Codex session header is unsupported.");
-          }
-          const metadata = payload as Record<string, unknown>;
-          const identifier = isBoundedIdentifier(metadata.id)
-            ? metadata.id
-            : isBoundedIdentifier(metadata.session_id) ? metadata.session_id : null;
-          if (identifier === null) throw new Error("Mooncite Codex session identity is invalid.");
-          sessionId = identifier;
-          project = projectIdentity(typeof metadata.cwd === "string" ? metadata.cwd : location.relativePath);
-          this.#consumeIngestionRecord();
-          records++;
-          eligibleRecords++;
-          return;
-        }
-        if (entry.type !== "session" || entry.version !== 3 || !isBoundedIdentifier(entry.id)) {
-          throw new Error("Mooncite session header is unsupported.");
-        }
-        if (location.origin === "pi" && physicalLine !== 1) throw new Error("Mooncite Pi session header must be the first record.");
-        if (location.origin === "omp" && physicalLine > 2) throw new Error("Mooncite OMP session header must follow only its optional title preamble.");
-        sessionId = entry.id;
-        const projectSource = typeof entry.cwd === "string" ? entry.cwd : location.relativePath.split("/")[0] ?? "unknown";
-        project = projectIdentity(projectSource);
+        const header = parseFullSourceHeader(location, entry, physicalLine);
         this.#consumeIngestionRecord();
         records++;
+        if (header === "preamble") return;
+        sessionId = header.sessionId;
+        project = header.project;
         eligibleRecords++;
         return;
       }
       records++;
       this.#consumeIngestionRecord();
-      let entryId: string | null;
-      let parentId: string | null | undefined;
-      let sourceKind: string | null;
-      let spans: Array<{ role: EvidenceRole; text: string }>;
-      if (location.origin === "claude-code") {
-        if (typeof entry.cwd === "string" && entry.cwd.trim()) project = projectIdentity(entry.cwd);
-        entryId = recordIdentity(location.origin, entry, physicalLine, bytes);
-        if (entryId === null) {
-          if (entry.type === "user" || entry.type === "assistant") {
-            skipped++;
-            malformed++;
-            errors++;
-          }
-          return;
-        }
-        parentId = entry.parentUuid === null || entry.parentUuid === undefined
-          ? null
-          : isBoundedIdentifier(entry.parentUuid) ? entry.parentUuid : undefined;
-        sourceKind = isBoundedIdentifier(entry.type, MAX_SOURCE_KIND_BYTES) ? entry.type : null;
-        spans = readableClaudeSpans(entry);
-      } else if (location.origin === "codex") {
-        spans = readableCodexSpans(entry);
-        if (spans.length === 0) return;
-        entryId = recordIdentity(location.origin, entry, physicalLine, bytes);
-        parentId = leafEntryId;
-        const payload = entry.payload as Record<string, unknown>;
-        sourceKind = isBoundedIdentifier(payload.type, MAX_SOURCE_KIND_BYTES) ? payload.type : null;
-      } else {
-        entryId = recordIdentity(location.origin, entry, physicalLine, bytes);
-        parentId = entry.parentId === null || entry.parentId === undefined
-          ? null
-          : isBoundedIdentifier(entry.parentId) ? entry.parentId : undefined;
-        sourceKind = isBoundedIdentifier(entry.type, MAX_SOURCE_KIND_BYTES) ? entry.type : null;
-        spans = readableSpans(entry);
-      }
-      if (entryId === null || sourceKind === null || parentId === undefined) {
+      project = fullSourceProject(location, entry, project!);
+      const extracted = extractFullSourceRecord(location, entry, physicalLine, bytes, leafEntryId);
+      if (extracted === null) return;
+      if (extracted === "malformed") {
         skipped++;
         malformed++;
         errors++;
         return;
       }
+      const { entryId, parentId, sourceKind, spans } = extracted;
       if (seenEntryIds.has(entryId)) {
         skipped++;
         errors++;
@@ -2497,6 +2786,7 @@ export class MoonciteEngine {
       leafEntryId = entryId;
       if (sourceKind === "compaction") latestCompactionLine = physicalLine;
       const timestamp = eventTimestamp(location.origin, entry);
+      const recordDigest = sha256(bytes);
       for (let ordinal = 0; ordinal < spans.length; ordinal++) {
         const span = spans[ordinal]!;
         const identifier = evidenceId(location.origin, sourceNamespace, sessionId, entryId, ordinal);
@@ -2507,7 +2797,7 @@ export class MoonciteEngine {
           identifier,
           evidenceUri(location.origin, sourceNamespace, sessionId, entryId, ordinal),
           span.text,
-          project!,
+          project,
           sessionId,
           entryId,
           span.role,
@@ -2516,9 +2806,9 @@ export class MoonciteEngine {
           timestamp,
           sourcePath,
           physicalLine,
-          lineStart,
-          end,
-          sha256(bytes),
+          line.start,
+          line.end,
+          recordDigest,
           "pending",
           parentId,
           "off_branch",
@@ -2529,48 +2819,13 @@ export class MoonciteEngine {
       }
     };
 
-    try {
-      while (fileOffset < captureSize) {
-        const count = readSync(fd, buffer, 0, Math.min(buffer.length, captureSize - fileOffset), fileOffset);
-        if (count === 0) break;
-        const chunk = buffer.subarray(0, count);
-        captureHash.update(chunk);
-        let cursor = 0;
-        while (cursor < count) {
-          const newline = chunk.indexOf(0x0a, cursor);
-          const end = newline < 0 ? count : newline;
-          const segment = chunk.subarray(cursor, end);
-          prefixHash.update(segment);
-          lineLength += segment.length;
-          if (!lineOversized) {
-            if (lineLength <= MAX_LINE_BYTES) lineParts.push(Buffer.from(segment));
-            else {
-              lineOversized = true;
-              lineParts = [];
-            }
-          }
-          if (newline < 0) break;
-          prefixHash.update("\n");
-          admittedHash = prefixHash.copy();
-          processLine(fileOffset + newline);
-          lineStart = fileOffset + newline + 1;
-          lineLength = 0;
-          lineOversized = false;
-          lineParts = [];
-          cursor = newline + 1;
-        }
-        fileOffset += count;
-      }
-    } finally {
-      closeSync(fd);
-    }
-    if (fileOffset !== captureSize || physicalLines === 0 || sessionId === null || project === null) throw new Error("Mooncite source could not be captured completely.");
-    const firstDigest = captureHash.digest("hex");
+    const scan = scanFullSourceLines(path, metadata, processLine);
+    if (physicalLines === 0 || sessionId === null || project === null) throw new Error("Mooncite source could not be captured completely.");
     const after = sourceMetadata(path, location.root);
     if (!after || after.dev !== metadata.dev || after.ino !== metadata.ino || after.size < captureSize) throw new Error("Mooncite source changed identity while indexing.");
     const changed = after.size !== metadata.size || after.mtimeNs !== metadata.mtimeNs || after.ctimeNs !== metadata.ctimeNs;
-    if (changed && hashFilePrefix(path, captureSize, after) !== firstDigest) throw new Error("Mooncite source prefix changed while indexing.");
-    const prefixDigest = admittedHash.digest("hex");
+    if (changed && hashFilePrefix(path, captureSize, after) !== scan.digest) throw new Error("Mooncite source prefix changed while indexing.");
+    const prefixDigest = scan.prefixDigest;
     this.#db.prepare("UPDATE evidence SET prefix_digest = ? WHERE source_path = ?").run(prefixDigest, sourcePath);
     return {
       sourceOrigin: location.origin,
@@ -2581,7 +2836,7 @@ export class MoonciteEngine {
       dev: metadata.dev,
       ino: metadata.ino,
       observedSize: captureSize,
-      admittedBytes: lineStart,
+      admittedBytes: scan.admittedBytes,
       mtimeNs: metadata.mtimeNs,
       ctimeNs: metadata.ctimeNs,
       physicalLines,
@@ -2658,15 +2913,10 @@ export class MoonciteEngine {
     return digest.digest("hex");
   }
 
-  #publishChanges(
-    appendPlans: Array<{ stored: StoredSourceRow; source: SourceSnapshot }>,
-    newSources: SourceLocation[],
-    replacementPlans: Array<{ stored: StoredSourceRow; location: SourceLocation }>,
-    removedPaths: string[],
-    operation: "refresh" | "rebuild",
-  ): ScanResult {
+  #beginPublishChangesTransaction(operation: "refresh" | "rebuild"): ScanResult | null {
     try {
       this.#db.exec("BEGIN IMMEDIATE");
+      return null;
     } catch (error) {
       if (isDatabaseBusy(error) && this.#last.generation !== "empty") {
         this.#last = { ...this.#last, retainedLastGood: true };
@@ -2675,46 +2925,89 @@ export class MoonciteEngine {
       }
       throw error;
     }
+  }
+
+  #publishChangesStoredSourceMatches(stored: StoredSourceRow): boolean {
+    const current = this.#db.prepare("SELECT * FROM source_files WHERE source_path = ?")
+      .get(stored.source_path) as unknown as StoredSourceRow | undefined;
+    return current !== undefined
+      && current.admitted_bytes === stored.admitted_bytes
+      && current.observed_size === stored.observed_size
+      && current.dev === stored.dev
+      && current.ino === stored.ino;
+  }
+
+  #finishPublishChangesUnchanged(operation: "refresh" | "rebuild"): ScanResult {
+    this.#db.exec("ROLLBACK");
+    const state = this.#stateFromSourceFiles();
+    this.#last = state;
+    this.#lastEvidenceCount = this.#storedSources().reduce((sum, source) => sum + source.evidence_spans, 0);
+    this.#setOperationOutcome(operation, "unchanged");
+    return state;
+  }
+
+  #deletePublishChangesSources(sourcePaths: Iterable<string>): void {
+    for (const sourcePath of sourcePaths) {
+      this.#db.prepare("DELETE FROM evidence WHERE source_path = ?").run(sourcePath);
+      this.#db.prepare("DELETE FROM source_records WHERE source_path = ?").run(sourcePath);
+      this.#db.prepare("DELETE FROM source_files WHERE source_path = ?").run(sourcePath);
+    }
+  }
+
+  #updatePublishChangesGeneration(source: SourceSnapshot): void {
+    source.sourceGeneration = this.#sourceGenerationFromDatabase(source.sourcePath);
+    this.#db.prepare("UPDATE source_files SET source_generation = ? WHERE source_path = ?")
+      .run(source.sourceGeneration, source.sourcePath);
+  }
+
+  #writePublishChangesFullSources(locations: SourceLocation[]): void {
+    for (const location of locations) {
+      const existing = this.#db.prepare("SELECT 1 AS found FROM source_files WHERE source_path = ?")
+        .get(location.sourcePath) as { found?: number } | undefined;
+      if (existing?.found) throw new Error(`Mooncite source appeared concurrently: ${location.sourcePath}`);
+      const source = this.#indexFullSource(location);
+      this.#writeSource(source);
+      if (source.requiresRelabel) {
+        this.#relabelSource(source.sourcePath, source.leafEntryId, source.latestCompactionLine);
+      }
+      this.#updatePublishChangesGeneration(source);
+    }
+  }
+
+  #writePublishChangesAppends(appendPlans: Array<{ stored: StoredSourceRow; source: SourceSnapshot }>): void {
+    const insertRecord = this.#db.prepare("INSERT INTO source_records(source_path, entry_id, parent_id, line, source_kind) VALUES (?, ?, ?, ?, ?)");
+    for (const plan of appendPlans) {
+      for (const entry of plan.source.entries) {
+        insertRecord.run(plan.source.sourcePath, entry.entryId, entry.parentId, entry.line, entry.sourceKind);
+      }
+      this.#insertEvidence(plan.source.evidence);
+      this.#writeSource(plan.source);
+      if (plan.source.requiresRelabel) {
+        this.#relabelSource(plan.source.sourcePath, plan.source.leafEntryId, plan.source.latestCompactionLine);
+        this.#updatePublishChangesGeneration(plan.source);
+      }
+    }
+  }
+
+  #publishChanges(
+    appendPlans: Array<{ stored: StoredSourceRow; source: SourceSnapshot }>,
+    newSources: SourceLocation[],
+    replacementPlans: Array<{ stored: StoredSourceRow; location: SourceLocation }>,
+    removedPaths: string[],
+    operation: "refresh" | "rebuild",
+  ): ScanResult {
+    const retained = this.#beginPublishChangesTransaction(operation);
+    if (retained) return retained;
     try {
       for (const plan of [...appendPlans, ...replacementPlans.map(({ stored }) => ({ stored }))]) {
-        const current = this.#db.prepare("SELECT * FROM source_files WHERE source_path = ?").get(plan.stored.source_path) as unknown as StoredSourceRow | undefined;
-        if (!current || current.admitted_bytes !== plan.stored.admitted_bytes || current.observed_size !== plan.stored.observed_size || current.dev !== plan.stored.dev || current.ino !== plan.stored.ino) {
-          this.#db.exec("ROLLBACK");
-          const state = this.#stateFromSourceFiles();
-          this.#last = state;
-          this.#lastEvidenceCount = this.#storedSources().reduce((sum, source) => sum + source.evidence_spans, 0);
-          this.#setOperationOutcome(operation, "unchanged");
-          return state;
+        if (!this.#publishChangesStoredSourceMatches(plan.stored)) {
+          return this.#finishPublishChangesUnchanged(operation);
         }
       }
       const pathsToDelete = new Set([...removedPaths, ...replacementPlans.map(({ stored }) => stored.source_path)]);
-      for (const sourcePath of pathsToDelete) {
-        this.#db.prepare("DELETE FROM evidence WHERE source_path = ?").run(sourcePath);
-        this.#db.prepare("DELETE FROM source_records WHERE source_path = ?").run(sourcePath);
-        this.#db.prepare("DELETE FROM source_files WHERE source_path = ?").run(sourcePath);
-      }
-      const insertRecord = this.#db.prepare("INSERT INTO source_records(source_path, entry_id, parent_id, line, source_kind) VALUES (?, ?, ?, ?, ?)");
-      for (const location of [...newSources, ...replacementPlans.map(({ location }) => location)]) {
-        const existing = this.#db.prepare("SELECT 1 AS found FROM source_files WHERE source_path = ?").get(location.sourcePath) as { found?: number } | undefined;
-        if (existing?.found) throw new Error(`Mooncite source appeared concurrently: ${location.sourcePath}`);
-        const source = this.#indexFullSource(location);
-        this.#writeSource(source);
-        if (source.requiresRelabel) this.#relabelSource(source.sourcePath, source.leafEntryId, source.latestCompactionLine);
-        source.sourceGeneration = this.#sourceGenerationFromDatabase(source.sourcePath);
-        this.#db.prepare("UPDATE source_files SET source_generation = ? WHERE source_path = ?").run(source.sourceGeneration, source.sourcePath);
-      }
-      for (const plan of appendPlans) {
-        for (const entry of plan.source.entries) {
-          insertRecord.run(plan.source.sourcePath, entry.entryId, entry.parentId, entry.line, entry.sourceKind);
-        }
-        this.#insertEvidence(plan.source.evidence);
-        this.#writeSource(plan.source);
-        if (plan.source.requiresRelabel) {
-          this.#relabelSource(plan.source.sourcePath, plan.source.leafEntryId, plan.source.latestCompactionLine);
-          plan.source.sourceGeneration = this.#sourceGenerationFromDatabase(plan.source.sourcePath);
-          this.#db.prepare("UPDATE source_files SET source_generation = ? WHERE source_path = ?").run(plan.source.sourceGeneration, plan.source.sourcePath);
-        }
-      }
+      this.#deletePublishChangesSources(pathsToDelete);
+      this.#writePublishChangesFullSources([...newSources, ...replacementPlans.map(({ location }) => location)]);
+      this.#writePublishChangesAppends(appendPlans);
       const state = this.#stateFromSourceFiles();
       const admitted = appendPlans.some((plan) => plan.source.admittedBytes > plan.stored.admitted_bytes);
       const changed = admitted || newSources.length > 0 || replacementPlans.length > 0 || removedPaths.length > 0;
@@ -2801,6 +3094,109 @@ export class MoonciteEngine {
       return [sourceError("unknown", "source_read_or_parse_failure")];
     }
   }
+  #matchesIndexedAppendBoundary(location: SourceLocation, stored: StoredSourceRow): boolean {
+    const boundary = this.#db.prepare("SELECT byte_start, byte_end, record_digest FROM evidence WHERE source_path = ? AND byte_end <= ? ORDER BY byte_end DESC LIMIT 1").get(
+      stored.source_path,
+      stored.admitted_bytes,
+    ) as { byte_start: number; byte_end: number; record_digest: string } | undefined;
+    if (!boundary
+      || boundary.byte_start < 0
+      || boundary.byte_end < boundary.byte_start
+      || boundary.byte_end - boundary.byte_start > MAX_LINE_BYTES) return false;
+    const bytes = readRangesCoherently(location.path, location.root, [{
+      start: boundary.byte_start,
+      end: boundary.byte_end,
+    }])?.[0];
+    return bytes !== undefined && sha256(bytes) === boundary.record_digest;
+  }
+
+  #classifyPerformRefreshLocation(
+    location: SourceLocation,
+    previous: StoredSourceRow | undefined,
+  ):
+    | { kind: "new" | "unchanged" | "full" }
+    | { kind: "append" | "replacement"; plan: { location: SourceLocation; stored: StoredSourceRow } }
+    | { kind: "failure"; failures: MoonciteStatusErrorGroup[] } {
+    if (!previous) return { kind: "new" };
+    const metadata = sourceMetadata(location.path, location.root);
+    if (!metadata) {
+      return { kind: "failure", failures: [sourceError(location.origin, "source_metadata_failure")] };
+    }
+    const exact = metadata.dev === previous.dev
+      && metadata.ino === previous.ino
+      && metadata.size === previous.observed_size
+      && metadata.mtimeNs === previous.mtime_ns
+      && metadata.ctimeNs === previous.ctime_ns;
+    if (exact) return { kind: "unchanged" };
+    const plan = { location, stored: previous };
+    if (location.origin !== "pi" && location.origin !== "omp") {
+      return { kind: "replacement", plan };
+    }
+    const monotonicAppend = metadata.dev === previous.dev
+      && metadata.ino === previous.ino
+      && metadata.size > previous.observed_size;
+    if (!monotonicAppend) {
+      if (location.origin === "omp") return { kind: "replacement", plan };
+      return { kind: "failure", failures: [sourceError(location.origin, "source_changed_during_refresh")] };
+    }
+    if (location.origin === "omp" && !this.#matchesIndexedAppendBoundary(location, previous)) {
+      return { kind: "replacement", plan };
+    }
+    if (metadata.size - previous.admitted_bytes > MAX_APPEND_CAPTURE_BYTES) return { kind: "full" };
+    return { kind: "append", plan };
+  }
+
+  #performRefreshHasNoChanges(
+    appendPlans: Array<{ location: SourceLocation; stored: StoredSourceRow }>,
+    replacementPlans: Array<{ location: SourceLocation; stored: StoredSourceRow }>,
+    newSources: SourceLocation[],
+    removedPaths: string[],
+  ): boolean {
+    return appendPlans.length === 0
+      && replacementPlans.length === 0
+      && newSources.length === 0
+      && removedPaths.length === 0;
+  }
+
+  #finishPerformRefreshUnchanged(
+    operation: "refresh" | "rebuild",
+    stored: StoredSourceRow[],
+  ): ScanResult {
+    const state = this.#stateFromSourceFiles();
+    this.#last = state;
+    this.#lastEvidenceCount = stored.reduce((sum, source) => sum + source.evidence_spans, 0);
+    this.#setOperationOutcome(operation, "unchanged");
+    return state;
+  }
+
+  #parsePerformRefreshAppends(
+    appendPlans: Array<{ location: SourceLocation; stored: StoredSourceRow }>,
+  ):
+    | { kind: "publish"; parsedPlans: Array<{ stored: StoredSourceRow; source: SourceSnapshot }> }
+    | { kind: "full" }
+    | { kind: "failure"; failures: MoonciteStatusErrorGroup[] } {
+    const parsedPlans: Array<{ stored: StoredSourceRow; source: SourceSnapshot }> = [];
+    for (const plan of appendPlans) {
+      const ids = new Set((this.#db.prepare("SELECT entry_id FROM source_records WHERE source_path = ?")
+        .all(plan.stored.source_path) as Array<{ entry_id: string }>).map((row) => row.entry_id));
+      const source = parseAppend(plan.location, plan.stored, ids);
+      if (source === "requires_full") return { kind: "full" };
+      if (!source) {
+        return { kind: "failure", failures: [sourceError(plan.location.origin, "source_read_or_parse_failure")] };
+      }
+      if (!this.#tryConsumeAppendBatch(
+        source.admittedBytes - plan.stored.admitted_bytes,
+        source.records - plan.stored.records,
+        source.evidence.length,
+      )) {
+        this.#resetIngestionBudget();
+        return { kind: "full" };
+      }
+      parsedPlans.push({ stored: plan.stored, source });
+    }
+    return { kind: "publish", parsedPlans };
+  }
+
   #performRefresh(operation: "refresh" | "rebuild", force: boolean): ScanResult {
     this.#resetIngestionBudget();
     const pruningErrors = this.#pruneDeauthorizedSources(operation);
@@ -2818,58 +3214,31 @@ export class MoonciteEngine {
     const replacementPlans: Array<{ location: SourceLocation; stored: StoredSourceRow }> = [];
     const newSources: SourceLocation[] = [];
     for (const location of scan.locations) {
-      const previous = byPath.get(location.sourcePath);
-      if (!previous) {
-        newSources.push(location);
-        continue;
+      const decision = this.#classifyPerformRefreshLocation(location, byPath.get(location.sourcePath));
+      switch (decision.kind) {
+        case "new":
+          newSources.push(location);
+          break;
+        case "append":
+          appendPlans.push(decision.plan);
+          break;
+        case "replacement":
+          replacementPlans.push(decision.plan);
+          break;
+        case "failure":
+          return this.#retainForSourceFailure(operation, decision.failures);
+        case "full":
+          return this.#performFullRefresh(operation);
       }
-      const metadata = sourceMetadata(location.path, location.root);
-      if (!metadata) return this.#retainForSourceFailure(
-        operation,
-        [sourceError(location.origin, "source_metadata_failure")],
-      );
-      const exact = metadata.dev === previous.dev && metadata.ino === previous.ino && metadata.size === previous.observed_size && metadata.mtimeNs === previous.mtime_ns && metadata.ctimeNs === previous.ctime_ns;
-      if (exact) continue;
-      if (location.origin !== "pi") {
-        replacementPlans.push({ location, stored: previous });
-        continue;
-      }
-      const monotonicAppend = metadata.dev === previous.dev && metadata.ino === previous.ino && metadata.size > previous.observed_size;
-      if (!monotonicAppend) return this.#retainForSourceFailure(
-        operation,
-        [sourceError(location.origin, "source_changed_during_refresh")],
-      );
-      if (metadata.size - previous.admitted_bytes > MAX_APPEND_CAPTURE_BYTES) return this.#performFullRefresh(operation);
-      appendPlans.push({ location, stored: previous });
     }
-    if (appendPlans.length === 0 && replacementPlans.length === 0 && newSources.length === 0 && removedPaths.length === 0) {
-      const state = this.#stateFromSourceFiles();
-      this.#last = state;
-      this.#lastEvidenceCount = stored.reduce((sum, source) => sum + source.evidence_spans, 0);
-      this.#setOperationOutcome(operation, "unchanged");
-      return state;
+    if (this.#performRefreshHasNoChanges(appendPlans, replacementPlans, newSources, removedPaths)) {
+      return this.#finishPerformRefreshUnchanged(operation, stored);
     }
-    const parsedPlans: Array<{ stored: StoredSourceRow; source: SourceSnapshot }> = [];
-    for (const plan of appendPlans) {
-      const ids = new Set((this.#db.prepare("SELECT entry_id FROM source_records WHERE source_path = ?").all(plan.stored.source_path) as Array<{ entry_id: string }>).map((row) => row.entry_id));
-      const source = parseAppend(plan.location, plan.stored, ids);
-      if (source === "requires_full") return this.#performFullRefresh(operation);
-      if (!source) return this.#retainForSourceFailure(
-        operation,
-        [sourceError(plan.location.origin, "source_read_or_parse_failure")],
-      );
-      if (!this.#tryConsumeAppendBatch(
-        source.admittedBytes - plan.stored.admitted_bytes,
-        source.records - plan.stored.records,
-        source.evidence.length,
-      )) {
-        this.#resetIngestionBudget();
-        return this.#performFullRefresh(operation);
-      }
-      parsedPlans.push({ stored: plan.stored, source });
-    }
+    const parsed = this.#parsePerformRefreshAppends(appendPlans);
+    if (parsed.kind === "full") return this.#performFullRefresh(operation);
+    if (parsed.kind === "failure") return this.#retainForSourceFailure(operation, parsed.failures);
     const replacedPaths = new Set(replacementPlans.map(({ stored: source }) => source.source_path));
-    const filteredParsedPlans = parsedPlans.filter(({ stored: source }) => !replacedPaths.has(source.source_path));
+    const filteredParsedPlans = parsed.parsedPlans.filter(({ stored: source }) => !replacedPaths.has(source.source_path));
     return this.#publishChanges(filteredParsedPlans, newSources, replacementPlans, removedPaths, operation);
   }
 
@@ -2966,32 +3335,79 @@ export class MoonciteEngine {
     return this.#memoryStatus(state);
   }
 
+  #compareRecallPhysicalRows(
+    a: Record<string, string | number | null>,
+    b: Record<string, string | number | null>,
+  ): number {
+    return String(a.source_origin).localeCompare(String(b.source_origin))
+      || String(a.source_path).localeCompare(String(b.source_path))
+      || Number(a.line) - Number(b.line)
+      || Number(a.byte_start) - Number(b.byte_start)
+      || String(a.evidence_id).localeCompare(String(b.evidence_id));
+  }
+
   recall(input: RecallInput): EvidenceBundle {
     return this.#recall(input, true);
   }
 
-  #recall(input: RecallInput, refreshOnMiss: boolean): EvidenceBundle {
-    const state = this.#stateForInteractiveRead();
+  #recallQuery(input: RecallInput): RecallQuery {
     const query = input.query.trim();
-    const parsedQuery = parsedQueryText(query);
-    const terms = queryTerms(parsedQuery.text);
-    const exactText = parsedQuery.text;
-    const limit = Math.min(20, Math.max(1, input.limit ?? 5));
-    const order = input.order ?? "relevance";
-    const after = input.after === undefined ? null : normalizeIsoTimestamp(input.after);
-    const before = input.before === undefined ? null : normalizeIsoTimestamp(input.before);
-    const invalidScope = (message: string): EvidenceBundle => ({
+    const parsed = parsedQueryText(query);
+    return {
+      query,
+      parsed,
+      terms: queryTerms(parsed.text),
+      exactText: parsed.text,
+      limit: Math.min(20, Math.max(1, input.limit ?? 5)),
+      order: input.order ?? "relevance",
+      after: input.after === undefined ? null : normalizeIsoTimestamp(input.after),
+      before: input.before === undefined ? null : normalizeIsoTimestamp(input.before),
+    };
+  }
+
+  #recallQueryError(input: RecallInput, recallQuery: RecallQuery): string | null {
+    if (recallQuery.order !== "relevance" && recallQuery.order !== "newest" && recallQuery.order !== "oldest") {
+      return "The recall order must be relevance, newest, or oldest.";
+    }
+    if (input.after !== undefined && recallQuery.after === null) {
+      return "The inclusive after timestamp must be an ISO 8601 timestamp with an explicit UTC offset.";
+    }
+    if (input.before !== undefined && recallQuery.before === null) {
+      return "The inclusive before timestamp must be an ISO 8601 timestamp with an explicit UTC offset.";
+    }
+    if (recallQuery.after !== null && recallQuery.before !== null && recallQuery.after > recallQuery.before) {
+      return "The inclusive after timestamp must not be later than before.";
+    }
+    if (input.role !== undefined && parseEvidenceRole(input.role) !== input.role) {
+      return "The role filter is not an indexed evidence role.";
+    }
+    if (input.sourceOrigin !== undefined && !SOURCE_ORIGINS.includes(input.sourceOrigin)) {
+      return "The source origin filter is invalid.";
+    }
+    if (input.project && !/^project:[A-Za-z0-9._%~-]{1,160}-[a-f0-9]{16}$/u.test(input.project)) {
+      return "The project scope is malformed. Copy the exact encoded project value from a recall candidate.";
+    }
+    return null;
+  }
+
+  #invalidRecallScope(
+    input: RecallInput,
+    state: ScanResult,
+    recallQuery: RecallQuery,
+    message: string,
+  ): EvidenceBundle {
+    return {
       outcome: "invalid_scope",
       conclusive: false,
       meaning: message,
       next: {
         action: "call",
         target: "mooncite_recall",
-        arguments: { query, limit },
+        arguments: { query: recallQuery.query, limit: recallQuery.limit },
         reason: "Retry with valid filters, or copy an exact project or source-qualified session value from a candidate.",
       },
-      query,
-      lexicalTerms: terms,
+      query: recallQuery.query,
+      lexicalTerms: recallQuery.terms,
       scope: { project: input.project ?? null, sessionId: input.sessionId ?? null, evidenceSpans: 0 },
       generation: state.generation,
       trustState: state.trustState,
@@ -2999,52 +3415,37 @@ export class MoonciteEngine {
       candidates: [],
       echoesSuppressed: 0,
       warnings: [message],
-    });
-    if (order !== "relevance" && order !== "newest" && order !== "oldest") {
-      return invalidScope("The recall order must be relevance, newest, or oldest.");
-    }
-    if (input.after !== undefined && after === null) {
-      return invalidScope("The inclusive after timestamp must be an ISO 8601 timestamp with an explicit UTC offset.");
-    }
-    if (input.before !== undefined && before === null) {
-      return invalidScope("The inclusive before timestamp must be an ISO 8601 timestamp with an explicit UTC offset.");
-    }
-    if (after !== null && before !== null && after > before) {
-      return invalidScope("The inclusive after timestamp must not be later than before.");
-    }
-    if (input.role !== undefined && parseEvidenceRole(input.role) !== input.role) {
-      return invalidScope("The role filter is not an indexed evidence role.");
-    }
-    if (input.sourceOrigin !== undefined && !SOURCE_ORIGINS.includes(input.sourceOrigin)) {
-      return invalidScope("The source origin filter is invalid.");
-    }
-    if (input.project && !/^project:[A-Za-z0-9._%~-]{1,160}-[a-f0-9]{16}$/u.test(input.project)) {
-      return invalidScope("The project scope is malformed. Copy the exact encoded project value from a recall candidate.");
-    }
-    let authorizedRoots: Array<{ origin: SourceOrigin; rootDigest: string }>;
-    try {
-      authorizedRoots = this.#configuredRoots().map((source) => ({
-        origin: source.origin,
-        rootDigest: sourceAuthorizationDigest(source.root, source.discovery),
-      }));
-    } catch {
-      return {
-        outcome: "unavailable",
-        conclusive: false,
-        meaning: "Source authorization could not be read, so Mooncite did not search the retained index.",
-        next: { action: "call", target: "mooncite_status", reason: "Check source and index health before retrying." },
-        query,
-        lexicalTerms: terms,
-        scope: { project: input.project ?? null, sessionId: input.sessionId ?? null, evidenceSpans: 0 },
-        generation: state.generation,
-        trustState: state.trustState,
-        coverage: "partial",
-        candidates: [],
-        echoesSuppressed: 0,
-        warnings: ["Source authorization is unavailable."],
-      };
-    }
-    const authorizedRootKeys = new Set(authorizedRoots.map(({ origin, rootDigest }) => `${origin}\0${rootDigest}`));
+    };
+  }
+
+  #unavailableRecallAuthorization(input: RecallInput, state: ScanResult, recallQuery: RecallQuery): EvidenceBundle {
+    return {
+      outcome: "unavailable",
+      conclusive: false,
+      meaning: "Source authorization could not be read, so Mooncite did not search the retained index.",
+      next: { action: "call", target: "mooncite_status", reason: "Check source and index health before retrying." },
+      query: recallQuery.query,
+      lexicalTerms: recallQuery.terms,
+      scope: { project: input.project ?? null, sessionId: input.sessionId ?? null, evidenceSpans: 0 },
+      generation: state.generation,
+      trustState: state.trustState,
+      coverage: "partial",
+      candidates: [],
+      echoesSuppressed: 0,
+      warnings: ["Source authorization is unavailable."],
+    };
+  }
+
+  #resolveRecallSessionScope(
+    input: RecallInput,
+    refreshOnMiss: boolean,
+    state: ScanResult,
+    recallQuery: RecallQuery,
+    authorizedRootKeys: Set<string>,
+  ): EvidenceBundle | {
+    sessionScope: { origin: SourceOrigin; rootDigest: string; sessionId: string } | null;
+    renderedSessionScope: string | null;
+  } {
     let sessionScope = input.sessionId ? parseQualifiedSessionId(input.sessionId) : null;
     let renderedSessionScope = input.sessionId ?? null;
     if (input.sessionId && !sessionScope) {
@@ -3060,17 +3461,28 @@ export class MoonciteEngine {
         return this.#recall(input, false);
       }
       if (matchingSources.length !== 1) {
-        return invalidScope(matchingSources.length === 0
+        const message = matchingSources.length === 0
           ? "The session scope is not a source-qualified Mooncite session and no unique authorized session has that bare ID."
-          : "The bare session scope is ambiguous across authorized sources. Copy the exact source-qualified sessionId from a candidate.");
+          : "The bare session scope is ambiguous across authorized sources. Copy the exact source-qualified sessionId from a candidate.";
+        return this.#invalidRecallScope(input, state, recallQuery, message);
       }
       const source = matchingSources[0]!;
       sessionScope = { origin: source.source_origin, rootDigest: source.source_root_digest, sessionId: source.session_id };
       renderedSessionScope = qualifiedSessionId(sessionScope.origin, sessionScope.rootDigest, sessionScope.sessionId);
     }
     if (sessionScope && !authorizedRootKeys.has(`${sessionScope.origin}\0${sessionScope.rootDigest}`)) {
-      return invalidScope("The source-qualified session scope is not authorized in this process.");
+      return this.#invalidRecallScope(input, state, recallQuery, "The source-qualified session scope is not authorized in this process.");
     }
+    return { sessionScope, renderedSessionScope };
+  }
+
+  #buildRecallScope(
+    input: RecallInput,
+    recallQuery: RecallQuery,
+    authorizedRoots: Array<{ origin: SourceOrigin; rootDigest: string }>,
+    sessionScope: { origin: SourceOrigin; rootDigest: string; sessionId: string } | null,
+    renderedSessionScope: string | null,
+  ): RecallScope {
     const authorizationSql = `EXISTS (
       SELECT 1 FROM source_files sf
       WHERE sf.source_path = e.source_path
@@ -3095,150 +3507,158 @@ export class MoonciteEngine {
       evidenceConditions.push("e.source_origin = ?");
       evidenceParams.push(input.sourceOrigin);
     }
-    if (after !== null) {
+    if (recallQuery.after !== null) {
       evidenceConditions.push("e.event_timestamp IS NOT NULL AND e.event_timestamp >= ?");
-      evidenceParams.push(after);
+      evidenceParams.push(recallQuery.after);
     }
-    if (before !== null) {
+    if (recallQuery.before !== null) {
       evidenceConditions.push("e.event_timestamp IS NOT NULL AND e.event_timestamp <= ?");
-      evidenceParams.push(before);
+      evidenceParams.push(recallQuery.before);
     }
     const evidenceSql = evidenceConditions.length > 0 ? ` AND ${evidenceConditions.join(" AND ")}` : "";
     const scopeSql = `SELECT COUNT(*) AS count FROM evidence e WHERE ${authorizationSql}${evidenceSql}`;
     const scopeParams = [...authorizationParams, ...evidenceParams];
-    const scopeCount = Number((this.#db.prepare(scopeSql).get(...scopeParams) as { count?: number } | undefined)?.count ?? 0);
-    const scope = { project: input.project ?? null, sessionId: renderedSessionScope, evidenceSpans: scopeCount };
+    const evidenceSpans = Number((this.#db.prepare(scopeSql).get(...scopeParams) as { count?: number } | undefined)?.count ?? 0);
     const hasFilters = input.project !== undefined
       || input.sessionId !== undefined
       || input.role !== undefined
       || input.sourceOrigin !== undefined
-      || after !== null
-      || before !== null;
-    const scopeWarnings = hasFilters && scopeCount === 0 ? ["Requested filters contain no indexed evidence."] : [];
-    if (!state.retainedLastGood && scopeCount === 0 && (state.fatalErrors > 0 || state.sourceFiles === 0)) {
-      const warning = state.errors > 0 ? `${state.errors} source error(s)` : "No usable registered session files";
-      return {
-        outcome: "unavailable",
-        conclusive: false,
-        meaning: "Mooncite has no usable evidence generation for this search.",
-        next: { action: "call", target: "mooncite_status", reason: "Check source and index health before retrying." },
-        query,
-        lexicalTerms: terms,
-        scope,
-        generation: state.generation,
-        trustState: state.trustState,
-        coverage: state.coverage,
-        candidates: [],
-        echoesSuppressed: 0,
-        warnings: [warning, ...scopeWarnings],
-      };
+      || recallQuery.after !== null
+      || recallQuery.before !== null;
+    return {
+      authorizationSql,
+      authorizationParams,
+      evidenceSql,
+      evidenceParams,
+      scope: { project: input.project ?? null, sessionId: renderedSessionScope, evidenceSpans },
+      warnings: hasFilters && evidenceSpans === 0 ? ["Requested filters contain no indexed evidence."] : [],
+    };
+  }
+
+  #queryRecallRows(recallQuery: RecallQuery, scope: RecallScope, authorizedRootKeys: Set<string>): Map<string, RecallRow> {
+    const directBranches = [
+      "SELECT rowid FROM evidence WHERE evidence_id = ?",
+      "SELECT rowid FROM evidence WHERE evidence_uri = ?",
+      "SELECT rowid FROM evidence WHERE entry_id = ?",
+    ];
+    const directLookupParams: Array<string | number> = [recallQuery.query, recallQuery.query, recallQuery.query];
+    if (/^project:[A-Za-z0-9._%~-]{1,160}-[a-f0-9]{16}$/u.test(recallQuery.query)) {
+      directBranches.push("SELECT rowid FROM evidence WHERE project = ?");
+      directLookupParams.push(recallQuery.query);
     }
-    const directConditions = ["e.evidence_id = ?", "e.evidence_uri = ?", "e.entry_id = ?"];
-    const directParams: Array<string | number> = [...authorizationParams, query, query, query];
-    if (/^project:[A-Za-z0-9._%~-]{1,160}-[a-f0-9]{16}$/u.test(query)) {
-      directConditions.push("e.project = ?");
-      directParams.push(query);
-    }
-    const querySession = parseQualifiedSessionId(query);
+    const querySession = parseQualifiedSessionId(recallQuery.query);
     if (querySession && authorizedRootKeys.has(`${querySession.origin}\0${querySession.rootDigest}`)) {
-      directConditions.push("e.source_origin = ? AND e.session_id = ? AND EXISTS (SELECT 1 FROM source_files direct_session_source WHERE direct_session_source.source_path = e.source_path AND direct_session_source.source_origin = ? AND direct_session_source.source_root_digest = ?)");
-      directParams.push(querySession.origin, querySession.sessionId, querySession.origin, querySession.rootDigest);
+      directBranches.push("SELECT e.rowid FROM evidence e WHERE e.source_origin = ? AND e.session_id = ? AND EXISTS (SELECT 1 FROM source_files direct_session_source WHERE direct_session_source.source_path = e.source_path AND direct_session_source.source_origin = ? AND direct_session_source.source_root_digest = ?)");
+      directLookupParams.push(querySession.origin, querySession.sessionId, querySession.origin, querySession.rootDigest);
     }
-    let directSql = `SELECT e.*, -1000000.0 AS score FROM evidence e WHERE ${authorizationSql} AND (${directConditions.join(" OR ")})${evidenceSql}`;
-    directParams.push(...evidenceParams);
     const physicalOrder = "e.source_origin, e.source_path, e.line, e.byte_start, e.evidence_id";
-    const temporalOrder = order === "newest"
+    const temporalOrder = recallQuery.order === "newest"
       ? `CASE WHEN e.event_timestamp IS NULL THEN 1 ELSE 0 END, e.event_timestamp DESC, ${physicalOrder}`
       : `CASE WHEN e.event_timestamp IS NULL THEN 1 ELSE 0 END, e.event_timestamp ASC, ${physicalOrder}`;
-    directSql += ` ORDER BY ${order === "relevance" ? "e.evidence_id" : temporalOrder} LIMIT ?`;
-    directParams.push(limit);
-    const directRows = this.#db.prepare(directSql).all(...directParams) as Array<Record<string, string | number | null>>;
+    let directSql = `WITH direct_rows(rowid) AS (${directBranches.join(" UNION ")})
+      SELECT e.*, -1000000.0 AS score
+      FROM direct_rows d
+      JOIN evidence e ON e.rowid = d.rowid
+      WHERE ${scope.authorizationSql}${scope.evidenceSql}`;
+    directSql += ` ORDER BY ${recallQuery.order === "relevance" ? "e.evidence_id" : temporalOrder} LIMIT ?`;
+    const directParams: Array<string | number> = [
+      ...directLookupParams,
+      ...scope.authorizationParams,
+      ...scope.evidenceParams,
+      recallQuery.limit,
+    ];
+    const directRows = this.#db.prepare(directSql).all(...directParams) as RecallRow[];
     const rowsById = new Map(directRows.map((row) => [String(row.evidence_id), row]));
-    if (terms.length) {
-      const match = parsedQuery.phrase
-        ? `"${exactText.replaceAll('"', '""')}"`
-        : terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
-      let sql = `SELECT e.*, evidence_fts.rank AS score FROM evidence_fts JOIN evidence e ON e.rowid=evidence_fts.rowid WHERE evidence_fts MATCH ? AND ${authorizationSql}${evidenceSql}`;
-      const params: Array<string | number> = [match, ...authorizationParams, ...evidenceParams];
-      sql += ` ORDER BY ${order === "relevance" ? "evidence_fts.rank, e.evidence_id" : temporalOrder} LIMIT ?`;
-      params.push(Math.min(MAX_RECALL_RANKING_ROWS, Math.max(40, limit * 10)));
-      const lexicalRows = this.#db.prepare(sql).all(...params) as Array<Record<string, string | number | null>>;
+    if (recallQuery.terms.length > 0) {
+      const match = recallQuery.parsed.phrase
+        ? `"${recallQuery.exactText.replaceAll('"', '""')}"`
+        : recallQuery.terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
+      let sql = `SELECT e.*, evidence_fts.rank AS score FROM evidence_fts CROSS JOIN evidence e ON e.rowid=evidence_fts.rowid WHERE evidence_fts MATCH ? AND ${scope.authorizationSql}${scope.evidenceSql}`;
+      const params: Array<string | number> = [match, ...scope.authorizationParams, ...scope.evidenceParams];
+      sql += ` ORDER BY ${recallQuery.order === "relevance" ? "evidence_fts.rank, e.evidence_id" : temporalOrder} LIMIT ?`;
+      params.push(Math.min(MAX_RECALL_RANKING_ROWS, Math.max(40, recallQuery.limit * 10)));
+      const lexicalRows = this.#db.prepare(sql).all(...params) as RecallRow[];
       for (const row of lexicalRows) if (!rowsById.has(String(row.evidence_id))) rowsById.set(String(row.evidence_id), row);
     }
-    const lowerQuery = exactText.toLowerCase();
-    const rankedWithEchoes = [...rowsById.values()].map((row) => {
-      const text = String(row.text);
-      const lower = text.toLowerCase();
-      const directCitation = String(row.evidence_id) === query || String(row.evidence_uri) === query;
-      const metadataExact = directCitation || [
-        row.project,
-        qualifiedSessionId(parseSourceOrigin(row.source_origin), sourceRootDigestFromSourcePath(parseSourceOrigin(row.source_origin), String(row.source_path)), String(row.session_id)),
-        row.entry_id,
-      ].some((value) => String(value) === query);
-      const matchedTerms = metadataExact ? [query] : terms.filter((term) =>
-        lower.includes(term) || lower.includes(term.replace(/(ing|ed|s)$/u, "")));
-      const termCoverage = metadataExact ? 1 : terms.length === 0 ? 0 : matchedTerms.length / terms.length;
-      const exact = metadataExact || (lowerQuery.length > 0 && lower.includes(lowerQuery));
-      const isEcho = isMoonciteRenderingText(text);
-      const band: RelevanceBand = exact || termCoverage >= 0.6 ? "strong" : termCoverage >= 0.25 ? "partial" : "weak";
-      const kind: MatchKind = metadataExact
-        ? "metadata_exact"
-        : exact && parsedQuery.phrase
-          ? "phrase_exact"
-          : exact
-            ? "text_exact"
-            : "terms";
-      return {
-        row,
-        matchedTerms,
-        missingTerms: metadataExact ? [] : terms.filter((term) => !matchedTerms.includes(term)),
-        termCoverage,
-        exact,
-        metadataExact,
-        directCitation,
-        isEcho,
-        band,
-        kind,
-      };
-    }).sort((a, b) => {
-      if (order !== "relevance") {
-        const timestampA = typeof a.row.event_timestamp === "string" ? a.row.event_timestamp : null;
-        const timestampB = typeof b.row.event_timestamp === "string" ? b.row.event_timestamp : null;
-        if (timestampA === null && timestampB !== null) return 1;
-        if (timestampA !== null && timestampB === null) return -1;
-        if (timestampA !== null && timestampB !== null) {
-          const timestampComparison = timestampA.localeCompare(timestampB);
-          if (timestampComparison !== 0) return order === "newest" ? -timestampComparison : timestampComparison;
-        }
-        return String(a.row.source_origin).localeCompare(String(b.row.source_origin))
-          || String(a.row.source_path).localeCompare(String(b.row.source_path))
-          || Number(a.row.line) - Number(b.row.line)
-          || Number(a.row.byte_start) - Number(b.row.byte_start)
-          || String(a.row.evidence_id).localeCompare(String(b.row.evidence_id));
+    return rowsById;
+  }
+
+  #rankRecallRow(row: RecallRow, recallQuery: RecallQuery): RankedRecallRow {
+    const text = String(row.text);
+    const lower = text.toLowerCase();
+    const lowerQuery = recallQuery.exactText.toLowerCase();
+    const directCitation = String(row.evidence_id) === recallQuery.query || String(row.evidence_uri) === recallQuery.query;
+    const metadataExact = directCitation || [
+      row.project,
+      qualifiedSessionId(parseSourceOrigin(row.source_origin), sourceRootDigestFromSourcePath(parseSourceOrigin(row.source_origin), String(row.source_path)), String(row.session_id)),
+      row.entry_id,
+    ].some((value) => String(value) === recallQuery.query);
+    const matchedTerms = metadataExact ? [recallQuery.query] : recallQuery.terms.filter((term) =>
+      lower.includes(term) || lower.includes(term.replace(/(ing|ed|s)$/u, "")));
+    const termCoverage = metadataExact ? 1 : recallQuery.terms.length === 0 ? 0 : matchedTerms.length / recallQuery.terms.length;
+    const exact = metadataExact || (lowerQuery.length > 0 && lower.includes(lowerQuery));
+    const isEcho = isMoonciteRenderingText(text);
+    const band: RelevanceBand = exact || termCoverage >= 0.6 ? "strong" : termCoverage >= 0.25 ? "partial" : "weak";
+    const kind: MatchKind = metadataExact
+      ? "metadata_exact"
+      : exact && recallQuery.parsed.phrase
+        ? "phrase_exact"
+        : exact
+          ? "text_exact"
+          : "terms";
+    return {
+      row,
+      matchedTerms,
+      missingTerms: metadataExact ? [] : recallQuery.terms.filter((term) => !matchedTerms.includes(term)),
+      termCoverage,
+      exact,
+      metadataExact,
+      directCitation,
+      isEcho,
+      band,
+      kind,
+    };
+  }
+
+  #compareRankedRecallRows(a: RankedRecallRow, b: RankedRecallRow, order: RecallOrder): number {
+    if (order !== "relevance") {
+      const timestampA = typeof a.row.event_timestamp === "string" ? a.row.event_timestamp : null;
+      const timestampB = typeof b.row.event_timestamp === "string" ? b.row.event_timestamp : null;
+      if (timestampA === null && timestampB !== null) return 1;
+      if (timestampA !== null && timestampB === null) return -1;
+      if (timestampA !== null && timestampB !== null) {
+        const timestampComparison = timestampA.localeCompare(timestampB);
+        if (timestampComparison !== 0) return order === "newest" ? -timestampComparison : timestampComparison;
       }
-      return Number(b.directCitation) - Number(a.directCitation)
-        || Number(b.metadataExact) - Number(a.metadataExact)
-        || Number(a.isEcho) - Number(b.isEcho)
-        || Number(b.exact) - Number(a.exact)
-        || b.termCoverage - a.termCoverage
-        || Number(a.row.score) - Number(b.row.score)
-        || String(a.row.source_origin).localeCompare(String(b.row.source_origin))
-        || String(a.row.source_path).localeCompare(String(b.row.source_path))
-        || Number(a.row.line) - Number(b.row.line)
-        || Number(a.row.byte_start) - Number(b.row.byte_start)
-        || String(a.row.evidence_id).localeCompare(String(b.row.evidence_id));
-    });
+      return this.#compareRecallPhysicalRows(a.row, b.row);
+    }
+    return Number(b.directCitation) - Number(a.directCitation)
+      || Number(b.metadataExact) - Number(a.metadataExact)
+      || Number(a.isEcho) - Number(b.isEcho)
+      || Number(b.exact) - Number(a.exact)
+      || b.termCoverage - a.termCoverage
+      || Number(a.row.score) - Number(b.row.score)
+      || this.#compareRecallPhysicalRows(a.row, b.row);
+  }
+
+  #recallCandidates(rowsById: Map<string, RecallRow>, recallQuery: RecallQuery): {
+    candidates: EvidenceCandidate[];
+    echoesSuppressed: number;
+  } {
+    const rankedWithEchoes = [...rowsById.values()]
+      .map((row) => this.#rankRecallRow(row, recallQuery))
+      .sort((a, b) => this.#compareRankedRecallRows(a, b, recallQuery.order));
     const echoesSuppressed = rankedWithEchoes.filter((candidate) => candidate.isEcho && !candidate.directCitation).length;
     const ranked = rankedWithEchoes.filter((candidate) => !candidate.isEcho || candidate.directCitation);
-    const duplicateBuckets = new Map<string, Map<string, typeof ranked[number] & { duplicateSpanCount: number }>>();
-    const diverse: Array<typeof ranked[number] & { duplicateSpanCount: number }> = [];
+    const duplicateBuckets = new Map<string, Map<string, RankedRecallRow & { duplicateSpanCount: number }>>();
+    const diverse: Array<RankedRecallRow & { duplicateSpanCount: number }> = [];
     for (const item of ranked) {
       if (item.metadataExact) {
         diverse.push({ ...item, duplicateSpanCount: 1 });
         continue;
       }
       const row = item.row;
-      const bucketKey = [row.source_origin, row.session_id, row.role, row.source_kind, row.branch_state, row.compaction_state].join("\u0000");
+      const bucketKey = [row.source_origin, row.session_id, row.role, row.source_kind, row.branch_state, row.compaction_state].join("\0");
       let excerpts = duplicateBuckets.get(bucketKey);
       if (!excerpts) {
         excerpts = new Map();
@@ -3254,48 +3674,52 @@ export class MoonciteEngine {
       excerpts.set(text, selected);
       diverse.push(selected);
     }
-    const candidates = diverse.slice(0, limit).map(({
-      row,
-      matchedTerms,
-      missingTerms,
-      termCoverage,
-      band,
-      kind,
+    const candidates = diverse.slice(0, recallQuery.limit)
+      .map((candidate) => this.#recallCandidate(candidate, recallQuery));
+    return { candidates, echoesSuppressed };
+  }
+
+  #recallCandidate(
+    candidate: RankedRecallRow & { duplicateSpanCount: number },
+    recallQuery: RecallQuery,
+  ): EvidenceCandidate {
+    const { row, matchedTerms, missingTerms, termCoverage, band, kind, isEcho, duplicateSpanCount } = candidate;
+    const excerpt = matchedExcerpt(String(row.text), recallQuery.exactText, matchedTerms, 1_024);
+    const sourceOrigin = parseSourceOrigin(row.source_origin);
+    return {
+      evidenceId: String(row.evidence_id),
+      evidenceUri: String(row.evidence_uri),
+      excerpt: excerpt.text,
+      omittedBytes: excerpt.omittedBytes,
+      project: String(row.project),
+      sessionId: qualifiedSessionId(sourceOrigin, sourceRootDigestFromSourcePath(sourceOrigin, String(row.source_path)), String(row.session_id)),
+      entryId: String(row.entry_id),
+      role: parseEvidenceRole(row.role),
+      sourceOrigin,
+      sourceKind: String(row.source_kind),
+      eventTimestamp: typeof row.event_timestamp === "string" ? normalizeIsoTimestamp(row.event_timestamp) : null,
+      recordProvenance: sourceOrigin === "chatgpt" ? "copy" : "original",
+      parentId: row.parent_id === null ? null : String(row.parent_id),
+      branchState: String(row.branch_state) === "current" ? "current" : "off_branch",
+      compactionState: parseCompactionState(row.compaction_state),
+      ...(duplicateSpanCount > 1 ? { duplicateSpanCount } : {}),
       isEcho,
-      duplicateSpanCount,
-    }): EvidenceCandidate => {
-      const excerpt = matchedExcerpt(String(row.text), exactText, matchedTerms, 1_024);
-      const sourceOrigin = parseSourceOrigin(row.source_origin);
-      return {
-        evidenceId: String(row.evidence_id),
-        evidenceUri: String(row.evidence_uri),
-        excerpt: excerpt.text,
-        omittedBytes: excerpt.omittedBytes,
-        project: String(row.project),
-        sessionId: qualifiedSessionId(sourceOrigin, sourceRootDigestFromSourcePath(sourceOrigin, String(row.source_path)), String(row.session_id)),
-        entryId: String(row.entry_id),
-        role: parseEvidenceRole(row.role),
-        sourceOrigin,
-        sourceKind: String(row.source_kind),
-        eventTimestamp: typeof row.event_timestamp === "string" ? normalizeIsoTimestamp(row.event_timestamp) : null,
-        recordProvenance: sourceOrigin === "chatgpt" ? "copy" : "original",
-        parentId: row.parent_id === null ? null : String(row.parent_id),
-        branchState: String(row.branch_state) === "current" ? "current" : "off_branch",
-        compactionState: parseCompactionState(row.compaction_state),
-        ...(duplicateSpanCount > 1 ? { duplicateSpanCount } : {}),
-        isEcho,
-        match: { kind, band, matchedTerms, missingTerms, termCoverage },
-      };
-    });
-    if (candidates.length === 0 && refreshOnMiss) {
-      this.refresh();
-      return this.#recall(input, false);
-    }
+      match: { kind, band, matchedTerms, missingTerms, termCoverage },
+    };
+  }
+
+  #recallResult(
+    state: ScanResult,
+    recallQuery: RecallQuery,
+    scope: RecallScope,
+    candidates: EvidenceCandidate[],
+    echoesSuppressed: number,
+  ): EvidenceBundle {
     const warnings = state.errors === 0
-      ? [...scopeWarnings]
+      ? [...scope.warnings]
       : [state.retainedLastGood
         ? `${state.errors} source error(s); last good generation retained`
-        : `${state.errors} source error(s)`, ...scopeWarnings];
+        : `${state.errors} source error(s)`, ...scope.warnings];
     if (echoesSuppressed > 0) warnings.push(`${echoesSuppressed} recursive Mooncite echo(es) suppressed.`);
     const incompleteMiss = candidates.length === 0
       && (state.coverage === "partial" || state.retainedLastGood || state.errors > 0);
@@ -3329,9 +3753,9 @@ export class MoonciteEngine {
       conclusive,
       meaning,
       next,
-      query,
-      lexicalTerms: terms,
-      scope,
+      query: recallQuery.query,
+      lexicalTerms: recallQuery.terms,
+      scope: scope.scope,
       generation: state.generation,
       trustState: state.trustState,
       coverage: state.coverage,
@@ -3341,6 +3765,57 @@ export class MoonciteEngine {
     };
   }
 
+  #recall(input: RecallInput, refreshOnMiss: boolean): EvidenceBundle {
+    const state = this.#stateForInteractiveRead();
+    const recallQuery = this.#recallQuery(input);
+    const queryError = this.#recallQueryError(input, recallQuery);
+    if (queryError) return this.#invalidRecallScope(input, state, recallQuery, queryError);
+
+    let authorizedRoots: Array<{ origin: SourceOrigin; rootDigest: string }>;
+    try {
+      authorizedRoots = this.#configuredRoots().map((source) => ({
+        origin: source.origin,
+        rootDigest: sourceAuthorizationDigest(source.root, source.discovery),
+      }));
+    } catch {
+      return this.#unavailableRecallAuthorization(input, state, recallQuery);
+    }
+    const authorizedRootKeys = new Set(authorizedRoots.map(({ origin, rootDigest }) => `${origin}\0${rootDigest}`));
+    const sessionResolution = this.#resolveRecallSessionScope(input, refreshOnMiss, state, recallQuery, authorizedRootKeys);
+    if ("outcome" in sessionResolution) return sessionResolution;
+    const scope = this.#buildRecallScope(
+      input,
+      recallQuery,
+      authorizedRoots,
+      sessionResolution.sessionScope,
+      sessionResolution.renderedSessionScope,
+    );
+    if (!state.retainedLastGood && scope.scope.evidenceSpans === 0 && (state.fatalErrors > 0 || state.sourceFiles === 0)) {
+      const warning = state.errors > 0 ? `${state.errors} source error(s)` : "No usable registered session files";
+      return {
+        outcome: "unavailable",
+        conclusive: false,
+        meaning: "Mooncite has no usable evidence generation for this search.",
+        next: { action: "call", target: "mooncite_status", reason: "Check source and index health before retrying." },
+        query: recallQuery.query,
+        lexicalTerms: recallQuery.terms,
+        scope: scope.scope,
+        generation: state.generation,
+        trustState: state.trustState,
+        coverage: state.coverage,
+        candidates: [],
+        echoesSuppressed: 0,
+        warnings: [warning, ...scope.warnings],
+      };
+    }
+    const rowsById = this.#queryRecallRows(recallQuery, scope, authorizedRootKeys);
+    const { candidates, echoesSuppressed } = this.#recallCandidates(rowsById, recallQuery);
+    if (candidates.length === 0 && refreshOnMiss) {
+      this.refresh();
+      return this.#recall(input, false);
+    }
+    return this.#recallResult(state, recallQuery, scope, candidates, echoesSuppressed);
+  }
   resolveEvidenceAnchors(requests: readonly EvidenceAnchorRequest[]): EvidenceAnchorResolution[] {
     if (!Array.isArray(requests) || requests.length > 256) {
       throw new Error("Mooncite anchor resolution accepts at most 256 locators.");
@@ -3437,17 +3912,27 @@ export class MoonciteEngine {
   }
 
   inspect(input: { evidenceId: string; window?: number }): EvidenceInspection {
-    const row = this.#db.prepare(`
+    const row = this.#inspectionRow(input.evidenceId);
+    if (!row) {
+      return { outcome: "unavailable", evidenceId: input.evidenceId, target: null, window: [], locator: null, message: "Evidence ID or URI is not present in the active generation." };
+    }
+    return this.#inspectRow({ ...input, evidenceId: String(row.evidence_id) }, row);
+  }
+
+  #inspectionRow(evidenceId: string): Record<string, string | number | null> | undefined {
+    return this.#db.prepare(`
       SELECT e.*, sf.source_root_digest
       FROM evidence e JOIN source_files sf ON sf.source_path = e.source_path
       WHERE e.evidence_id = ? OR e.evidence_uri = ?
       ORDER BY CASE WHEN e.evidence_id = ? THEN 0 ELSE 1 END
       LIMIT 1
-    `).get(input.evidenceId, input.evidenceId, input.evidenceId) as Record<string, string | number | null> | undefined;
-    if (!row) {
-      return { outcome: "unavailable", evidenceId: input.evidenceId, target: null, window: [], locator: null, message: "Evidence ID or URI is not present in the active generation." };
-    }
-    input = { ...input, evidenceId: String(row.evidence_id) };
+    `).get(evidenceId, evidenceId, evidenceId) as Record<string, string | number | null> | undefined;
+  }
+
+  #inspectRow(
+    input: { evidenceId: string; window?: number },
+    row: Record<string, string | number | null>,
+  ): EvidenceInspection {
     const sourceOrigin = parseSourceOrigin(row.source_origin);
     const sourcePath = String(row.source_path);
     const location = this.#locationForStored({
@@ -3468,42 +3953,84 @@ export class MoonciteEngine {
       prefixDigest: String(row.prefix_digest),
       prefixDigestKind: String(row.prefix_digest).startsWith("append-chain:") ? "append_chain_sha256" : "full_prefix_sha256",
     };
-    const asSpan = (value: Record<string, string | number | null>, relation: InspectedSpan["relation"]): InspectedSpan => {
-      const bounded = truncateUtf8(String(value.text), relation === "target" ? 4_096 : 512);
-      const origin = parseSourceOrigin(value.source_origin);
-      return {
-        relation,
-        evidenceId: String(value.evidence_id),
-        text: bounded.text,
-        sessionId: qualifiedSessionId(origin, sourceRootDigestFromSourcePath(origin, String(value.source_path)), String(value.session_id)),
-        entryId: String(value.entry_id),
-        parentId: value.parent_id === null ? null : String(value.parent_id),
-        role: parseEvidenceRole(value.role),
-        sourceOrigin: origin,
-        sourceKind: String(value.source_kind),
-        eventTimestamp: typeof value.event_timestamp === "string" ? normalizeIsoTimestamp(value.event_timestamp) : null,
-        recordProvenance: origin === "chatgpt" ? "copy" : "original",
-        branchState: String(value.branch_state) === "current" ? "current" : "off_branch",
-        compactionState: parseCompactionState(value.compaction_state),
-        omittedBytes: bounded.omittedBytes,
-      };
-    };
-    const target = asSpan(row, "target");
+    const target = this.#inspectionSpan(row, "target");
     if (!location) {
       return { outcome: "excluded", evidenceId: input.evidenceId, target: null, window: [], locator, message: "Locator escapes the authorized source root." };
     }
-    const absolutePath = location.path;
-    if (hasSymlinkComponent(location.root) || hasSymlinkComponent(absolutePath)) {
-      return { outcome: "excluded", evidenceId: input.evidenceId, target: null, window: [], locator, message: "Source path contains a symbolic-link component." };
-    }
-    if (!existsSync(absolutePath)) {
-      return { outcome: "missing", evidenceId: input.evidenceId, target, window: [], locator, message: "Source file is missing." };
-    }
-    const file = lstatSync(absolutePath);
-    if (!file.isFile() || file.isSymbolicLink()) {
-      return { outcome: "excluded", evidenceId: input.evidenceId, target: null, window: [], locator, message: "Source is no longer an authorized regular file." };
-    }
+    const locationFailure = this.#inspectionLocationFailure(input.evidenceId, location, target, locator);
+    if (locationFailure) return locationFailure;
+
     const radius = Math.min(10, Math.max(0, input.window ?? 2));
+    const { selectedRows, targetIndex } = this.#inspectionRows(sourcePath, locator, row, radius);
+    const capture = this.#captureInspection(location, selectedRows, input.evidenceId, target, locator);
+    if ("error" in capture) return capture.error;
+
+    const targetFailure = this.#inspectionTargetFailure(
+      capture.captured[targetIndex]!,
+      sourceOrigin,
+      input.evidenceId,
+      target,
+      locator,
+    );
+    if (targetFailure) return targetFailure;
+
+    const windowFailure = this.#inspectionWindowFailure(capture.captured, selectedRows, input.evidenceId, target, locator);
+    if (windowFailure) return windowFailure;
+    const window = selectedRows.map((value, index) =>
+      this.#inspectionSpan(value, index < targetIndex ? "before" : index > targetIndex ? "after" : "target"),
+    );
+    return { outcome: "verified", evidenceId: input.evidenceId, target, window, locator };
+  }
+
+  #inspectionSpan(
+    value: Record<string, string | number | null>,
+    relation: InspectedSpan["relation"],
+  ): InspectedSpan {
+    const bounded = truncateUtf8(String(value.text), relation === "target" ? 4_096 : 512);
+    const origin = parseSourceOrigin(value.source_origin);
+    return {
+      relation,
+      evidenceId: String(value.evidence_id),
+      text: bounded.text,
+      sessionId: qualifiedSessionId(origin, sourceRootDigestFromSourcePath(origin, String(value.source_path)), String(value.session_id)),
+      entryId: String(value.entry_id),
+      parentId: value.parent_id === null ? null : String(value.parent_id),
+      role: parseEvidenceRole(value.role),
+      sourceOrigin: origin,
+      sourceKind: String(value.source_kind),
+      eventTimestamp: typeof value.event_timestamp === "string" ? normalizeIsoTimestamp(value.event_timestamp) : null,
+      recordProvenance: origin === "chatgpt" ? "copy" : "original",
+      branchState: String(value.branch_state) === "current" ? "current" : "off_branch",
+      compactionState: parseCompactionState(value.compaction_state),
+      omittedBytes: bounded.omittedBytes,
+    };
+  }
+
+  #inspectionLocationFailure(
+    evidenceId: string,
+    location: SourceLocation,
+    target: InspectedSpan,
+    locator: NonNullable<EvidenceInspection["locator"]>,
+  ): EvidenceInspection | null {
+    if (hasSymlinkComponent(location.root) || hasSymlinkComponent(location.path)) {
+      return { outcome: "excluded", evidenceId, target: null, window: [], locator, message: "Source path contains a symbolic-link component." };
+    }
+    if (!existsSync(location.path)) {
+      return { outcome: "missing", evidenceId, target, window: [], locator, message: "Source file is missing." };
+    }
+    const file = lstatSync(location.path);
+    if (!file.isFile() || file.isSymbolicLink()) {
+      return { outcome: "excluded", evidenceId, target: null, window: [], locator, message: "Source is no longer an authorized regular file." };
+    }
+    return null;
+  }
+
+  #inspectionRows(
+    sourcePath: string,
+    locator: NonNullable<EvidenceInspection["locator"]>,
+    row: Record<string, string | number | null>,
+    radius: number,
+  ): { selectedRows: Array<Record<string, string | number | null>>; targetIndex: number } {
     const spanOrdinalSql = "CAST(substr(evidence_id, length(rtrim(evidence_id, '0123456789')) + 1) AS INTEGER)";
     const beforeRows = radius === 0 ? [] : (this.#db.prepare(`
       SELECT * FROM evidence
@@ -3537,54 +4064,78 @@ export class MoonciteEngine {
       includeWithinBudget(afterRows[offset]);
     }
     const selectedRows = allRows.filter((value) => selectedIds.has(String(value.evidence_id)));
-    const selectedTargetIndex = selectedRows.findIndex((value) => String(value.evidence_id) === String(row.evidence_id));
-    let captured: Buffer[];
+    const targetIndex = selectedRows.findIndex((value) => String(value.evidence_id) === String(row.evidence_id));
+    return { selectedRows, targetIndex };
+  }
+
+  #captureInspection(
+    location: SourceLocation,
+    selectedRows: Array<Record<string, string | number | null>>,
+    evidenceId: string,
+    target: InspectedSpan,
+    locator: NonNullable<EvidenceInspection["locator"]>,
+  ): { captured: Buffer[] } | { error: EvidenceInspection } {
     try {
       const ranges = selectedRows.map((value) => ({ start: Number(value.byte_start), end: Number(value.byte_end) }));
-      const bytes = readRangesCoherently(absolutePath, location.root, ranges);
+      const bytes = readRangesCoherently(location.path, location.root, ranges);
       if (bytes === null) {
-        const currentSize = statSync(absolutePath).size;
+        const currentSize = statSync(location.path).size;
         const missingRange = ranges.some((range) => range.start < 0 || range.end < range.start || range.end > currentSize);
-        return missingRange
-          ? { outcome: "stale", evidenceId: input.evidenceId, target, window: [], locator, message: "Located source bytes no longer exist." }
-          : { outcome: "corrupt", evidenceId: input.evidenceId, target: null, window: [], locator, message: "Source window could not be captured coherently." };
+        return { error: missingRange
+          ? { outcome: "stale", evidenceId, target, window: [], locator, message: "Located source bytes no longer exist." }
+          : { outcome: "corrupt", evidenceId, target: null, window: [], locator, message: "Source window could not be captured coherently." } };
       }
-      captured = bytes;
+      return { captured: bytes };
     } catch {
-      return { outcome: "corrupt", evidenceId: input.evidenceId, target: null, window: [], locator, message: "Located source bytes could not be read safely." };
+      return { error: { outcome: "corrupt", evidenceId, target: null, window: [], locator, message: "Located source bytes could not be read safely." } };
     }
-    const targetBytes = captured[selectedTargetIndex]!;
+  }
+
+  #inspectionTargetFailure(
+    targetBytes: Buffer,
+    sourceOrigin: SourceOrigin,
+    evidenceId: string,
+    target: InspectedSpan,
+    locator: NonNullable<EvidenceInspection["locator"]>,
+  ): EvidenceInspection | null {
     if (sha256(targetBytes) !== locator.recordDigest) {
       let changed: Record<string, unknown>;
       try {
         changed = JSON.parse(targetBytes.toString("utf8")) as Record<string, unknown>;
       } catch {
-        return { outcome: "corrupt", evidenceId: input.evidenceId, target: null, window: [], locator, message: "Located source record is no longer valid JSON." };
+        return { outcome: "corrupt", evidenceId, target: null, window: [], locator, message: "Located source record is no longer valid JSON." };
       }
       const changedIdentity = recordMatchesIdentity(sourceOrigin, changed, locator.line, targetBytes, locator.entryId);
       if (sourceOrigin !== "codex" && !changedIdentity) {
-        return { outcome: "corrupt", evidenceId: input.evidenceId, target: null, window: [], locator, message: "Located source bytes now resolve to a different record." };
+        return { outcome: "corrupt", evidenceId, target: null, window: [], locator, message: "Located source bytes now resolve to a different record." };
       }
-      return { outcome: "stale", evidenceId: input.evidenceId, target, window: [], locator, message: "Located source record changed after indexing." };
+      return { outcome: "stale", evidenceId, target, window: [], locator, message: "Located source record changed after indexing." };
     }
     let parsed: Record<string, unknown>;
     try {
       parsed = JSON.parse(targetBytes.toString("utf8")) as Record<string, unknown>;
     } catch {
-      return { outcome: "corrupt", evidenceId: input.evidenceId, target: null, window: [], locator, message: "Located source record is invalid JSON." };
+      return { outcome: "corrupt", evidenceId, target: null, window: [], locator, message: "Located source record is invalid JSON." };
     }
     if (!recordMatchesIdentity(sourceOrigin, parsed, locator.line, targetBytes, locator.entryId)) {
-      return { outcome: "corrupt", evidenceId: input.evidenceId, target: null, window: [], locator, message: "Located source identity does not match the evidence ID." };
+      return { outcome: "corrupt", evidenceId, target: null, window: [], locator, message: "Located source identity does not match the evidence ID." };
     }
+    return null;
+  }
+
+  #inspectionWindowFailure(
+    captured: Buffer[],
+    selectedRows: Array<Record<string, string | number | null>>,
+    evidenceId: string,
+    target: InspectedSpan,
+    locator: NonNullable<EvidenceInspection["locator"]>,
+  ): EvidenceInspection | null {
     for (let index = 0; index < selectedRows.length; index++) {
       if (sha256(captured[index]!) !== String(selectedRows[index]!.record_digest)) {
-        return { outcome: "stale", evidenceId: input.evidenceId, target, window: [], locator, message: "A source-window record changed after indexing." };
+        return { outcome: "stale", evidenceId, target, window: [], locator, message: "A source-window record changed after indexing." };
       }
     }
-    const window = selectedRows.map((value, index) =>
-      asSpan(value, index < selectedTargetIndex ? "before" : index > selectedTargetIndex ? "after" : "target"),
-    );
-    return { outcome: "verified", evidenceId: input.evidenceId, target, window, locator };
+    return null;
   }
 
   #memoryStatus(state: ScanResult): MoonciteStatus {

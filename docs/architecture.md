@@ -25,7 +25,7 @@ For OMP and Claude Code, Mooncite admits only project-level JSONL files. It igno
 
 Recall checks the active index first. Only a miss triggers one bounded incremental refresh and retry. `status` always refreshes. `rebuild` performs the explicit full reread.
 
-Pi same-inode growth may append a coherently read suffix as `append_trusted`. Changes from OMP, Claude Code, Codex, and ChatGPT replace that source's projection in a transaction. A shrink, rewrite, identity change, or failed replacement keeps the usable last-good generation. Mooncite does not publish known partial coverage over it.
+Pi same-inode growth may append a coherently read suffix as `append_trusted`. OMP same-inode growth may do the same after Mooncite physically verifies the last indexed evidence record at the append boundary. Other OMP changes and changes from Claude Code, Codex, and ChatGPT replace that source's projection in a transaction. A shrink, detectable rewrite, identity change, or failed replacement keeps the usable last-good generation. Mooncite does not publish known partial coverage over it.
 
 The evidence index is disposable and rebuildable. Source files are never repaired, rewritten, or treated as Mooncite-owned.
 

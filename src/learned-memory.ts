@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type BigIntStats,
   chmodSync,
   closeSync,
   constants,
@@ -667,28 +668,36 @@ function assertPrivateDirectory(path: string, subject: string): void {
     assertSafeAncestorChain(absolutePath, subject);
   }
 }
+function assertPrivateFileState(state: BigIntStats, maximumBytes: number, subject: string): number {
+  if (state.isSymbolicLink() || !state.isFile()) throw new Error(`${subject} is not a regular file.`);
+  if (typeof process.getuid === "function" && state.uid !== BigInt(process.getuid())) {
+    throw new Error(`${subject} is not owned by the current user.`);
+  }
+  if ((Number(state.mode) & 0o077) !== 0) throw new Error(`${subject} is not private.`);
+  const size = Number(state.size);
+  if (!Number.isSafeInteger(size) || size < 0 || size > maximumBytes) throw new Error(`${subject} exceeds the size limit.`);
+  return size;
+}
+
+function samePrivateFileVersion(left: BigIntStats, right: BigIntStats): boolean {
+  return right.isFile()
+    && right.dev === left.dev
+    && right.ino === left.ino
+    && right.size === left.size
+    && right.mtimeNs === left.mtimeNs
+    && right.ctimeNs === left.ctimeNs;
+}
 
 function readPrivateFile(path: string, maximumBytes: number, subject: string): Buffer {
   if (hasSymlinkComponent(path)) throw new Error(`${subject} path contains a symbolic-link component.`);
   assertPrivateDirectory(dirname(path), subject);
   const before = lstatSync(path, { bigint: true });
-  if (before.isSymbolicLink() || !before.isFile()) throw new Error(`${subject} is not a regular file.`);
-  if (typeof process.getuid === "function" && before.uid !== BigInt(process.getuid())) {
-    throw new Error(`${subject} is not owned by the current user.`);
-  }
-  if ((Number(before.mode) & 0o077) !== 0) throw new Error(`${subject} is not private.`);
-  const size = Number(before.size);
-  if (!Number.isSafeInteger(size) || size < 0 || size > maximumBytes) throw new Error(`${subject} exceeds the size limit.`);
+  const size = assertPrivateFileState(before, maximumBytes, subject);
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   let bytes: Buffer;
   try {
     const opened = fstatSync(fd, { bigint: true });
-    if (!opened.isFile()
-      || opened.dev !== before.dev
-      || opened.ino !== before.ino
-      || opened.size !== before.size
-      || opened.mtimeNs !== before.mtimeNs
-      || opened.ctimeNs !== before.ctimeNs) {
+    if (!samePrivateFileVersion(before, opened)) {
       throw new Error(`${subject} changed identity.`);
     }
     bytes = Buffer.alloc(size);
@@ -703,11 +712,7 @@ function readPrivateFile(path: string, maximumBytes: number, subject: string): B
     closeSync(fd);
   }
   const after = lstatSync(path, { bigint: true });
-  if (after.dev !== before.dev
-    || after.ino !== before.ino
-    || after.size !== before.size
-    || after.mtimeNs !== before.mtimeNs
-    || after.ctimeNs !== before.ctimeNs) {
+  if (!samePrivateFileVersion(before, after)) {
     throw new Error(`${subject} changed while reading.`);
   }
   return bytes;
@@ -1930,6 +1935,56 @@ export class LearnedMemoryStore {
     return related;
   }
 
+  #recallRows(
+    query: string,
+    terms: string[],
+    project: string | null,
+    includeArchived: boolean,
+  ): RevisionRow[] {
+    const scopeSql = project === null ? "" : " AND (revisions.scope_project IS NULL OR revisions.scope_project = ?)";
+    const lifecycleSql = includeArchived ? "" : " AND lifecycle.state = 'active'";
+    const projectParameters = project === null ? [] : [project];
+    if (MEMORY_ID_PATTERN.test(query)) {
+      return this.#db.prepare(`
+        SELECT revisions.*, heads.current_revision,
+               lifecycle.state AS lifecycle_state,
+               lifecycle.metadata_version AS lifecycle_metadata_version,
+               lifecycle.salience,
+               lifecycle.last_activation_at,
+               lifecycle.reinforcement_count,
+               lifecycle.archived_at
+        FROM learned_memory_revisions revisions
+        JOIN learned_memory_heads heads
+          ON heads.memory_id = revisions.memory_id
+         AND heads.current_revision = revisions.revision
+        JOIN learned_memory_lifecycle lifecycle ON lifecycle.memory_id = revisions.memory_id
+        WHERE revisions.memory_id = ?${scopeSql}${lifecycleSql}
+      `).all(query, ...projectParameters).map((value) => parseRevisionRow(value));
+    }
+    if (terms.length === 0) return [];
+    const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
+    return this.#db.prepare(`
+      SELECT revisions.*, heads.current_revision,
+             lifecycle.state AS lifecycle_state,
+             lifecycle.metadata_version AS lifecycle_metadata_version,
+             lifecycle.salience,
+             lifecycle.last_activation_at,
+             lifecycle.reinforcement_count,
+             lifecycle.archived_at,
+             bm25(learned_memory_fts) AS score
+      FROM learned_memory_fts
+      JOIN learned_memory_revisions revisions
+        ON revisions.memory_id = learned_memory_fts.memory_id
+       AND revisions.revision = learned_memory_fts.revision
+      JOIN learned_memory_heads heads
+        ON heads.memory_id = revisions.memory_id
+       AND heads.current_revision = revisions.revision
+      JOIN learned_memory_lifecycle lifecycle ON lifecycle.memory_id = revisions.memory_id
+      WHERE learned_memory_fts MATCH ?${scopeSql}${lifecycleSql}
+      ORDER BY score, revisions.memory_id
+      LIMIT ?
+    `).all(match, ...projectParameters, MAX_MEMORY_RECALL_ROWS).map((value) => parseRevisionRow(value));
+  }
   recall(input: {
     query: string;
     limit: number;
@@ -1958,50 +2013,7 @@ export class LearnedMemoryStore {
     );
     const terms = queryTerms(query);
     const exactId = MEMORY_ID_PATTERN.test(query);
-    const scopeSql = project === null ? "" : " AND (revisions.scope_project IS NULL OR revisions.scope_project = ?)";
-    const lifecycleSql = input.includeArchived ? "" : " AND lifecycle.state = 'active'";
-    let rows: RevisionRow[] = [];
-    if (exactId) {
-      rows = this.#db.prepare(`
-        SELECT revisions.*, heads.current_revision,
-               lifecycle.state AS lifecycle_state,
-               lifecycle.metadata_version AS lifecycle_metadata_version,
-               lifecycle.salience,
-               lifecycle.last_activation_at,
-               lifecycle.reinforcement_count,
-               lifecycle.archived_at
-        FROM learned_memory_revisions revisions
-        JOIN learned_memory_heads heads
-          ON heads.memory_id = revisions.memory_id
-         AND heads.current_revision = revisions.revision
-        JOIN learned_memory_lifecycle lifecycle ON lifecycle.memory_id = revisions.memory_id
-        WHERE revisions.memory_id = ?${scopeSql}${lifecycleSql}
-      `).all(query, ...(project === null ? [] : [project])).map((value) => parseRevisionRow(value));
-    } else if (terms.length > 0) {
-      const match = terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
-      rows = this.#db.prepare(`
-        SELECT revisions.*, heads.current_revision,
-               lifecycle.state AS lifecycle_state,
-               lifecycle.metadata_version AS lifecycle_metadata_version,
-               lifecycle.salience,
-               lifecycle.last_activation_at,
-               lifecycle.reinforcement_count,
-               lifecycle.archived_at,
-               bm25(learned_memory_fts) AS score
-        FROM learned_memory_fts
-        JOIN learned_memory_revisions revisions
-          ON revisions.memory_id = learned_memory_fts.memory_id
-         AND revisions.revision = learned_memory_fts.revision
-        JOIN learned_memory_heads heads
-          ON heads.memory_id = revisions.memory_id
-         AND heads.current_revision = revisions.revision
-        JOIN learned_memory_lifecycle lifecycle ON lifecycle.memory_id = revisions.memory_id
-        WHERE learned_memory_fts MATCH ?${scopeSql}${lifecycleSql}
-        ORDER BY score, revisions.memory_id
-        LIMIT ?
-      `).all(match, ...(project === null ? [] : [project]), MAX_MEMORY_RECALL_ROWS)
-        .map((value) => parseRevisionRow(value));
-    }
+    const rows = this.#recallRows(query, terms, project, input.includeArchived);
     const prepared = rows.map((row) => ({ row, anchors: this.#anchors(row.memory_id, row.revision) }));
     if (prepared.some((item) => item.anchors.length > 0) || relatedLimit > 0) this.#engine.refresh();
     const healthByRevision = new Map<string, Map<number, ResolvedAnchorHealth>>();

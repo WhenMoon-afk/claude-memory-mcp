@@ -33,7 +33,7 @@
 
 **Skill candidate.** A bounded artifact proposed from exact learned revisions. It stays pending until explicit approval or rejection. Review never installs a skill.
 
-**Refresh.** Incremental admission of new files and Pi same-inode growth. A coherent Pi suffix uses `append_trusted`. That path does not reread the indexed prefix. Detectable Pi shrinkage, same-size rewrite, or identity change keeps the last-good generation. Every detected OMP, Claude Code, Codex, or ChatGPT change replaces that source projection in one transaction. Those producers may rewrite mutable records or exports.
+**Refresh.** Incremental admission of new files and same-inode growth from Pi or OMP. A coherent Pi suffix uses `append_trusted`. OMP uses that bounded path only after physically verifying the last indexed evidence record. These paths do not reread the indexed prefix. Detectable Pi shrinkage, same-size rewrite, or identity change keeps the last-good generation. Other detected OMP changes and every detected Claude Code, Codex, or ChatGPT change replace that source projection in one transaction. Those producers may rewrite mutable records or exports.
 
 **Rebuild.** Full verified recreation of the evidence index from authorized source history.
 

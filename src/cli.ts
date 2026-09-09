@@ -89,6 +89,156 @@ function writeResult(value: unknown): void {
 }
 const HELP_TEXT = "Mooncite commands: install, status, rebuild, source list, source add, source remove, memory enable, memory disable, memory status, disable, uninstall, purge, serve\n";
 
+type CliRegistrations = ReturnType<typeof createClientRegistrationAdapter>;
+
+interface CliContext {
+  args: string[];
+  engineOptions: EngineOptions;
+  installation: InstallationOptions;
+  registrations: CliRegistrations;
+}
+
+type CliCommandHandler = (context: CliContext) => Promise<void>;
+
+function runSourceCommand(args: string[]): void {
+  const action = args[1] ?? "list";
+  const configPath = resolveSourceConfigPath();
+  if (action === "list") {
+    const sources = resolveSourceRegistrations();
+    writeResult({
+      automatic: sources.filter((source) => source.discovery === "automatic"),
+      configured: sources.filter((source) => source.discovery !== "automatic"),
+      sources,
+    });
+    return;
+  }
+  if (action !== "add" && action !== "remove") throw new Error("Usage: mooncite source <list|add|remove>");
+  const origin = args[2];
+  if (!origin || !isOptionalSourceOrigin(origin)) throw new Error("Mooncite source origin must be claude-code, codex, or chatgpt.");
+  const root = args[3];
+  if (!root) {
+    throw new Error(`Usage: mooncite source ${action} <claude-code|codex|chatgpt> <absolute-root>`);
+  }
+  const result = action === "add"
+    ? addSourceRegistration(configPath, { origin, root })
+    : removeSourceRegistration(configPath, { origin, root });
+  writeResult(result);
+}
+
+async function runServeCommand({ engineOptions, registrations }: CliContext): Promise<void> {
+  const handle = serveStdio(
+    () => createMoonciteMcpServer(
+      engineOptions,
+      () => registrations.diagnose(),
+      { configPath: resolveLearnedMemoryConfigPath() },
+    ),
+  );
+  await new Promise<void>((resolve) => {
+    const finish = (): void => resolve();
+    process.stdin.once("end", finish);
+    process.stdin.once("close", finish);
+    process.once("SIGINT", finish);
+    process.once("SIGTERM", finish);
+  });
+  await handle.close();
+}
+
+async function runMemoryCommand({ args, engineOptions }: CliContext): Promise<void> {
+  if (args.length !== 2 || !["enable", "disable", "status"].includes(args[1]!)) {
+    throw new Error("Usage: mooncite memory <enable|disable|status>");
+  }
+  const action = args[1]!;
+  const configPath = resolveLearnedMemoryConfigPath();
+  if (action === "enable" || action === "disable") {
+    const databaseRetained = learnedMemoryDatabaseRetained(engineOptions.stateDir);
+    const mode = setLearnedMemoryEnabled(configPath, action === "enable");
+    writeResult({
+      kind: "derived_memory_config",
+      ...mode,
+      databaseRetained,
+      reloadRequired: true,
+    });
+    return;
+  }
+  const mode = loadLearnedMemoryMode(configPath);
+  if (!mode.enabled) {
+    writeResult({
+      kind: "derived_memory_config",
+      ...mode,
+      databaseRetained: learnedMemoryDatabaseRetained(engineOptions.stateDir),
+      reloadRequired: false,
+    });
+    return;
+  }
+  const engine = new MoonciteEngine(engineOptions);
+  let store: LearnedMemoryStore | null = null;
+  try {
+    try {
+      store = new LearnedMemoryStore(engine, { stateDir: engineOptions.stateDir });
+      writeResult({ ...mode, ...store.status(), reloadRequired: false });
+    } catch (error) {
+      writeResult({ ...mode, ...unavailableLearnedMemoryStatus(error), reloadRequired: false });
+    }
+  } finally {
+    try {
+      store?.close();
+    } finally {
+      engine.close();
+    }
+  }
+}
+
+async function runStatusCommand({ engineOptions, registrations }: CliContext): Promise<void> {
+  const engine = new MoonciteEngine(engineOptions);
+  let store: LearnedMemoryStore | null = null;
+  try {
+    const status: Record<string, unknown> = { ...engine.status(), registrations: await registrations.diagnose() };
+    try {
+      if (loadLearnedMemoryMode(resolveLearnedMemoryConfigPath()).enabled) {
+        try {
+          store = new LearnedMemoryStore(engine, { stateDir: engineOptions.stateDir });
+          status.learnedMemory = store.status();
+        } catch (error) {
+          status.learnedMemory = unavailableLearnedMemoryStatus(error);
+        }
+      }
+    } catch {
+      // Optional learned-memory configuration failures do not alter evidence status.
+    }
+    writeResult(status);
+  } finally {
+    try {
+      store?.close();
+    } finally {
+      engine.close();
+    }
+  }
+}
+
+async function runRebuildCommand({ engineOptions }: CliContext): Promise<void> {
+  const engine = new MoonciteEngine(engineOptions);
+  try {
+    writeResult(engine.rebuild());
+  } finally {
+    engine.close();
+  }
+}
+
+const COMMAND_HANDLERS: Readonly<Partial<Record<string, CliCommandHandler>>> = {
+  serve: runServeCommand,
+  memory: runMemoryCommand,
+  install: async ({ installation }) => writeResult(await installMooncite(installation)),
+  disable: async ({ installation }) => writeResult(await disableMooncite(installation)),
+  uninstall: async ({ installation }) => writeResult(await uninstallMooncite(installation)),
+  purge: async ({ args, engineOptions }) => {
+    const result = await purgeMooncite(engineOptions, args.includes("--yes"));
+    writeResult(result);
+    if (result.outcome === "confirmation_required") process.exitCode = 2;
+  },
+  status: runStatusCommand,
+  rebuild: runRebuildCommand,
+};
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const command = args[0] ?? "help";
@@ -97,153 +247,15 @@ async function main(): Promise<void> {
     return;
   }
   if (command === "source") {
-    const action = args[1] ?? "list";
-    const configPath = resolveSourceConfigPath();
-    if (action === "list") {
-      const sources = resolveSourceRegistrations();
-      writeResult({
-        automatic: sources.filter((source) => source.discovery === "automatic"),
-        configured: sources.filter((source) => source.discovery !== "automatic"),
-        sources,
-      });
-      return;
-    }
-    if (action !== "add" && action !== "remove") throw new Error("Usage: mooncite source <list|add|remove>");
-    const origin = args[2];
-    if (!origin || !isOptionalSourceOrigin(origin)) throw new Error("Mooncite source origin must be claude-code, codex, or chatgpt.");
-    const root = args[3];
-    if (!root) {
-      throw new Error(`Usage: mooncite source ${action} <claude-code|codex|chatgpt> <absolute-root>`);
-    }
-    if (action === "add") {
-      writeResult(addSourceRegistration(configPath, { origin, root }));
-      return;
-    }
-    writeResult(removeSourceRegistration(configPath, { origin, root }));
+    runSourceCommand(args);
     return;
   }
   const engineOptions = resolveEngineOptions();
   const installation = resolveInstallationOptions();
   const registrations = createClientRegistrationAdapter(installation);
-
-  if (command === "serve") {
-    const handle = serveStdio(
-      () => createMoonciteMcpServer(
-        engineOptions,
-        () => registrations.diagnose(),
-        { configPath: resolveLearnedMemoryConfigPath() },
-      ),
-    );
-    await new Promise<void>((resolve) => {
-      const finish = (): void => resolve();
-      process.stdin.once("end", finish);
-      process.stdin.once("close", finish);
-      process.once("SIGINT", finish);
-      process.once("SIGTERM", finish);
-    });
-    await handle.close();
-    return;
-  }
-  if (command === "memory") {
-    if (args.length !== 2 || !["enable", "disable", "status"].includes(args[1]!)) {
-      throw new Error("Usage: mooncite memory <enable|disable|status>");
-    }
-    const action = args[1]!;
-    const configPath = resolveLearnedMemoryConfigPath();
-    if (action === "enable" || action === "disable") {
-      const databaseRetained = learnedMemoryDatabaseRetained(engineOptions.stateDir);
-      const mode = setLearnedMemoryEnabled(configPath, action === "enable");
-      writeResult({
-        kind: "derived_memory_config",
-        ...mode,
-        databaseRetained,
-        reloadRequired: true,
-      });
-      return;
-    }
-    const mode = loadLearnedMemoryMode(configPath);
-    if (!mode.enabled) {
-      writeResult({
-        kind: "derived_memory_config",
-        ...mode,
-        databaseRetained: learnedMemoryDatabaseRetained(engineOptions.stateDir),
-        reloadRequired: false,
-      });
-      return;
-    }
-    const engine = new MoonciteEngine(engineOptions);
-    let store: LearnedMemoryStore | null = null;
-    try {
-      try {
-        store = new LearnedMemoryStore(engine, { stateDir: engineOptions.stateDir });
-        writeResult({ ...mode, ...store.status(), reloadRequired: false });
-      } catch (error) {
-        writeResult({ ...mode, ...unavailableLearnedMemoryStatus(error), reloadRequired: false });
-      }
-    } finally {
-      try {
-        store?.close();
-      } finally {
-        engine.close();
-      }
-    }
-    return;
-  }
-  if (command === "install") {
-    writeResult(await installMooncite(installation));
-    return;
-  }
-  if (command === "disable") {
-    writeResult(await disableMooncite(installation));
-    return;
-  }
-  if (command === "uninstall") {
-    writeResult(await uninstallMooncite(installation));
-    return;
-  }
-  if (command === "purge") {
-    const result = await purgeMooncite(engineOptions, args.includes("--yes"));
-    writeResult(result);
-    if (result.outcome === "confirmation_required") process.exitCode = 2;
-    return;
-  }
-  if (command === "status") {
-    const engine = new MoonciteEngine(engineOptions);
-    let store: LearnedMemoryStore | null = null;
-    try {
-      const status: Record<string, unknown> = { ...engine.status(), registrations: await registrations.diagnose() };
-      try {
-        if (loadLearnedMemoryMode(resolveLearnedMemoryConfigPath()).enabled) {
-          try {
-            store = new LearnedMemoryStore(engine, { stateDir: engineOptions.stateDir });
-            status.learnedMemory = store.status();
-          } catch (error) {
-            status.learnedMemory = unavailableLearnedMemoryStatus(error);
-          }
-        }
-      } catch {
-        // Optional learned-memory configuration failures do not alter evidence status.
-      }
-      writeResult(status);
-    } finally {
-      try {
-        store?.close();
-      } finally {
-        engine.close();
-      }
-    }
-    return;
-  }
-  if (command === "rebuild") {
-    const engine = new MoonciteEngine(engineOptions);
-    try {
-      writeResult(engine.rebuild());
-    } finally {
-      engine.close();
-    }
-    return;
-  }
-  throw new Error(`Unknown Mooncite command: ${command}`);
+  const handler = COMMAND_HANDLERS[command];
+  if (!handler) throw new Error(`Unknown Mooncite command: ${command}`);
+  await handler({ args, engineOptions, installation, registrations });
 }
 
 main().catch((error: unknown) => {

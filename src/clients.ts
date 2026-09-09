@@ -19,6 +19,7 @@ export type CommandRunner = (
   command: string,
   args: string[],
   env?: NodeJS.ProcessEnv,
+  cwd?: string,
 ) => Promise<CommandResult>;
 
 export interface ClientOptions {
@@ -39,10 +40,11 @@ export interface ClientRegistrationAdapter {
   disable(clients?: readonly ClientName[]): Promise<RegistrationDiagnostics>;
 }
 
-export const defaultCommandRunner: CommandRunner = async (command, args, env = process.env) => {
+export const defaultCommandRunner: CommandRunner = async (command, args, env = process.env, cwd) => {
   const { promise, resolve, reject } = Promise.withResolvers<CommandResult>();
   const child = spawn(command, args, {
     env,
+    cwd,
     stdio: ["ignore", "pipe", "pipe"],
     detached: process.platform !== "win32",
   });
@@ -118,7 +120,7 @@ function packageSource(value: unknown): string | null {
 const MISSING_MCP_SERVER_MESSAGE = /(?:^|\r?\n)\s*(?:error:\s*)?(?:no mcp server\s+named\s+["']?mooncite["']?(?:\.|\s|$)|no mcp server\b[^\r\n]*\bfound\b|mcp server\b[^\r\n]*\bnot found\b)/iu;
 
 async function piState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
-  const probe = await runner(options.piCommand ?? "pi", ["--version"], env).catch(() => null);
+  const probe = await runner(options.piCommand ?? "pi", ["--version"], env, options.home).catch(() => null);
   if (!probe || probe.code !== 0) return "unavailable";
   const settings = await readJson(join(options.piAgentDir, "settings.json"));
   const packages = settings && typeof settings === "object" && Array.isArray((settings as Record<string, unknown>).packages)
@@ -150,7 +152,7 @@ function walkPluginEntries(value: unknown, output: Array<Record<string, unknown>
 }
 
 async function ompState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
-  const result = await runner(options.ompCommand ?? "omp", ["plugin", "list", "--json"], env).catch(() => null);
+  const result = await runner(options.ompCommand ?? "omp", ["plugin", "list", "--json"], env, options.home).catch(() => null);
   if (!result || result.code !== 0) return "unavailable";
   let parsed: unknown;
   try { parsed = JSON.parse(result.stdout) as unknown; } catch { return "unavailable"; }
@@ -179,7 +181,7 @@ async function ompState(options: ClientOptions, runner: CommandRunner, env: Node
 }
 
 async function codexState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
-  const result = await runner(options.codexCommand ?? "codex", ["mcp", "get", MOONCITE_MCP_NAME, "--json"], env).catch(() => null);
+  const result = await runner(options.codexCommand ?? "codex", ["mcp", "get", MOONCITE_MCP_NAME, "--json"], env, options.home).catch(() => null);
   if (!result) return "unavailable";
   if (result.code !== 0) {
     const text = `${result.stdout}\n${result.stderr}`;
@@ -207,7 +209,7 @@ function claudeField(text: string, name: string): string | null {
 }
 
 async function claudeState(options: ClientOptions, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<RegistrationState> {
-  const result = await runner(options.claudeCommand ?? "claude", ["mcp", "get", MOONCITE_MCP_NAME], env).catch(() => null);
+  const result = await runner(options.claudeCommand ?? "claude", ["mcp", "get", MOONCITE_MCP_NAME], env, options.home).catch(() => null);
   if (!result) return "unavailable";
   if (result.code !== 0) {
     const text = `${result.stdout}\n${result.stderr}`;
@@ -226,12 +228,18 @@ async function claudeState(options: ClientOptions, runner: CommandRunner, env: N
     : "conflict";
 }
 
-async function required(runner: CommandRunner, command: string, args: string[], env: NodeJS.ProcessEnv): Promise<void> {
-  const result = await runner(command, args, env);
+async function required(
+  runner: CommandRunner,
+  command: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+): Promise<void> {
+  const result = await runner(command, args, env, cwd);
   if (result.code !== 0) throw new Error(`${command} ${args.join(" ")} failed: ${(result.stderr || result.stdout).trim() || `exit ${result.code}`}`);
 }
 
-async function removeOmpPlugin(command: string, runner: CommandRunner, env: NodeJS.ProcessEnv): Promise<void> {
+async function removeOmpPlugin(command: string, runner: CommandRunner, env: NodeJS.ProcessEnv, cwd: string): Promise<void> {
   const shimDir = await mkdtemp(join(tmpdir(), "mooncite-omp-uninstall-"));
   try {
     await writeFile(
@@ -241,7 +249,7 @@ async function removeOmpPlugin(command: string, runner: CommandRunner, env: Node
     );
     const existingPath = env.PATH;
     const shimEnv = { ...env, PATH: existingPath ? `${shimDir}${delimiter}${existingPath}` : shimDir };
-    await required(runner, command, ["plugin", "uninstall", MOONCITE_PACKAGE_NAME], shimEnv);
+    await required(runner, command, ["plugin", "uninstall", MOONCITE_PACKAGE_NAME], shimEnv, cwd);
   } finally {
     await rm(shimDir, { recursive: true, force: true });
   }
@@ -263,16 +271,16 @@ export function createClientRegistrationAdapter(
   };
 
   const add = async (client: ClientName): Promise<void> => {
-    if (client === "pi") await required(runner, options.piCommand ?? "pi", ["install", options.packageRoot], env);
-    else if (client === "omp") await required(runner, options.ompCommand ?? "omp", ["plugin", "link", options.packageRoot], env);
-    else if (client === "codex") await required(runner, options.codexCommand ?? "codex", ["mcp", "add", MOONCITE_MCP_NAME, "--", options.nodePath, options.cliPath, "serve"], env);
-    else await required(runner, options.claudeCommand ?? "claude", ["mcp", "add", "--scope", "user", MOONCITE_MCP_NAME, "--", options.nodePath, options.cliPath, "serve"], env);
+    if (client === "pi") await required(runner, options.piCommand ?? "pi", ["install", options.packageRoot], env, options.home);
+    else if (client === "omp") await required(runner, options.ompCommand ?? "omp", ["plugin", "link", options.packageRoot], env, options.home);
+    else if (client === "codex") await required(runner, options.codexCommand ?? "codex", ["mcp", "add", MOONCITE_MCP_NAME, "--", options.nodePath, options.cliPath, "serve"], env, options.home);
+    else await required(runner, options.claudeCommand ?? "claude", ["mcp", "add", "--scope", "user", MOONCITE_MCP_NAME, "--", options.nodePath, options.cliPath, "serve"], env, options.home);
   };
   const remove = async (client: ClientName): Promise<void> => {
-    if (client === "pi") await required(runner, options.piCommand ?? "pi", ["remove", options.packageRoot], env);
-    else if (client === "omp") await removeOmpPlugin(options.ompCommand ?? "omp", runner, env);
-    else if (client === "codex") await required(runner, options.codexCommand ?? "codex", ["mcp", "remove", MOONCITE_MCP_NAME], env);
-    else await required(runner, options.claudeCommand ?? "claude", ["mcp", "remove", "--scope", "user", MOONCITE_MCP_NAME], env);
+    if (client === "pi") await required(runner, options.piCommand ?? "pi", ["remove", options.packageRoot], env, options.home);
+    else if (client === "omp") await removeOmpPlugin(options.ompCommand ?? "omp", runner, env, options.home);
+    else if (client === "codex") await required(runner, options.codexCommand ?? "codex", ["mcp", "remove", MOONCITE_MCP_NAME], env, options.home);
+    else await required(runner, options.claudeCommand ?? "claude", ["mcp", "remove", "--scope", "user", MOONCITE_MCP_NAME], env, options.home);
   };
 
   return {

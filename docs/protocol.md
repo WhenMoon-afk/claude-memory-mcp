@@ -42,7 +42,7 @@ A source-qualified session ID has the form `<origin>:<64-hex-source-root-digest>
 
 Candidates include exact project and session identities. They include `evidence_id`, `evidence_uri`, a bounded excerpt, and match reasons. For long records, the excerpt starts near the exact query or the longest matched term instead of returning the record prefix; `omittedBytes` counts text omitted before and after that window. Candidates also show matched and missing terms, duplicate spans, and suppressed recursive output.
 
-`full_verified` means the projection came from a full source read or a transactional mutable-source replacement. `append_trusted` means Mooncite admitted coherent Pi same-inode growth without rereading the indexed prefix.
+`full_verified` means the projection came from a full source read or a transactional mutable-source replacement. `append_trusted` means Mooncite admitted coherent Pi same-inode growth, or OMP same-inode growth after physically verifying the last indexed evidence record, without rereading the indexed prefix.
 
 Results larger than 8 KiB keep a useful slice inline and may link a `mooncite-result://artifact/<uuid>` resource. The complete result may remain in that server process for up to ten minutes. The server keeps at most 12 large-result artifacts and evicts the oldest when full. Pi receives the complete result inline because its native extension cannot read MCP resources.
 

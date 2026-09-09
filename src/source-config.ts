@@ -1,4 +1,5 @@
 import {
+  type BigIntStats,
   chmodSync,
   closeSync,
   constants,
@@ -130,50 +131,67 @@ function parseConfig(value: unknown): SourceConfig {
   return { version: 1, sources: sources.sort(compareSourceRegistrations) };
 }
 
+interface SourceConfigFileIdentity {
+  dev: bigint;
+  ino: bigint;
+  size: bigint;
+  mtimeNs: bigint;
+  ctimeNs: bigint;
+}
+
+function sourceConfigFileMatches(left: SourceConfigFileIdentity, right: SourceConfigFileIdentity): boolean {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs;
+}
+
+function validateSourceConfigFile(state: BigIntStats): number {
+  if (state.isSymbolicLink() || !state.isFile()) throw new Error("Mooncite source configuration is not a regular file.");
+  if (typeof process.getuid === "function" && state.uid !== BigInt(process.getuid())) {
+    throw new Error("Mooncite source configuration is not owned by the current user.");
+  }
+  if ((Number(state.mode) & 0o077) !== 0) throw new Error("Mooncite source configuration is not private.");
+  const size = Number(state.size);
+  if (!Number.isSafeInteger(size) || size < 0 || size > MAX_SOURCE_CONFIG_BYTES) {
+    throw new Error("Mooncite source configuration exceeds the size limit.");
+  }
+  return size;
+}
+
+function readCompleteSourceConfig(fd: number, size: number): Buffer {
+  const bytes = Buffer.alloc(size);
+  let offset = 0;
+  while (offset < size) {
+    const count = readSync(fd, bytes, offset, size - offset, offset);
+    if (count === 0) break;
+    offset += count;
+  }
+  if (offset !== size) throw new Error("Mooncite source configuration could not be read completely.");
+  return bytes;
+}
+
 export function loadSourceRegistrations(configPath: string): SourceRegistration[] {
   const path = resolve(configPath);
   if (hasSymlinkComponent(path)) throw new Error("Mooncite source configuration path contains a symbolic-link component.");
   if (!existsSync(path)) return [];
   assertOwnedConfigDirectory(dirname(path));
   const before = lstatSync(path, { bigint: true });
-  if (before.isSymbolicLink() || !before.isFile()) throw new Error("Mooncite source configuration is not a regular file.");
-  if (typeof process.getuid === "function" && before.uid !== BigInt(process.getuid())) {
-    throw new Error("Mooncite source configuration is not owned by the current user.");
-  }
-  if ((Number(before.mode) & 0o077) !== 0) throw new Error("Mooncite source configuration is not private.");
-  const size = Number(before.size);
-  if (!Number.isSafeInteger(size) || size < 0 || size > MAX_SOURCE_CONFIG_BYTES) {
-    throw new Error("Mooncite source configuration exceeds the size limit.");
-  }
+  const size = validateSourceConfigFile(before);
   const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   let bytes: Buffer;
   try {
     const opened = fstatSync(fd, { bigint: true });
-    if (!opened.isFile()
-      || opened.dev !== before.dev
-      || opened.ino !== before.ino
-      || opened.size !== before.size
-      || opened.mtimeNs !== before.mtimeNs
-      || opened.ctimeNs !== before.ctimeNs) {
+    if (!opened.isFile() || !sourceConfigFileMatches(opened, before)) {
       throw new Error("Mooncite source configuration changed identity.");
     }
-    bytes = Buffer.alloc(size);
-    let offset = 0;
-    while (offset < size) {
-      const count = readSync(fd, bytes, offset, size - offset, offset);
-      if (count === 0) break;
-      offset += count;
-    }
-    if (offset !== size) throw new Error("Mooncite source configuration could not be read completely.");
+    bytes = readCompleteSourceConfig(fd, size);
   } finally {
     closeSync(fd);
   }
   const after = lstatSync(path, { bigint: true });
-  if (after.dev !== before.dev
-    || after.ino !== before.ino
-    || after.size !== before.size
-    || after.mtimeNs !== before.mtimeNs
-    || after.ctimeNs !== before.ctimeNs) {
+  if (!sourceConfigFileMatches(after, before)) {
     throw new Error("Mooncite source configuration changed while reading.");
   }
   return parseConfig(JSON.parse(bytes.toString("utf8")) as unknown).sources;

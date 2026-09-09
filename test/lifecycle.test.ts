@@ -405,7 +405,8 @@ describe("Mooncite lifecycle public seam", () => {
     await writeFile(join(options.piAgentDir, "settings.json"), JSON.stringify({ packages: [] }));
     const enabled = { pi: false, omp: false, codex: false, claudeCode: false };
     let ompShimDir: string | null = null;
-    const runner: CommandRunner = async (command, args, env) => {
+    const runner: CommandRunner = async (command, args, env, cwd) => {
+      expect(cwd).toBe(options.home);
       if (command === "pi" && args[0] === "--version") return { code: 0, stdout: "1.0.0\n", stderr: "" };
       if (command === "pi" && args[0] === "install") {
         enabled.pi = true;

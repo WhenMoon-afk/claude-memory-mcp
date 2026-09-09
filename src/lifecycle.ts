@@ -537,6 +537,61 @@ export async function uninstallMooncite(
   return { outcome: "uninstalled", retainedState: resolve(options.stateDir), registrations: diagnostics };
 }
 
+async function assertCanonicalSourceRootsDoNotOverlap(sourceRoots: readonly string[], canonicalStateDir: string): Promise<void> {
+  for (const sourceRoot of sourceRoots) {
+    let canonicalSourceRoot: string;
+    try {
+      canonicalSourceRoot = await realpath(sourceRoot);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (pathsOverlap(canonicalSourceRoot, canonicalStateDir)) {
+      throw new Error("Refusing to purge overlapping Mooncite source and derived-state paths.");
+    }
+  }
+}
+
+async function acquirePurgeLock(stateDir: string): Promise<string> {
+  const purgeLock = join(stateDir, ".purge.lock");
+  try {
+    await writeFile(purgeLock, `${process.pid}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    await assertOwnedStateFile(purgeLock);
+    const ownerPid = Number((await readFile(purgeLock, "utf8")).trim());
+    if (processIsAlive(ownerPid)) throw new Error("Refusing to purge while another Mooncite purge is active.");
+    await rm(purgeLock);
+    await writeFile(purgeLock, `${process.pid}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  }
+  return purgeLock;
+}
+
+async function collectOwnedPurgePaths(stateDir: string): Promise<string[]> {
+  const entries = (await readdir(stateDir, { withFileTypes: true }))
+    .filter((entry) => entry.name !== ".purge.lock");
+  for (const entry of entries) {
+    const engineLock = /^\.engine-(\d+)-[0-9a-f-]+\.lock$/u.exec(entry.name);
+    const path = join(stateDir, entry.name);
+    if (engineLock) {
+      await assertOwnedStateFile(path);
+      if (processIsAlive(Number(engineLock[1]))) {
+        throw new Error("Refusing to purge Mooncite while a live engine is using its evidence index.");
+      }
+      continue;
+    }
+    if (!OWNED_STATE_FILES[entry.name] || entry.isSymbolicLink() || !entry.isFile()) {
+      throw new Error(`Refusing unknown Mooncite state entry: ${entry.name}`);
+    }
+    await assertOwnedStateFile(path);
+  }
+  return entries.map((entry) => join(stateDir, entry.name)).sort((left, right) => {
+    if (left.endsWith(`${sep}${MOONCITE_STATE_MARKER_NAME}`)) return 1;
+    if (right.endsWith(`${sep}${MOONCITE_STATE_MARKER_NAME}`)) return -1;
+    return left.localeCompare(right);
+  });
+}
+
 export async function purgeMooncite(
   options: Pick<EngineOptions, "stateDir" | "sessionsRoot" | "ompSessionsRoot" | "optionalSources" | "optionalSourcesProvider">,
   confirmed: boolean,
@@ -556,55 +611,13 @@ export async function purgeMooncite(
   if (kind !== "directory") throw new Error("Refusing to purge a non-directory Mooncite state path.");
   const identity = await assertOwnedStateDirectory(options.stateDir);
   const canonicalStateDir = await realpath(options.stateDir);
-  for (const sourceRoot of sourceRoots) {
-    let canonicalSourceRoot: string;
-    try {
-      canonicalSourceRoot = await realpath(sourceRoot);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw error;
-    }
-    if (pathsOverlap(canonicalSourceRoot, canonicalStateDir)) {
-      throw new Error("Refusing to purge overlapping Mooncite source and derived-state paths.");
-    }
-  }
+  await assertCanonicalSourceRootsDoNotOverlap(sourceRoots, canonicalStateDir);
   await assertStateMarker(join(options.stateDir, MOONCITE_STATE_MARKER_NAME));
-  const purgeLock = join(options.stateDir, ".purge.lock");
-  try {
-    await writeFile(purgeLock, `${process.pid}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    await assertOwnedStateFile(purgeLock);
-    const ownerPid = Number((await readFile(purgeLock, "utf8")).trim());
-    if (processIsAlive(ownerPid)) throw new Error("Refusing to purge while another Mooncite purge is active.");
-    await rm(purgeLock);
-    await writeFile(purgeLock, `${process.pid}\n`, { encoding: "utf8", flag: "wx", mode: 0o600 });
-  }
+  const purgeLock = await acquirePurgeLock(options.stateDir);
   let purgeLockHeld = true;
   try {
     await assertOwnedStateDirectory(options.stateDir, identity);
-    const entries = (await readdir(options.stateDir, { withFileTypes: true }))
-      .filter((entry) => entry.name !== ".purge.lock");
-    for (const entry of entries) {
-      const engineLock = /^\.engine-(\d+)-[0-9a-f-]+\.lock$/u.exec(entry.name);
-      const path = join(options.stateDir, entry.name);
-      if (engineLock) {
-        await assertOwnedStateFile(path);
-        if (processIsAlive(Number(engineLock[1]))) {
-          throw new Error("Refusing to purge Mooncite while a live engine is using its evidence index.");
-        }
-        continue;
-      }
-      if (!OWNED_STATE_FILES[entry.name] || entry.isSymbolicLink() || !entry.isFile()) {
-        throw new Error(`Refusing unknown Mooncite state entry: ${entry.name}`);
-      }
-      await assertOwnedStateFile(path);
-    }
-    const ownedPaths = entries.map((entry) => join(options.stateDir, entry.name)).sort((left, right) => {
-      if (left.endsWith(`${sep}${MOONCITE_STATE_MARKER_NAME}`)) return 1;
-      if (right.endsWith(`${sep}${MOONCITE_STATE_MARKER_NAME}`)) return -1;
-      return left.localeCompare(right);
-    });
+    const ownedPaths = await collectOwnedPurgePaths(options.stateDir);
     if (!confirmed) return { outcome: "confirmation_required", ownedPaths };
     for (const path of ownedPaths) {
       await assertOwnedStateDirectory(options.stateDir, identity);

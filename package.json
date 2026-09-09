@@ -43,7 +43,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:focused": "vitest run test/engine.test.ts test/learned-memory.test.ts test/mcp.test.ts test/pi-extension.test.ts test/lifecycle.test.ts test/source-config.test.ts",
-    "verify": "npm run typecheck && npm test && npm run build",
+    "lint:complexity": "eslint \"src/**/*.ts\"",
+    "verify": "npm run lint:complexity && npm run typecheck && npm test && npm run build",
     "smoke:package": "npm run build && node scripts/package-smoke.mjs",
     "prepare": "npm run build"
   },
@@ -59,6 +60,8 @@
   ],
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@typescript-eslint/parser": "8.68.0",
+    "eslint": "10.9.1",
     "typescript": "^5.9.0",
     "vitest": "^4.1.4"
   },

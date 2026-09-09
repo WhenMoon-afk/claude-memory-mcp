@@ -189,7 +189,7 @@ describe("Mooncite engine public seam", () => {
       engine.close();
     }
   });
-  it("indexes Pi and OMP collisions independently and transactionally replaces OMP changes", async () => {
+  it("indexes Pi and OMP collisions independently, incrementally appends OMP, and replaces rewritten OMP history", async () => {
     const f = await fixture();
     const ompArtifacts = join(f.ompSessionsRoot, "-moon-project", "session");
     await mkdir(ompArtifacts);
@@ -254,7 +254,7 @@ describe("Mooncite engine public seam", () => {
       const appended = engine.recall({ query: "cobalt-comet-63" });
       expect(appended).toMatchObject({
         outcome: "matches",
-        trustState: "full_verified",
+        trustState: "append_trusted",
         candidates: [{ sourceOrigin: "omp" }],
       });
       expect(appended.candidates[0]!.evidenceId).toMatch(/^mooncite:omp:[a-f0-9]{24}:[a-f0-9]{24}:[a-f0-9]{24}:0$/u);

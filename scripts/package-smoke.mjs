@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -301,8 +301,24 @@ process.exit(1);
       "mooncite_status",
     ],
   };
+  const largeSource = join(sessions, "large-source.jsonl");
+  const largeSourceSize = 591_791_976;
+  const largeHeader = Buffer.from(line({ type: "session", version: 3, id: "packed-large-session", cwd: "/receiver/project" }));
+  const largeTail = Buffer.from(`\n${line({ type: "message", id: "packed-large-entry", parentId: null, message: { role: "user", content: "Packed 592 MB source marker bounded-source-592mb." } })}`);
+  const largeHandle = await open(largeSource, "w", 0o600);
+  try {
+    await largeHandle.write(largeHeader, 0, largeHeader.length, 0);
+    await largeHandle.truncate(largeSourceSize);
+    await largeHandle.write(largeTail, 0, largeTail.length, largeSourceSize - largeTail.length);
+  } finally {
+    await largeHandle.close();
+  }
   const withMcpServer = async (expectedTools, verify) => {
-    const child = spawn(resolvedServer.command, resolvedServer.args, { cwd: resolvedServer.cwd, env, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(resolvedServer.command, resolvedServer.args, {
+      cwd: resolvedServer.cwd,
+      env: { ...env, NODE_OPTIONS: "--max-old-space-size=256" },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     let serverStderr = "";
     child.stderr.setEncoding("utf8").on("data", (chunk) => { serverStderr += chunk; });
     const serverClosed = new Promise((resolve, reject) => {
@@ -349,6 +365,7 @@ process.exit(1);
       ["lucid-fern-52", "claude-code"],
       ["bright-pine-64", "codex"],
       ["amber-canvas-75", "chatgpt"],
+      ["bounded-source-592mb", "pi"],
     ];
     const candidates = [];
     for (const [query, origin] of recallQueries) {
@@ -368,11 +385,12 @@ process.exit(1);
     }
     const status = await request("tools/call", { name: "mooncite_status", arguments: {} });
     if (status.structuredContent.outcome !== "ready" || Object.values(status.structuredContent.registrations).some((value) => value !== "exact")) throw new Error("status was not ready and exact");
-    if (status.structuredContent.sourceFilesByOrigin?.pi !== 1
+    if (status.structuredContent.sourceFilesByOrigin?.pi !== 2
       || status.structuredContent.sourceFilesByOrigin?.omp !== 1
       || status.structuredContent.sourceFilesByOrigin?.["claude-code"] !== 1
       || status.structuredContent.sourceFilesByOrigin?.codex !== 1
-      || status.structuredContent.sourceFilesByOrigin?.chatgpt !== 1) throw new Error("status did not report all source origins");
+      || status.structuredContent.sourceFilesByOrigin?.chatgpt !== 1
+      || status.structuredContent.oversized < 1) throw new Error("status did not report all source origins and the bounded large-source line");
   });
   if ((await readdir(join(stateHome, "mooncite"))).some((name) => name.startsWith(".engine-"))) {
     throw new Error("packed MCP server left an engine lock after shutdown");
