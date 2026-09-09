@@ -19,16 +19,16 @@ flowchart LR
 Mooncite requires Linux with procfs, Node.js 24 or newer, `npm`, and access to GitHub.
 
 ```bash
-npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.5 install
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6 install
 ```
 
-Tagged v4.0.5 is the current stable release. After installation, check the launcher. Then fully restart or reload each client whose registration is `exact`:
+This cut is Mooncite 4.0.6. Use the `#v4.0.6` tag after it is cut on merge. After installation, check the launcher. Then fully restart or reload each client whose registration is `exact`:
 
 ```bash
 "$HOME/.local/bin/mooncite" status
 ```
 
-The installer configures available Pi, OMP, Codex, and Claude Code clients. ChatGPT is a source, not a client. See [operations](docs/operations.md) for the prerelease, source setup, ChatGPT exports, removal commands, and quick fixes.
+The installer configures available Pi, OMP, Codex, and Claude Code clients. ChatGPT is a source, not a client. See [operations](docs/operations.md) for source setup, ChatGPT exports, removal commands, and quick fixes.
 
 ## First search
 
