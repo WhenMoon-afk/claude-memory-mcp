@@ -703,6 +703,7 @@ describe("Mooncite engine public seam", () => {
     try {
       const generation = engine.status().generation;
       configurationAvailable = false;
+      engine.refresh();
       const failed = engine.status();
       expect(failed).toMatchObject({
         outcome: "degraded",
@@ -729,6 +730,7 @@ describe("Mooncite engine public seam", () => {
       configurationAvailable = true;
       reopened = new MoonciteEngine(options);
       configurationAvailable = false;
+      reopened.refresh();
       expect(reopened.status()).toMatchObject({
         outcome: "degraded",
         freshness: "last_good",
@@ -756,6 +758,7 @@ describe("Mooncite engine public seam", () => {
     try {
       const generation = engine.status().generation;
       await rename(f.sessionsRoot, join(f.home, "unavailable-pi-root"));
+      engine.refresh();
       expect(engine.status()).toMatchObject({
         outcome: "degraded",
         freshness: "last_good",
@@ -772,6 +775,7 @@ describe("Mooncite engine public seam", () => {
       engine = null;
 
       reopened = new MoonciteEngine(options);
+      reopened.refresh();
       expect(reopened.status()).toMatchObject({
         outcome: "degraded",
         freshness: "last_good",
@@ -801,6 +805,7 @@ describe("Mooncite engine public seam", () => {
     try {
       const generation = engine.status().generation;
       await chmod(inaccessible, 0o000);
+      engine.refresh();
       expect(engine.status()).toMatchObject({
         outcome: "degraded",
         freshness: "last_good",
@@ -817,6 +822,7 @@ describe("Mooncite engine public seam", () => {
       engine = null;
 
       reopened = new MoonciteEngine(options);
+      reopened.refresh();
       expect(reopened.status()).toMatchObject({
         outcome: "degraded",
         freshness: "last_good",
@@ -846,6 +852,7 @@ describe("Mooncite engine public seam", () => {
       const generation = engine.status().generation;
       const original = await readFile(f.source, "utf8");
       await writeFile(f.source, original.replace("silver-cedar-17", "silver-cedar-18"));
+      engine.refresh();
       expect(engine.status()).toMatchObject({
         outcome: "degraded",
         freshness: "last_good",
@@ -862,6 +869,7 @@ describe("Mooncite engine public seam", () => {
       engine = null;
 
       reopened = new MoonciteEngine(options);
+      reopened.refresh();
       expect(reopened.status()).toMatchObject({
         outcome: "degraded",
         freshness: "last_good",
@@ -923,6 +931,7 @@ describe("Mooncite engine public seam", () => {
       engine = null;
 
       reopened = new MoonciteEngine(options);
+      reopened.refresh();
       expect(reopened.status()).toMatchObject({
         outcome: "degraded",
         freshness: "current",
@@ -959,6 +968,7 @@ describe("Mooncite engine public seam", () => {
         nested = join(nested, `deep-${depth}`);
         await mkdir(nested);
       }
+      engine.refresh();
       const expectedGroup = {
         origin: "pi",
         reason: "source_limit_exceeded",
@@ -986,6 +996,7 @@ describe("Mooncite engine public seam", () => {
       engine = null;
 
       reopened = new MoonciteEngine(options);
+      reopened.refresh();
       expect(reopened.status()).toMatchObject({
         outcome: "degraded",
         freshness: "last_good",

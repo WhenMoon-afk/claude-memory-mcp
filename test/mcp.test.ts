@@ -765,7 +765,7 @@ describe("Mooncite stdio MCP seam", () => {
     expect((result.content as Array<{ text: string }>)[0]!.text).toContain("Mooncite status: ready;");
   });
 
-  it("renders actionable source-error groups without transcript text or source paths", async () => {
+  it("does not rescan sources on mooncite_status after the index is warm", async () => {
     const sourceFixture = await createFixture();
     fixtures.push(sourceFixture);
     expect((await callTool("mooncite_status", {}, sourceFixture)).structuredContent)
@@ -775,35 +775,13 @@ describe("Mooncite stdio MCP seam", () => {
       nested = join(nested, `deep-${depth}`);
       await mkdir(nested);
     }
-
-    const expectedGroup = {
-      origin: "pi",
-      reason: "source_limit_exceeded",
-      count: 1,
-      fatalCount: 1,
-    };
-    const expectedReason = "Mooncite hit a bounded source-discovery or ingestion limit. Rebuilding alone will repeat it until the authorized source set or supported limit changes.";
     const result = await callTool("mooncite_status", {}, sourceFixture);
     expect(result.structuredContent).toMatchObject({
-      outcome: "degraded",
-      errors: 1,
-      errorGroups: [expectedGroup],
-      next: {
-        action: "run",
-        target: "mooncite rebuild",
-        reason: expectedReason,
-      },
+      outcome: "ready",
+      errorGroups: [],
     });
-    expect((await callTool("mooncite_status", {}, sourceFixture)).structuredContent).toMatchObject({
-      outcome: "degraded",
-      errors: 1,
-      errorGroups: [expectedGroup],
-    });
-    const rendered = (result.content as Array<{ text: string }>)[0]!.text;
-    expect(rendered).toContain("pi/source_limit_exceeded=1 (fatal=1)");
-    expect(rendered).toContain(expectedReason);
-    expect(rendered).not.toContain(sourceFixture.home);
-    expect(rendered).not.toContain("silver-cedar-17");
+    expect((result.content as Array<{ text: string }>)[0]!.text).toContain("Mooncite status: ready;");
+    expect(JSON.stringify(result.structuredContent)).not.toContain("silver-cedar-17");
   });
 
   it("keeps a first-generation bounded refresh unavailable without exposing source details", async () => {

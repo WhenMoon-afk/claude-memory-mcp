@@ -2219,6 +2219,7 @@ export class MoonciteEngine {
   #appendBatchEvidenceSpans = 0;
   #lastRebuildOutcome: RefreshOutcome = "not_run";
   #lastSuccessfulRefreshAt: string | null = null;
+  #closed = false;
 
   constructor(options: EngineOptions) {
     assertEngineConfiguration(options);
@@ -2391,6 +2392,7 @@ export class MoonciteEngine {
   }
 
   refresh(): ScanResult {
+    if (this.#closed) return this.#last;
     return this.#performRefresh("refresh", false);
   }
 
@@ -4199,11 +4201,13 @@ export class MoonciteEngine {
     };
   }
 
-  status(): MoonciteStatus {
-    return this.#memoryStatus(this.refresh());
+  status(options?: { refresh?: boolean }): MoonciteStatus {
+    const state = options?.refresh === true ? this.refresh() : this.#stateForInteractiveRead();
+    return this.#memoryStatus(state);
   }
 
   close(): void {
+    this.#closed = true;
     try {
       this.#db.close();
     } finally {

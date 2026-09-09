@@ -645,6 +645,26 @@ export function createMoonciteMcpServer(
   learnedMemory?: MoonciteLearnedMemoryServerOptions,
 ): McpServer {
   const engine = new MoonciteEngine(options);
+  const unavailableRegistrations: RegistrationDiagnostics = {
+    pi: "unavailable",
+    omp: "unavailable",
+    codex: "unavailable",
+    claudeCode: "unavailable",
+  };
+  let registrationCache: RegistrationDiagnostics = unavailableRegistrations;
+  void registrations().then((diagnostics) => {
+    registrationCache = diagnostics;
+  }).catch(() => {
+    registrationCache = unavailableRegistrations;
+  });
+  setImmediate(() => {
+    try {
+      engine.refresh();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Mooncite background refresh failed.";
+      process.stderr.write(`Mooncite background refresh failed: ${message}\n`);
+    }
+  });
   let learnedMemoryEnabled = false;
   if (learnedMemory) {
     try {
@@ -912,7 +932,7 @@ export function createMoonciteMcpServer(
     },
     async () => {
       try {
-        const status: MoonciteToolStatus = { ...engine.status(), registrations: await registrations() };
+        const status: MoonciteToolStatus = { ...engine.status(), registrations: registrationCache };
         if (learnedMemoryEnabled) {
           if (!learnedStore) {
             status.learnedMemory = unavailableLearnedMemoryStatus(learnedStoreError);
