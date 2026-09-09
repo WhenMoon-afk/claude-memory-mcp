@@ -634,6 +634,34 @@ describe("Mooncite engine public seam", () => {
     }
   });
 
+  it("ranks user and assistant spans above tool dumps for the same lexical query", async () => {
+    const f = await fixture();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    try {
+      expect(engine.status().outcome).toBe("ready");
+      await appendFile(
+        f.source,
+        jsonLine({
+          type: "message",
+          id: "entry-tool-dump",
+          parentId: "entry-b",
+          message: { role: "toolResult", content: "acceptance_criteria notes: riverbank-lantern-55 lives in a JSON dump." },
+        })
+        + jsonLine({
+          type: "message",
+          id: "entry-spoken",
+          parentId: "entry-tool-dump",
+          message: { role: "user", content: "I said riverbank-lantern-55 in conversation." },
+        }),
+      );
+      const recalled = engine.recall({ query: "riverbank-lantern-55", limit: 10 });
+      expect(recalled.outcome).toBe("matches");
+      expect(recalled.candidates[0]).toMatchObject({ entryId: "entry-spoken", role: "user" });
+    } finally {
+      engine.close();
+    }
+  });
+
   it("reports degraded and unavailable states without treating an incomplete miss as absence", async () => {
     const f = await fixture();
     const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });

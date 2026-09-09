@@ -713,6 +713,12 @@ export function isMoonciteToolRendering(role: string, text: string): boolean {
   return (role === "toolResult" || role === "tool") && isMoonciteRenderingText(text);
 }
 
+function conversationalRoleRank(role: unknown): number {
+  if (role === "user" || role === "assistant") return 2;
+  if (role === "system" || role === "developer") return 1;
+  return 0;
+}
+
 function isBoundedIdentifier(value: unknown, maxBytes = MAX_SOURCE_IDENTIFIER_BYTES): value is string {
   return typeof value === "string"
     && value.length > 0
@@ -3639,6 +3645,7 @@ export class MoonciteEngine {
     return Number(b.directCitation) - Number(a.directCitation)
       || Number(b.metadataExact) - Number(a.metadataExact)
       || Number(a.isEcho) - Number(b.isEcho)
+      || conversationalRoleRank(b.row.role) - conversationalRoleRank(a.row.role)
       || Number(b.exact) - Number(a.exact)
       || b.termCoverage - a.termCoverage
       || Number(a.row.score) - Number(b.row.score)
