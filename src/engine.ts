@@ -44,7 +44,7 @@ const MAX_SOURCE_IDENTIFIER_BYTES = 256;
 const MAX_SOURCE_KIND_BYTES = 64;
 const PRESENTATION_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
 const PRESENTATION_CONTROL_REPLACEMENT_PATTERN = new RegExp(PRESENTATION_CONTROL_PATTERN.source, "gu");
-const DERIVATION_VERSION = "13";
+const DERIVATION_VERSION = "14";
 
 export type SourceOrigin = "pi" | "omp" | SourceRegistration["origin"];
 const SOURCE_ORIGINS: SourceOrigin[] = ["pi", "omp", "claude-code", "codex", "chatgpt"];
@@ -107,6 +107,7 @@ const DATABASE_SCHEMA = `
     evidence_id TEXT PRIMARY KEY,
     evidence_uri TEXT NOT NULL,
     text TEXT NOT NULL,
+    semantic_eligible INTEGER NOT NULL,
     project TEXT NOT NULL,
     session_id TEXT NOT NULL,
     entry_id TEXT NOT NULL,
@@ -141,6 +142,16 @@ const DATABASE_SCHEMA = `
   END;
   CREATE TRIGGER IF NOT EXISTS evidence_fts_delete AFTER DELETE ON evidence BEGIN
     INSERT INTO evidence_fts(evidence_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+  END;
+  CREATE TABLE IF NOT EXISTS semantic_pending (
+    evidence_rowid INTEGER PRIMARY KEY
+  );
+  CREATE TRIGGER IF NOT EXISTS evidence_semantic_insert AFTER INSERT ON evidence
+  WHEN new.semantic_eligible = 1 BEGIN
+    INSERT OR REPLACE INTO semantic_pending(evidence_rowid) VALUES (new.rowid);
+  END;
+  CREATE TRIGGER IF NOT EXISTS evidence_semantic_delete AFTER DELETE ON evidence BEGIN
+    INSERT OR REPLACE INTO semantic_pending(evidence_rowid) VALUES (old.rowid);
   END;
   CREATE TABLE IF NOT EXISTS metadata (
     key TEXT PRIMARY KEY,
@@ -198,7 +209,7 @@ export interface EngineOptions {
 }
 
 export type RelevanceBand = "strong" | "partial" | "weak";
-export type MatchKind = "metadata_exact" | "phrase_exact" | "text_exact" | "terms";
+export type MatchKind = "metadata_exact" | "phrase_exact" | "text_exact" | "terms" | "semantic";
 export type TrustState = "full_verified" | "append_trusted";
 export type CoverageState = "complete" | "partial";
 export type RecallOrder = "relevance" | "newest" | "oldest";
@@ -223,6 +234,7 @@ export interface EvidenceMatch {
   matchedTerms: string[];
   missingTerms: string[];
   termCoverage: number;
+  semanticSimilarity?: number;
 }
 
 export interface EvidenceCandidate {
@@ -711,6 +723,12 @@ function isMoonciteRenderingText(text: string): boolean {
 
 export function isMoonciteToolRendering(role: string, text: string): boolean {
   return (role === "toolResult" || role === "tool") && isMoonciteRenderingText(text);
+}
+
+const SEMANTIC_ROLES = new Set<EvidenceRole>(["user", "assistant", "system", "developer", "summary"]);
+
+function semanticEligible(role: EvidenceRole, text: string): boolean {
+  return SEMANTIC_ROLES.has(role) && text.trim().length >= 4 && !isMoonciteRenderingText(text);
 }
 
 function conversationalRoleRank(role: unknown): number {
@@ -2198,7 +2216,7 @@ function migrateDatabaseDerivation(database: DatabaseSync): void {
   try {
     const current = database.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value?: string } | undefined;
     if (current?.value !== DERIVATION_VERSION) {
-      database.exec("DELETE FROM evidence; DELETE FROM source_records; DELETE FROM source_files; DELETE FROM metadata WHERE key = 'last_good';");
+      database.exec("DELETE FROM evidence; DELETE FROM source_records; DELETE FROM source_files; DELETE FROM semantic_pending; DELETE FROM metadata WHERE key = 'last_good';");
       database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('derivation_version', ?)").run(DERIVATION_VERSION);
     }
     database.exec("COMMIT");
@@ -2546,10 +2564,11 @@ export class MoonciteEngine {
   }
 
   #insertEvidence(items: IndexedEvidence[]): void {
-    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const item of items) {
       insertEvidence.run(
-        item.evidenceId, item.evidenceUri, item.text, item.project, item.sessionId, item.entryId, item.role,
+        item.evidenceId, item.evidenceUri, item.text, semanticEligible(item.role, item.text) ? 1 : 0,
+        item.project, item.sessionId, item.entryId, item.role,
         item.sourceOrigin, item.sourceKind, item.eventTimestamp, item.sourcePath, item.line, item.byteStart,
         item.byteEnd, item.recordDigest, item.prefixDigest, item.parentId, item.branchState, item.compactionState,
       );
@@ -2584,7 +2603,7 @@ export class MoonciteEngine {
     this.#consumeIngestion(metadata.size, 0, 0);
     const captureSize = metadata.size;
     const insertRecord = this.#db.prepare("INSERT INTO source_records(source_path, entry_id, parent_id, line, source_kind) VALUES (?, ?, ?, ?, ?)");
-    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const findEvidence = this.#db.prepare("SELECT 1 AS found FROM evidence WHERE evidence_id = ?");
     const seenEntryIds = new Set<string>();
     let conversationCount = 0;
@@ -2646,6 +2665,7 @@ export class MoonciteEngine {
             identifier,
             evidenceUri("chatgpt", sourceNamespace, sessionId, entryId, ordinal),
             span.text,
+            semanticEligible(span.role, span.text) ? 1 : 0,
             project,
             sessionId,
             entryId,
@@ -2742,7 +2762,7 @@ export class MoonciteEngine {
     let latestCompactionLine: number | null = null;
     const seenEntryIds = new Set<string>();
     const insertRecord = this.#db.prepare("INSERT INTO source_records(source_path, entry_id, parent_id, line, source_kind) VALUES (?, ?, ?, ?, ?)");
-    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const findEvidence = this.#db.prepare("SELECT 1 AS found FROM evidence WHERE evidence_id = ?");
 
     const processLine = (line: FullSourceLine): void => {
@@ -2807,6 +2827,7 @@ export class MoonciteEngine {
           identifier,
           evidenceUri(location.origin, sourceNamespace, sessionId, entryId, ordinal),
           span.text,
+          semanticEligible(span.role, span.text) ? 1 : 0,
           project,
           sessionId,
           entryId,
