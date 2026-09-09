@@ -3526,15 +3526,17 @@ export class MoonciteEngine {
       evidenceParams.push(recallQuery.before);
     }
     const evidenceSql = evidenceConditions.length > 0 ? ` AND ${evidenceConditions.join(" AND ")}` : "";
-    const scopeSql = `SELECT COUNT(*) AS count FROM evidence e WHERE ${authorizationSql}${evidenceSql}`;
-    const scopeParams = [...authorizationParams, ...evidenceParams];
-    const evidenceSpans = Number((this.#db.prepare(scopeSql).get(...scopeParams) as { count?: number } | undefined)?.count ?? 0);
     const hasFilters = input.project !== undefined
       || input.sessionId !== undefined
       || input.role !== undefined
       || input.sourceOrigin !== undefined
       || recallQuery.after !== null
       || recallQuery.before !== null;
+    const evidenceSpans = hasFilters
+      ? Number((this.#db.prepare(
+        `SELECT COUNT(*) AS count FROM evidence e WHERE ${authorizationSql}${evidenceSql}`,
+      ).get(...authorizationParams, ...evidenceParams) as { count?: number } | undefined)?.count ?? 0)
+      : this.#lastEvidenceCount;
     return {
       authorizationSql,
       authorizationParams,
@@ -3583,12 +3585,32 @@ export class MoonciteEngine {
       const match = recallQuery.parsed.phrase
         ? `"${recallQuery.exactText.replaceAll('"', '""')}"`
         : recallQuery.terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
-      let sql = `SELECT e.*, evidence_fts.rank AS score FROM evidence_fts CROSS JOIN evidence e ON e.rowid=evidence_fts.rowid WHERE evidence_fts MATCH ? AND ${scope.authorizationSql}${scope.evidenceSql}`;
-      const params: Array<string | number> = [match, ...scope.authorizationParams, ...scope.evidenceParams];
-      sql += ` ORDER BY ${recallQuery.order === "relevance" ? "evidence_fts.rank, e.evidence_id" : temporalOrder} LIMIT ?`;
-      params.push(Math.min(MAX_RECALL_RANKING_ROWS, Math.max(40, recallQuery.limit * 10)));
-      const lexicalRows = this.#db.prepare(sql).all(...params) as RecallRow[];
-      for (const row of lexicalRows) if (!rowsById.has(String(row.evidence_id))) rowsById.set(String(row.evidence_id), row);
+      const rankingLimit = Math.min(MAX_RECALL_RANKING_ROWS, Math.max(40, recallQuery.limit * 10));
+      if (recallQuery.order === "relevance") {
+        const ftsHits = this.#db.prepare(
+          "SELECT rowid, rank AS score FROM evidence_fts WHERE evidence_fts MATCH ? ORDER BY rank LIMIT ?",
+        ).all(match, rankingLimit) as Array<{ rowid: number; score: number }>;
+        if (ftsHits.length > 0) {
+          const placeholders = ftsHits.map(() => "?").join(",");
+          const lexicalRows = this.#db.prepare(
+            `SELECT e.rowid AS fts_rowid, e.* FROM evidence e WHERE e.rowid IN (${placeholders}) AND ${scope.authorizationSql}${scope.evidenceSql}`,
+          ).all(
+            ...ftsHits.map((hit) => hit.rowid),
+            ...scope.authorizationParams,
+            ...scope.evidenceParams,
+          ) as RecallRow[];
+          const scoreByRowid = new Map(ftsHits.map((hit) => [Number(hit.rowid), Number(hit.score)]));
+          for (const row of lexicalRows) {
+            row.score = scoreByRowid.get(Number(row.fts_rowid)) ?? 0;
+            if (!rowsById.has(String(row.evidence_id))) rowsById.set(String(row.evidence_id), row);
+          }
+        }
+      } else {
+        const lexicalRows = this.#db.prepare(
+          `SELECT e.*, evidence_fts.rank AS score FROM evidence_fts CROSS JOIN evidence e ON e.rowid=evidence_fts.rowid WHERE evidence_fts MATCH ? AND ${scope.authorizationSql}${scope.evidenceSql} ORDER BY ${temporalOrder} LIMIT ?`,
+        ).all(match, ...scope.authorizationParams, ...scope.evidenceParams, rankingLimit) as RecallRow[];
+        for (const row of lexicalRows) if (!rowsById.has(String(row.evidence_id))) rowsById.set(String(row.evidence_id), row);
+      }
     }
     return rowsById;
   }
