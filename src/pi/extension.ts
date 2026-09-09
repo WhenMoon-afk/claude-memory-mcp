@@ -172,7 +172,7 @@ export function createMooncitePiExtension(
     pi.registerTool(tool(call, {
       name: "mooncite_recall",
       label: "Recall prior evidence",
-      description: "Search authorized local history for bounded lexical evidence. Returns cited candidates, explicit outcomes, and next actions.",
+      description: "Search authorized local history for bounded lexical evidence. Unquoted multi-word misses may use local embeddings. Returns cited candidates, explicit outcomes, and next actions.",
       promptSnippet: "Recall cited evidence from prior local sessions",
       promptGuidelines: [
         "Use mooncite_recall when past local context may matter. Start with an exact name, identifier, error, hash, or distinctive phrase.",
@@ -180,7 +180,7 @@ export function createMooncitePiExtension(
         "Start without a scope. Narrow only with exact project and sessionId values from a candidate. Never pass a filesystem path.",
       ],
       parameters: Type.Object({
-        query: Type.String({ minLength: 1, maxLength: 2_000, pattern: PRESENTATION_SAFE_PATTERN, description: "Lexical query. Matching quotes require an exact phrase. Unquoted terms use OR. Exact locators and returned identities also match." }),
+        query: Type.String({ minLength: 1, maxLength: 2_000, pattern: PRESENTATION_SAFE_PATTERN, description: "Lexical query. Matching quotes require an exact phrase. Unquoted terms use OR. After an unquoted multi-word miss, local embeddings may add matches. Exact locators and returned identities also match." }),
         limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20, description: "Maximum candidates. Default: 5." })),
         project: Type.Optional(Type.String({ minLength: 1, maxLength: 256, pattern: PRESENTATION_SAFE_PATTERN, description: "Copy candidate.project from a result. Do not pass a filesystem path." })),
         session_id: Type.Optional(Type.String({ minLength: 1, maxLength: 512, pattern: PRESENTATION_SAFE_PATTERN, description: "Copy the source-qualified candidate.sessionId from a result." })),

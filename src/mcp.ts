@@ -29,7 +29,7 @@ function sanitizePresentation<T>(value: T): T {
 const debugTimingInput = z.boolean().optional()
   .describe("Return monotonic server-side latency data. Default: false.");
 const recallInput = z.object({
-  query: boundedRenderedInput(2_000).describe("Lexical query. Matching quotes require an exact phrase. Unquoted terms use OR. Exact locators and returned identities also match."),
+  query: boundedRenderedInput(2_000).describe("Lexical query. Matching quotes require an exact phrase. Unquoted terms use OR. After an unquoted multi-word miss, local embeddings may add matches. Exact locators and returned identities also match."),
   limit: z.number().int().min(1).max(20).optional().describe("Maximum candidates. Default: 5."),
   project: boundedRenderedInput(256).optional().describe("Copy candidate.project from a result. Do not pass a filesystem path."),
   session_id: boundedRenderedInput(512).optional().describe("Copy the source-qualified candidate.sessionId from a result."),
@@ -159,6 +159,8 @@ function renderEstablishment(candidate: EvidenceBundle["candidates"][number]): s
       return `This ${candidate.role} record contains the requested text verbatim.`;
     case "terms":
       return `This ${candidate.role} record contains ${candidate.match.matchedTerms.length} of ${candidate.match.matchedTerms.length + candidate.match.missingTerms.length} requested lexical terms.`;
+    case "semantic":
+      return `This ${candidate.role} record is a local embedding match.`;
   }
 }
 
@@ -308,7 +310,7 @@ function renderStatus(status: MoonciteToolStatus): string {
     : "";
   const refresh = status.lastSuccessfulRefreshAt ?? "never";
   return `Mooncite status: ${status.outcome}; ${status.meaning}\n`
-    + `Freshness: ${status.freshness}; trust=${status.trustState}; coverage=${status.coverage}; search_usable=${status.searchUsable}; last_successful_refresh=${refresh}; last_refresh=${status.lastRefreshOutcome}; last_rebuild=${status.lastRebuildOutcome}.\n`
+    + `Freshness: ${status.freshness}; trust=${status.trustState}; coverage=${status.coverage}; search_usable=${status.searchUsable}; embeddings=${status.semanticAvailable ? "available" : "unavailable"}; semantic_pending=${status.semanticPending}; last_successful_refresh=${refresh}; last_refresh=${status.lastRefreshOutcome}; last_rebuild=${status.lastRebuildOutcome}.\n`
     + `Sources: ${status.evidenceSpans} searchable span(s) from ${status.sourceFiles} session file(s) (${sourceCounts}); derived_state_bytes=${status.stateBytes}; ${status.malformed} malformed, ${status.oversized} oversized, ${status.errors} error(s); registrations: Pi ${registrations.pi}, OMP ${registrations.omp}, Codex ${registrations.codex}, Claude Code ${registrations.claudeCode}.${errors}\n`
     + `Next: ${renderNext(status.next)}`;
 }
@@ -473,7 +475,7 @@ export function createMoonciteMcpServer(
     "mooncite_recall",
     {
       title: "Recall prior evidence",
-      description: "Search authorized local history for bounded lexical evidence. Returns cited candidates, explicit outcomes, and next actions.",
+      description: "Search authorized local history for bounded lexical evidence. Unquoted multi-word misses may use local embeddings. Returns cited candidates, explicit outcomes, and next actions.",
       inputSchema: recallInput,
       annotations: { readOnlyHint: true, openWorldHint: false },
     },

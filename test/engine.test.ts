@@ -1366,4 +1366,58 @@ describe("Mooncite engine public seam", () => {
       recovered.close();
     }
   });
+
+  it("uses embeddings only after an unquoted multi-word lexical miss", async () => {
+    const f = await fixture();
+    await appendFile(f.source, jsonLine({
+      type: "message",
+      id: "semantic-question",
+      parentId: "entry-b",
+      timestamp: "2030-01-01T00:00:02.500Z",
+      message: {
+        role: "user",
+        content: "What should we do when a vendor request keeps failing?",
+      },
+    }) + jsonLine({
+      type: "message",
+      id: "semantic-target",
+      parentId: "semantic-question",
+      timestamp: "2030-01-01T00:00:03.000Z",
+      message: {
+        role: "assistant",
+        content: "We decided to retry provider failures with exponential backoff and jitter.",
+      },
+    }));
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    try {
+      expect(engine.status().semanticAvailable).toBe(true);
+      const paraphrase = engine.recall({
+        query: "What is the recovery policy for broken vendor requests?",
+        limit: 20,
+      });
+      expect(paraphrase.outcome).toBe("matches");
+      const semanticCandidate = paraphrase.candidates.find((candidate) => candidate.entryId === "semantic-target")!;
+      expect(semanticCandidate.match.kind).toBe("semantic");
+      expect(engine.inspect({ evidenceId: semanticCandidate.evidenceId, window: 0 })).toMatchObject({
+        outcome: "verified",
+        target: { text: expect.stringContaining("exponential backoff and jitter") },
+      });
+      const exact = engine.recall({ query: "retry provider failures with exponential backoff and jitter" });
+      expect(exact.candidates[0]).toMatchObject({ entryId: "semantic-target", match: { kind: "text_exact" } });
+      expect(exact.candidates[0]!.match.semanticSimilarity).toBeUndefined();
+      const jitter = engine.recall({ query: "jitter" });
+      expect(jitter.candidates[0]).toMatchObject({ entryId: "semantic-target", match: { kind: "text_exact" } });
+      expect(jitter.candidates[0]!.match.semanticSimilarity).toBeUndefined();
+      const quoted = engine.recall({ query: "\"exponential backoff\"" });
+      expect(quoted.candidates[0]).toMatchObject({ entryId: "semantic-target", match: { kind: "phrase_exact" } });
+      expect(quoted.candidates[0]!.match.semanticSimilarity).toBeUndefined();
+      expect(engine.recall({ query: "neon narwhal waltz" }).outcome).toBe("no_match");
+      expect(engine.status()).toMatchObject({
+        semanticAvailable: true,
+        semanticPending: 0,
+      });
+    } finally {
+      engine.close();
+    }
+  });
 });

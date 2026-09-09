@@ -136,7 +136,7 @@ describe("Mooncite stdio MCP seam", () => {
     expect(tools.map((tool) => tool.name).sort()).toEqual(["mooncite_inspect", "mooncite_recall", "mooncite_status"]);
     expect(Object.fromEntries(tools.map(({ name, description }) => [name, description]))).toEqual({
       mooncite_inspect: "Verify one Mooncite locator against current source bytes and return a bounded window. Verification proves provenance, not truth.",
-      mooncite_recall: "Search authorized local history for bounded lexical evidence. Returns cited candidates, explicit outcomes, and next actions.",
+      mooncite_recall: "Search authorized local history for bounded lexical evidence. Unquoted multi-word misses may use local embeddings. Returns cited candidates, explicit outcomes, and next actions.",
       mooncite_status: "Report source and index health without transcript text or full source paths.",
     });
     expect(await readdir(sourceFixture.stateDir)).not.toContain("learned-memory.sqlite");
