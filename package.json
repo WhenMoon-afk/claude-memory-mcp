@@ -6,6 +6,9 @@
   "os": [
     "linux"
   ],
+  "cpu": [
+    "x64"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -39,7 +42,7 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc -p tsconfig.build.json",
+    "build": "npm run clean && tsc -p tsconfig.build.json && node scripts/copy-semantic-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:focused": "vitest run test/engine.test.ts test/mcp.test.ts test/pi-extension.test.ts test/lifecycle.test.ts test/source-config.test.ts",
@@ -50,11 +53,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
+    "@ternlight/mini": "0.1.1",
     "typebox": "1.3.7",
     "zod": "4.3.6"
   },
   "bundleDependencies": [
     "@modelcontextprotocol/server",
+    "@ternlight/mini",
     "typebox",
     "zod"
   ],
@@ -62,6 +67,7 @@
     "@types/node": "^24.0.0",
     "@typescript-eslint/parser": "8.68.0",
     "eslint": "10.9.1",
+    "sqlite-vec-linux-x64": "0.1.9",
     "typescript": "^5.9.0",
     "vitest": "^4.1.4"
   },
