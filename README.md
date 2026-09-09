@@ -22,7 +22,7 @@ Mooncite requires Linux with procfs, Node.js 24 or newer, `npm`, and access to G
 npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6 install
 ```
 
-Tagged v4.0.6 is the current stable release. After installation, check the launcher. Then fully restart or reload each client whose registration is `exact`:
+This cut is Mooncite 4.0.6. Use the `#v4.0.6` tag after it is cut on merge. After installation, check the launcher. Then fully restart or reload each client whose registration is `exact`:
 
 ```bash
 "$HOME/.local/bin/mooncite" status
