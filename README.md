@@ -28,7 +28,7 @@ Tagged v4.0.6 is the current stable release. After installation, check the launc
 "$HOME/.local/bin/mooncite" status
 ```
 
-The installer configures available Pi, OMP, Codex, and Claude Code clients. ChatGPT is a source, not a client. See [operations](docs/operations.md) for the prerelease, source setup, ChatGPT exports, removal commands, and quick fixes.
+The installer configures available Pi, OMP, Codex, and Claude Code clients. ChatGPT is a source, not a client. See [operations](docs/operations.md) for source setup, ChatGPT exports, removal commands, and quick fixes.
 
 ## First search
 
