@@ -10,6 +10,13 @@ Stable v4.0.6:
 npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6 install
 ```
 
+
+Current prerelease (not stable):
+
+```bash
+npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.7-preview.1010.0 install
+```
+
 The stable tag is the documented install. Untagged `main` builds are identified by commit SHA.
 
 The installer verifies the package identity and layout. It puts the package under `$XDG_DATA_HOME/mooncite` and the evidence index under `$XDG_STATE_HOME/mooncite`. It creates `~/.local/bin/mooncite` and configures available Pi, OMP, Codex, and Claude Code clients. Reinstalling the same version is idempotent.

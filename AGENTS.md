@@ -83,7 +83,7 @@ Exercise lifecycle scenarios only in disposable fixture homes. Never run install
 
 ## Versions and publication
 
-Tagged v4.0.6 is the documented stable install. The owner decides when a stable tag is ready. After this cut, new work uses a later preview identity. Untagged work is never published merely because files contain a candidate version. A version change must synchronize `src/identity.ts`, package manifests/lockfile, lifecycle expectations, and tests.
+Tagged v4.0.6 is the documented stable install. The owner decides when a stable tag is ready. Current development identity is `4.0.7-preview.1010.0`. Untagged work is never published merely because files contain a candidate version. A version change must synchronize `src/identity.ts`, package manifests/lockfile, lifecycle expectations, and tests.
 
 Before a release is eligible, the full verification suite and packaged-artifact smoke must pass on the supported Linux/procfs and Node baseline; the candidate must also prove clean isolated install, all four client paths, the exact default three-tool surface, the conditional learned-memory tools when enabled, source preservation, conflict refusal, disable/uninstall ownership, and confirmed purge boundaries. Review the actual shipped file set and public docs, not only the working tree.
 

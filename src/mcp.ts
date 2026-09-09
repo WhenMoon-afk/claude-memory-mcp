@@ -386,6 +386,12 @@ function renderFollowOnQueries(bundle: EvidenceBundle): string {
   return `Follow-on queries:\n- ${suggestions.join("\n- ")}`;
 }
 
+function clipExcerpt(text: string, max = 240): string {
+  const oneLine = text.replace(/\s+/g, " ").trim();
+  if (oneLine.length <= max) return oneLine;
+  return `${oneLine.slice(0, max - 1)}…`;
+}
+
 function renderRecall(bundle: EvidenceBundle): string {
   const requestedScope = bundle.scope.project || bundle.scope.sessionId
     ? `; scope${bundle.scope.project ? ` project=${bundle.scope.project}` : ""}${bundle.scope.sessionId ? ` session_id=${bundle.scope.sessionId}` : ""} contains ${bundle.scope.evidenceSpans} indexed span(s)`
@@ -396,8 +402,11 @@ function renderRecall(bundle: EvidenceBundle): string {
   const next = `Next: ${renderNext(bundle.next)}`;
   if (!bundle.candidates.length) return `${heading}\n${state}\n${next}`;
   const renderedAt = Date.now();
-  const findings = bundle.candidates.map((candidate, index) => {
-    const details = [
+  const card = bundle.candidates.map((candidate, index) =>
+    `${index + 1}. ${candidate.sourceOrigin} ${candidate.role} · ${formatDisplayTimestamp(candidate.eventTimestamp, renderedAt)}\n${clipExcerpt(candidate.excerpt)}`
+  ).join("\n\n");
+  const details = bundle.candidates.map((candidate, index) => {
+    const matchDetails = [
       `${candidate.match.band}; ${candidate.match.kind}; term_coverage=${candidate.match.termCoverage.toFixed(2)}`,
       ...(candidate.duplicateSpanCount && candidate.duplicateSpanCount > 1 ? [`duplicates_collapsed=${candidate.duplicateSpanCount}`] : []),
       ...(candidate.omittedBytes > 0 ? [`omitted_bytes=${candidate.omittedBytes}`] : []),
@@ -414,12 +423,12 @@ function renderRecall(bundle: EvidenceBundle): string {
       + `Evidence URI: ${candidate.evidenceUri}\n`
       + `Project: ${candidate.project}\n`
       + `Session ID: ${candidate.sessionId}\n`
-      + `Match: ${details}\n`
+      + `Match: ${matchDetails}\n`
       + `Matched terms: ${candidate.match.matchedTerms.join(", ") || "none"}\n`
       + `Missing terms: ${candidate.match.missingTerms.join(", ") || "none"}`
       + (candidate.isEcho ? "\nRecursive Mooncite rendering: yes" : "");
   }).join("\n\n");
-  return `${findings}\n\n${heading}\n${state}\n${renderFollowOnQueries(bundle)}\n${next}`;
+  return `${card}\n\n${details}\n\n${heading}\n${state}\n${renderFollowOnQueries(bundle)}\n${next}`;
 }
 
 type InspectionPresentation = EvidenceInspection & {
