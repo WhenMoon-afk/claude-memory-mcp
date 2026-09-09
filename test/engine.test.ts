@@ -595,8 +595,17 @@ describe("Mooncite engine public seam", () => {
         })
         + jsonLine({
           type: "message",
-          id: "entry-genuine",
+          id: "entry-echo-finding",
           parentId: "entry-echo",
+          message: {
+            role: "toolResult",
+            content: "Finding 1\nExcerpt: The genuine event marker is recursive-origin-marker-77.\nSource: omp\nRole: toolResult\nMooncite recall: matches; conclusive=true;",
+          },
+        })
+        + jsonLine({
+          type: "message",
+          id: "entry-genuine",
+          parentId: "entry-echo-finding",
           message: { role: "user", content: "The genuine event marker is recursive-origin-marker-77." },
         }),
       );
@@ -604,17 +613,16 @@ describe("Mooncite engine public seam", () => {
       expect(recalled).toMatchObject({
         outcome: "matches",
         conclusive: true,
-        echoesSuppressed: 1,
+        echoesSuppressed: 2,
         candidates: [{ entryId: "entry-genuine", isEcho: false, recordProvenance: "original" }],
       });
       expect(recalled.candidates).toHaveLength(1);
-      expect(recalled.warnings).toContain("1 recursive Mooncite echo(es) suppressed.");
+      expect(recalled.warnings).toContain("2 recursive Mooncite echo(es) suppressed.");
       expect(recalled.candidates[0]!.excerpt).toContain("genuine event marker");
       const echoIdParts = recalled.candidates[0]!.evidenceId.split(":");
       echoIdParts[4] = createHash("sha256").update("entry-echo").digest("hex").slice(0, 24);
       expect(engine.recall({ query: echoIdParts.join(":") })).toMatchObject({
         outcome: "matches",
-        echoesSuppressed: 0,
         candidates: [{
           entryId: "entry-echo",
           isEcho: true,

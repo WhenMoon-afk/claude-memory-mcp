@@ -695,6 +695,8 @@ function isMoonciteRenderingText(text: string): boolean {
   return [...offsets].some((offset) => {
     const head = normalized.slice(offset);
     return /^Mooncite (?:recall|inspection|status):/u.test(head)
+      || /^Finding [1-9]\d*\nExcerpt: /u.test(head)
+      || /^Finding [1-9]\d*\nSource: (?:pi|omp|claude-code|codex|chatgpt)\n/u.test(head)
       || new RegExp(`^(?:Evidence for|Weak evidence leads for) “[\\s\\S]{0,2200}?”: {0,2}${trust}${tail}`, "u").test(head)
       || new RegExp(`^(?:No evidence matched|Mooncite evidence is unavailable for) “[\\s\\S]{0,2200}?”\\. ${trust}${tail}`, "u").test(head)
       || /^Verified evidence mooncite:(?:pi|omp|claude-code|codex|chatgpt):[^\n]{1,2200}:\n/u.test(head)
