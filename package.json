@@ -1,7 +1,7 @@
 {
   "name": "@whenmoon-afk/mooncite",
   "version": "4.0.7-preview.1010.0",
-  "description": "Local citation-backed context recall for coding agents. Learned memory is optional.",
+  "description": "Local citation-backed context recall for coding agents.",
   "type": "module",
   "os": [
     "linux"
@@ -27,7 +27,7 @@
     "LICENSE"
   ],
   "omp": {
-    "description": "Local citation-backed context recall with optional learned memory"
+    "description": "Local citation-backed context recall"
   },
   "pi": {
     "extensions": [
@@ -42,7 +42,7 @@
     "build": "npm run clean && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:focused": "vitest run test/engine.test.ts test/learned-memory.test.ts test/mcp.test.ts test/pi-extension.test.ts test/lifecycle.test.ts test/source-config.test.ts",
+    "test:focused": "vitest run test/engine.test.ts test/mcp.test.ts test/pi-extension.test.ts test/lifecycle.test.ts test/source-config.test.ts",
     "lint:complexity": "eslint \"src/**/*.ts\"",
     "verify": "npm run lint:complexity && npm run typecheck && npm test && npm run build",
     "smoke:package": "npm run build && node scripts/package-smoke.mjs",
@@ -82,7 +82,6 @@
     "mcp",
     "context-retrieval",
     "conversation-history",
-    "learned-memory",
     "local-first",
     "citations",
     "pi",

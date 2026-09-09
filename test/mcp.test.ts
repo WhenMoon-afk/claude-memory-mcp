@@ -1,12 +1,10 @@
 import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import { PassThrough } from "node:stream";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createMoonciteMcpServer } from "../src/mcp.js";
-import { setLearnedMemoryEnabled } from "../src/learned-memory.js";
 import { createFixture, jsonLine, type Fixture } from "./fixture.js";
 
 const fixtures: Fixture[] = [];
@@ -25,14 +23,12 @@ async function rpc(
   method: string,
   params?: Record<string, unknown>,
   sourceFixture?: Fixture,
-  learnedConfigPath?: string,
 ): Promise<RpcResponse> {
   const f = sourceFixture ?? await createFixture();
   if (!sourceFixture) fixtures.push(f);
   const server = createMoonciteMcpServer(
     { sessionsRoot: f.sessionsRoot, stateDir: f.stateDir },
     async () => ({ pi: "exact", omp: "exact", codex: "exact", claudeCode: "exact" }),
-    learnedConfigPath ? { configPath: learnedConfigPath } : undefined,
   );
   const input = new PassThrough();
   const output = new PassThrough();
@@ -72,7 +68,6 @@ async function rpc(
 
 async function openRpcSession(
   sourceFixture: Fixture,
-  learnedConfigPath?: string,
   clientName = "contract-sequence",
 ): Promise<{
   request: (method: string, params?: Record<string, unknown>) => Promise<RpcResponse>;
@@ -81,7 +76,6 @@ async function openRpcSession(
   const server = createMoonciteMcpServer(
     { sessionsRoot: sourceFixture.sessionsRoot, stateDir: sourceFixture.stateDir },
     async () => ({ pi: "exact", omp: "exact", codex: "exact", claudeCode: "exact" }),
-    learnedConfigPath ? { configPath: learnedConfigPath } : undefined,
   );
   const input = new PassThrough();
   const output = new PassThrough();
@@ -127,9 +121,8 @@ async function callTool(
   name: string,
   args: Record<string, unknown>,
   sourceFixture?: Fixture,
-  learnedConfigPath?: string,
 ): Promise<Record<string, unknown>> {
-  const response = await rpc("tools/call", { name, arguments: args }, sourceFixture, learnedConfigPath);
+  const response = await rpc("tools/call", { name, arguments: args }, sourceFixture);
   if (response.error) throw new Error(response.error.message);
   return response.result ?? {};
 }
@@ -149,249 +142,6 @@ describe("Mooncite stdio MCP seam", () => {
     expect(await readdir(sourceFixture.stateDir)).not.toContain("learned-memory.sqlite");
   });
 
-  it("conditionally exposes and exercises the four provenance-native learned-memory tools", async () => {
-    const sourceFixture = await createFixture();
-    fixtures.push(sourceFixture);
-    const configPath = join(sourceFixture.home, ".config", "mooncite", "learned-memory.json");
-    setLearnedMemoryEnabled(configPath, true);
-
-    const listed = await rpc("tools/list", undefined, sourceFixture, configPath);
-    const tools = listed.result?.tools as Array<{ name: string; description: string }>;
-    expect(tools.map((tool) => tool.name).sort()).toEqual([
-      "mooncite_inspect",
-      "mooncite_memory_delete",
-      "mooncite_memory_inspect",
-      "mooncite_memory_recall",
-      "mooncite_memory_write",
-      "mooncite_recall",
-      "mooncite_status",
-    ]);
-    expect(Object.fromEntries(tools.map(({ name, description }) => [name, description]))).toMatchObject({
-      mooncite_memory_delete: "Delete one learned memory or skill candidate. Memory deletion fails while a surviving dependency remains.",
-      mooncite_memory_inspect: "Inspect one immutable memory revision and verify its own anchors, or inspect one skill candidate.",
-      mooncite_memory_recall: "Search agent-authored interpretations. Results are learned memory, not source evidence.",
-      mooncite_memory_write: "Write immutable learned-memory revisions, manage lifecycle metadata, or propose and review skill candidates. Candidate review never installs a skill.",
-    });
-
-    const recalledEvidence = await callTool("mooncite_recall", { query: "silver-cedar-17" }, sourceFixture, configPath);
-    const evidenceStructured = recalledEvidence.structuredContent as { candidates: Array<{ evidenceId: string }> };
-    const evidence = evidenceStructured.candidates[0]!;
-    const written = await callTool("mooncite_memory_write", {
-      operation: "create",
-      interpretation: "The launch marker is silver cedar.",
-      provenance: { kind: "verified", evidence_ids: [evidence.evidenceId] },
-    }, sourceFixture, configPath);
-    expect(written.structuredContent).toMatchObject({
-      kind: "derived_memory_write",
-      outcome: "created",
-      revision: 1,
-      provenance: { kind: "verified" },
-      provenanceOutcome: "verified",
-    });
-    const writtenContent = written.content as Array<{ text: string }>;
-    expect(writtenContent[0]!.text).toContain("never source evidence");
-    const writtenStructured = written.structuredContent as { memoryId: string };
-    const memoryId = writtenStructured.memoryId;
-    const staleWrite = await callTool("mooncite_memory_write", {
-      operation: "revise",
-      memory_id: memoryId,
-      expected_revision: 2,
-      interpretation: "This stale correction must not commit.",
-      provenance: { kind: "verified", evidence_ids: [evidence.evidenceId] },
-    }, sourceFixture, configPath);
-    expect(staleWrite).toMatchObject({
-      isError: true,
-      structuredContent: {
-        kind: "derived_memory_error",
-        operation: "write",
-        outcome: "failed",
-        message: expect.stringMatching(/expected revision 2, current revision 1/u),
-      },
-    });
-
-    const recalledMemory = await callTool("mooncite_memory_recall", {
-      query: memoryId,
-      related_limit: 1,
-    }, sourceFixture, configPath);
-    expect(recalledMemory.structuredContent).toMatchObject({
-      kind: "derived_memory_recall",
-      candidates: [{
-        kind: "derived_memory",
-        memoryId,
-        revision: 1,
-        provenanceState: "indexed",
-        lifecycle: { state: "active", metadataVersion: 1 },
-      }],
-    });
-    const recalledMemoryContent = recalledMemory.content as Array<{ text: string }>;
-    expect(recalledMemoryContent[0]!.text).toContain("interpretations, never source evidence");
-
-    const inspected = await callTool("mooncite_memory_inspect", {
-      kind: "revision",
-      memory_id: memoryId,
-      window: 1,
-    }, sourceFixture, configPath);
-    expect(inspected.structuredContent).toMatchObject({
-      kind: "derived_memory",
-      memoryId,
-      provenance: { kind: "verified" },
-      provenanceOutcome: "verified",
-      anchors: [{ kind: "source_evidence_anchor", inspection: { outcome: "verified" } }],
-    });
-
-    const reinforced = await callTool("mooncite_memory_write", {
-      operation: "reinforce",
-      memory_id: memoryId,
-      expected_revision: 1,
-      expected_metadata_version: 1,
-      salience: 61,
-    }, sourceFixture, configPath);
-    expect(reinforced.structuredContent).toMatchObject({
-      kind: "derived_memory_lifecycle",
-      outcome: "reinforced",
-      lifecycle: { state: "active", metadataVersion: 2, salience: 61, reinforcementCount: 1 },
-    });
-
-    const proposed = await callTool("mooncite_memory_write", {
-      operation: "propose_skill_candidate",
-      sources: [{ memory_id: memoryId, revision: 1 }],
-      artifact: {
-        name: "silver-cedar-check",
-        description: "A reviewed candidate artifact.",
-        instructions: "Check the silver cedar marker before launch.",
-      },
-    }, sourceFixture, configPath);
-    const proposedStructured = proposed.structuredContent as {
-      candidate: { candidateId: string };
-    };
-    const candidateId = proposedStructured.candidate.candidateId;
-    expect(proposed.structuredContent).toMatchObject({
-      kind: "skill_candidate_write",
-      outcome: "proposed",
-      candidate: { candidateId, review: { state: "pending_review" }, installed: false },
-    });
-    const reviewed = await callTool("mooncite_memory_write", {
-      operation: "review_skill_candidate",
-      candidate_id: candidateId,
-      expected_state: "pending_review",
-      decision: "approved",
-      review_note: "Reviewed as an artifact only.",
-    }, sourceFixture, configPath);
-    expect(reviewed.structuredContent).toMatchObject({
-      candidate: { candidateId, review: { state: "approved" }, installed: false },
-    });
-    expect((await callTool("mooncite_memory_inspect", {
-      kind: "skill_candidate",
-      candidate_id: candidateId,
-    }, sourceFixture, configPath)).structuredContent).toMatchObject({
-      kind: "skill_candidate",
-      candidateId,
-      review: { state: "approved" },
-      installed: false,
-    });
-
-    const status = await callTool("mooncite_status", {}, sourceFixture, configPath);
-    expect(status.structuredContent).toMatchObject({
-      outcome: "ready",
-      learnedMemory: {
-        kind: "derived_memory_status",
-        enabled: true,
-        outcome: "ready",
-        schemaVersion: 2,
-        memories: 1,
-        revisions: 1,
-        active: 1,
-        skillCandidates: 1,
-        pendingSkillCandidates: 0,
-      },
-    });
-    expect((await callTool("mooncite_memory_delete", {
-      kind: "memory",
-      memory_id: memoryId,
-      expected_revision: 1,
-      expected_metadata_version: 2,
-    }, sourceFixture, configPath)).structuredContent).toMatchObject({
-      kind: "derived_memory_delete",
-      outcome: "blocked",
-      dependencyCount: 1,
-      dependencies: [{ kind: "skill_candidate", candidateId }],
-    });
-    expect((await callTool("mooncite_memory_delete", {
-      kind: "skill_candidate",
-      candidate_id: candidateId,
-      expected_state: "approved",
-    }, sourceFixture, configPath)).structuredContent).toMatchObject({
-      kind: "skill_candidate_delete",
-      outcome: "deleted",
-      candidateId,
-    });
-    const deleted = await callTool("mooncite_memory_delete", {
-      kind: "memory",
-      memory_id: memoryId,
-      expected_revision: 1,
-      expected_metadata_version: 2,
-    }, sourceFixture, configPath);
-    expect(deleted.structuredContent).toMatchObject({
-      kind: "derived_memory_delete",
-      outcome: "deleted",
-      memoryId,
-      deletedRevisions: 1,
-    });
-    expect((await callTool("mooncite_recall", { query: "silver-cedar-17" }, sourceFixture, configPath)).structuredContent)
-      .toMatchObject({ outcome: "matches" });
-    setLearnedMemoryEnabled(configPath, false);
-    const disabled = await rpc("tools/list", undefined, sourceFixture, configPath);
-    const disabledTools = disabled.result?.tools as Array<{ name: string }>;
-    expect(disabledTools.map(({ name }) => name).sort()).toEqual(["mooncite_inspect", "mooncite_recall", "mooncite_status"]);
-    expect(await readdir(sourceFixture.stateDir)).toContain("learned-memory.sqlite");
-  });
-
-  it("keeps every evidence tool available when the learned store has a future schema", async () => {
-    const sourceFixture = await createFixture();
-    fixtures.push(sourceFixture);
-    const configPath = join(sourceFixture.home, ".config", "mooncite", "learned-memory.json");
-    setLearnedMemoryEnabled(configPath, true);
-    await rpc("tools/list", undefined, sourceFixture, configPath);
-    const databasePath = join(sourceFixture.stateDir, "learned-memory.sqlite");
-    const database = new DatabaseSync(databasePath);
-    try {
-      database.prepare("UPDATE memory_metadata SET value = '3' WHERE key = 'schema_version'").run();
-    } finally {
-      database.close();
-    }
-
-    const recalled = await callTool("mooncite_recall", { query: "silver-cedar-17" }, sourceFixture, configPath);
-    expect(recalled.structuredContent).toMatchObject({ outcome: "matches" });
-    const recalledEvidence = z.object({
-      candidates: z.array(z.object({ evidenceId: z.string() })).min(1),
-    }).parse(recalled.structuredContent);
-    const evidenceId = recalledEvidence.candidates[0]!.evidenceId;
-    const inspected = await callTool("mooncite_inspect", {
-      evidence_id: evidenceId,
-      window: 0,
-    }, sourceFixture, configPath);
-    expect(inspected.structuredContent).toMatchObject({ outcome: "verified" });
-    const status = await callTool("mooncite_status", {}, sourceFixture, configPath);
-    expect(status.structuredContent).toMatchObject({
-      outcome: "ready",
-      learnedMemory: {
-        enabled: true,
-        outcome: "unavailable",
-        errorCode: "unsupported_schema",
-        message: expect.stringContaining("Keep learned-memory.sqlite intact"),
-      },
-    });
-    const memory = await callTool("mooncite_memory_recall", { query: "silver cedar" }, sourceFixture, configPath);
-    expect(memory).toMatchObject({ isError: true });
-
-    const retained = new DatabaseSync(databasePath, { readOnly: true });
-    try {
-      expect(retained.prepare("SELECT value FROM memory_metadata WHERE key = 'schema_version'").get())
-        .toEqual({ value: "3" });
-    } finally {
-      retained.close();
-    }
-  });
 
   it("supports the receiver recall-to-inspect flow with both rendered locator forms", async () => {
     const sourceFixture = await createFixture();
@@ -592,7 +342,7 @@ describe("Mooncite stdio MCP seam", () => {
       await session.close();
     }
 
-    const piSession = await openRpcSession(sourceFixture, undefined, "mooncite-pi");
+    const piSession = await openRpcSession(sourceFixture, "mooncite-pi");
     try {
       const piResponse = await piSession.request("tools/call", {
         name: "mooncite_recall",

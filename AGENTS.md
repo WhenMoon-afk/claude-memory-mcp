@@ -10,16 +10,16 @@ Mooncite is a Linux/procfs-only, local, citation-backed retrieval tool for prior
 - The SQLite evidence index is owner-private, transactional, derived, disposable, and rebuildable from authorized sources.
 - Recall is bounded lexical retrieval. Inspection must re-read and verify the current physical source bytes before returning a bounded window. Status must not expose transcript text or full physical paths.
 - Mooncite has no history network transport, telemetry, upload, SSH/remote-copy path, account login, export automation, credential/cookie access, or opaque application-cache scraping. Text returned through MCP enters the receiving model's privacy boundary; do not imply otherwise.
-- Evidence retrieval is not an authority, policy, recommendation, truth-scoring, or durable-agent-memory layer. The owner-approved learned-memory mode is a separate, explicit, default-off layer for agent-authored interpretations with verified, derived, current-context, or unanchored provenance; it must never relabel an interpretation as source evidence.
+- Evidence retrieval is not an authority, policy, recommendation, truth-scoring, or durable-agent-memory layer.
 
 ## Fixed architecture
 
-Treat these counts and seams as closed contracts except for the owner-approved optional learned-memory mode:
+Treat these counts and seams as closed contracts:
 
 - Exactly five source origins: Pi, OMP, Claude Code, Codex, and ChatGPT.
-- Default mode exposes exactly three MCP tools: `mooncite_recall`, `mooncite_inspect`, and `mooncite_status`. A valid explicit learned-memory enablement may additionally expose only `mooncite_memory_recall`, `mooncite_memory_inspect`, `mooncite_memory_write`, and `mooncite_memory_delete`.
+- Exactly three MCP tools: `mooncite_recall`, `mooncite_inspect`, and `mooncite_status`.
 - Exactly four client integrations: Pi, OMP, Codex, and Claude Code. They connect to one local stdio MCP server. ChatGPT is a source origin, not a client integration.
-- `MoonciteEngine` owns ingestion, source adapters, coherent reads, citation identity, SQLite/FTS, refresh/rebuild, inspection, last-good behavior, and the bounded canonical-anchor resolver. `LearnedMemoryStore` owns the separate durable `learned-memory.sqlite`; learned-store failure must not disable evidence retrieval.
+- `MoonciteEngine` owns ingestion, source adapters, coherent reads, citation identity, SQLite/FTS, refresh/rebuild, inspection, last-good behavior, and the bounded canonical-anchor resolver.
 - The Pi extension is a thin native-to-MCP adapter. `.mcp.json`, Codex, and Claude Code registrations point to the same packaged server. Do not duplicate retrieval behavior in an integration.
 - Pi and OMP use their standard roots. Only the narrow supported Claude Code, Codex, and local ChatGPT-export roots may be automatically discovered. Owner configuration adds optional roots. A configured origin/root pair suppresses only the automatic registration with that exact pair. Automatic sibling roots remain active. Authorization grants local reads only.
 - Symlinks are excluded from source admission. Authorized roots and opened files remain physically contained and identity-checked through Linux file descriptors.

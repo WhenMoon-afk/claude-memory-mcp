@@ -36,13 +36,12 @@ Recall runs inside a configured client. It is not a shell command. Give the agen
 
 > Call `mooncite_recall` with "<phrase>". Start without a scope. If it returns a candidate, inspect that candidate's `evidence_id` with `mooncite_inspect`. Treat `verified` as proof that the cited text still matches its source file. It does not prove the text is true.
 
-Mooncite exposes exactly three evidence tools by default:
+Mooncite exposes exactly three tools:
 
 - `mooncite_recall` searches bounded local evidence.
 - `mooncite_inspect` checks a locator against current source bytes.
 - `mooncite_status` reports coverage and health without transcript text.
 
-Learned memory is separate and off by default. Enabling it adds four `mooncite_memory_*` tools. Those tools store agent-authored interpretations in a separate database.
 
 ## Read next
 

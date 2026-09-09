@@ -5,19 +5,6 @@ import { z } from "zod";
 import { MoonciteEngine, type EngineOptions, type EvidenceBundle, type EvidenceInspection, type MoonciteStatus } from "./engine.js";
 import { MOONCITE_MCP_NAME, MOONCITE_VERSION } from "./identity.js";
 import type { RegistrationDiagnostics } from "./clients.js";
-import {
-  LearnedMemoryStore,
-  loadLearnedMemoryMode,
-  unavailableLearnedMemoryStatus,
-  type LearnedMemoryDeleteResult,
-  type LearnedMemoryInspection,
-  type LearnedMemoryRecall,
-  type LearnedMemoryProvenance,
-  type LearnedMemoryProvenanceInput,
-  type LearnedMemoryRelation,
-  type LearnedMemoryStatus,
-  type LearnedMemoryWriteResult,
-} from "./learned-memory.js";
 
 const PRESENTATION_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
 const PRESENTATION_CONTROL_REPLACEMENT_PATTERN = new RegExp(PRESENTATION_CONTROL_PATTERN.source, "gu");
@@ -67,193 +54,6 @@ const inspectInput = z.object({
 
 
 
-const memoryIdInput = boundedRenderedInput(64)
-  .regex(/^mooncite-memory:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
-const skillCandidateIdInput = boundedRenderedInput(80)
-  .regex(/^mooncite-skill-candidate:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
-const memoryScopeInput = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("global") }).strict(),
-  z.object({
-    kind: z.literal("project"),
-    project: boundedRenderedInput(256).describe("Exact encoded project from a source-evidence candidate."),
-  }).strict(),
-]);
-const memoryRelationInput = z.object({
-  memory_id: memoryIdInput,
-  revision: z.number().int().min(1),
-  relation: z.enum(["supports", "contradicts", "refines", "supersedes"]),
-  reason: boundedRenderedInput(1_024),
-}).strict();
-const memoryEvidenceIdsInput = (minimum: 0 | 1) => z.array(boundedRenderedInput(2_048))
-  .min(minimum)
-  .max(8)
-  .refine((values) => new Set(values).size === values.length, "Evidence locators must be unique.");
-const memoryRelationsInput = (minimum: 1 | 2) => z.array(memoryRelationInput)
-  .min(minimum)
-  .max(8)
-  .refine(
-    (values) => new Set(values.map((value) => `${value.memory_id}\0${value.revision}`)).size === values.length,
-    "Exact parent revisions must be unique.",
-  );
-const memoryRevisionSourcesInput = z.array(z.object({
-  memory_id: memoryIdInput,
-  revision: z.number().int().min(1),
-}).strict()).min(1).max(8).refine(
-  (values) => new Set(values.map((value) => `${value.memory_id}\0${value.revision}`)).size === values.length,
-  "Exact source revisions must be unique.",
-);
-const memoryProvenanceInput = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("verified"),
-    evidence_ids: memoryEvidenceIdsInput(1)
-      .describe("One to eight evidence locators. Mooncite verifies and canonicalizes every locator."),
-  }).strict(),
-  z.object({
-    kind: z.literal("derived"),
-    parents: memoryRelationsInput(1),
-    evidence_ids: memoryEvidenceIdsInput(0)
-      .describe("Up to eight additional evidence locators owned by this revision."),
-  }).strict(),
-  z.object({
-    kind: z.literal("current_context"),
-    context_note: boundedRenderedInput(2_048),
-    evidence_ids: memoryEvidenceIdsInput(0)
-      .describe("Up to eight evidence locators owned by this revision."),
-  }).strict(),
-  z.object({
-    kind: z.literal("unanchored"),
-    basis_note: boundedRenderedInput(2_048),
-  }).strict(),
-]);
-const memoryRecallInput = z.object({
-  query: boundedRenderedInput(2_000).describe("Lexical interpretation query or exact mooncite-memory ID."),
-  limit: z.number().int().min(1).max(20).optional().describe("Maximum candidates. Default: 5."),
-  project: boundedRenderedInput(256).optional().describe("Return this project and global learned memories. Copy the exact encoded project from a result."),
-  include_invalid: z.boolean().optional().describe("Include memories quarantined by their own changed, missing, or deauthorized evidence anchors."),
-  include_archived: z.boolean().optional().describe("Include archived memories. Default: false."),
-  related_limit: z.number().int().min(0).max(8).optional()
-    .describe("Maximum one-hop related revisions per result. Default: 0. Mooncite never traverses recursively."),
-}).strict();
-const memoryInspectInput = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("revision"),
-    memory_id: memoryIdInput,
-    revision: z.number().int().min(1).optional().describe("Immutable revision. Default: current revision."),
-    window: z.number().int().min(0).max(2).optional()
-      .describe("Source spans before and after each own anchor. Default: 0. Range: 0 to 2."),
-  }).strict(),
-  z.object({
-    kind: z.literal("skill_candidate"),
-    candidate_id: skillCandidateIdInput,
-  }).strict(),
-]);
-const memoryWriteInput = z.discriminatedUnion("operation", [
-  z.object({
-    operation: z.literal("create"),
-    interpretation: boundedRenderedInput(8_192)
-      .describe("Agent-authored interpretation up to 8 KiB UTF-8. It is not source evidence."),
-    provenance: memoryProvenanceInput,
-    scope: memoryScopeInput.optional()
-      .describe("Omit to infer scope from same-project dependencies. Evidence-free memory requires an explicit scope."),
-  }).strict(),
-  z.object({
-    operation: z.literal("revise"),
-    memory_id: memoryIdInput,
-    expected_revision: z.number().int().min(1),
-    interpretation: boundedRenderedInput(8_192)
-      .describe("Interpretation for the new immutable revision."),
-    provenance: memoryProvenanceInput,
-    scope: memoryScopeInput.optional().describe("Omit to keep and validate the previous scope."),
-  }).strict(),
-  z.object({
-    operation: z.literal("activate"),
-    memory_id: memoryIdInput,
-    expected_revision: z.number().int().min(1),
-    expected_metadata_version: z.number().int().min(1),
-  }).strict(),
-  z.object({
-    operation: z.literal("reinforce"),
-    memory_id: memoryIdInput,
-    expected_revision: z.number().int().min(1),
-    expected_metadata_version: z.number().int().min(1),
-    salience: z.number().int().min(0).max(100),
-  }).strict(),
-  z.object({
-    operation: z.literal("archive"),
-    memory_id: memoryIdInput,
-    expected_revision: z.number().int().min(1),
-    expected_metadata_version: z.number().int().min(1),
-  }).strict(),
-  z.object({
-    operation: z.literal("consolidate"),
-    interpretation: boundedRenderedInput(8_192),
-    parents: memoryRelationsInput(2),
-    evidence_ids: memoryEvidenceIdsInput(0),
-    scope: memoryScopeInput.optional()
-      .describe("Omit to infer scope from same-project dependencies. Mixed or global dependencies require global scope."),
-  }).strict(),
-  z.object({
-    operation: z.literal("propose_skill_candidate"),
-    sources: memoryRevisionSourcesInput,
-    artifact: z.object({
-      name: boundedRenderedInput(80),
-      description: boundedRenderedInput(2_048),
-      instructions: boundedRenderedInput(16_384),
-    }).strict(),
-  }).strict(),
-  z.object({
-    operation: z.literal("review_skill_candidate"),
-    candidate_id: skillCandidateIdInput,
-    expected_state: z.literal("pending_review"),
-    decision: z.enum(["approved", "rejected"]),
-    review_note: boundedRenderedInput(2_048),
-  }).strict(),
-]);
-const memoryDeleteInput = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("memory"),
-    memory_id: memoryIdInput,
-    expected_revision: z.number().int().min(1),
-    expected_metadata_version: z.number().int().min(1),
-  }).strict(),
-  z.object({
-    kind: z.literal("skill_candidate"),
-    candidate_id: skillCandidateIdInput,
-    expected_state: z.enum(["pending_review", "approved", "rejected"]),
-  }).strict(),
-]);
-type MemoryRelationWire = z.infer<typeof memoryRelationInput>;
-type MemoryProvenanceWire = z.infer<typeof memoryProvenanceInput>;
-
-function memoryRelationFromWire(relation: MemoryRelationWire): LearnedMemoryRelation {
-  return {
-    memoryId: relation.memory_id,
-    revision: relation.revision,
-    relation: relation.relation,
-    reason: relation.reason,
-  };
-}
-
-function memoryProvenanceFromWire(provenance: MemoryProvenanceWire): LearnedMemoryProvenanceInput {
-  switch (provenance.kind) {
-    case "verified":
-      return { kind: "verified", evidenceIds: provenance.evidence_ids };
-    case "derived":
-      return {
-        kind: "derived",
-        parents: provenance.parents.map(memoryRelationFromWire),
-        evidenceIds: provenance.evidence_ids,
-      };
-    case "current_context":
-      return {
-        kind: "current_context",
-        contextNote: provenance.context_note,
-        evidenceIds: provenance.evidence_ids,
-      };
-    case "unanchored":
-      return { kind: "unanchored", basisNote: provenance.basis_note };
-  }
-}
 
 const RESULT_ARTIFACT_TTL_MS = 10 * 60 * 1_000;
 const MAX_RESULT_ARTIFACTS = 12;
@@ -475,130 +275,6 @@ function renderInspection(inspection: InspectionPresentation): string {
   return `${findings}\n\n${heading}\nEvidence: ${inspection.evidenceId}\n${next}`;
 }
 
-function renderMemoryProvenance(provenance: LearnedMemoryProvenance): string {
-  switch (provenance.kind) {
-    case "verified":
-      return "verified evidence";
-    case "derived":
-      return `derived from ${provenance.parents.map((parent) =>
-        `${parent.memoryId}@${parent.revision} ${parent.relation} (${parent.reason})`).join("; ")}`;
-    case "current_context":
-      return `current context (${provenance.contextNote})`;
-    case "unanchored":
-      return `unanchored (${provenance.basisNote})`;
-  }
-}
-
-function renderMemoryRecall(bundle: LearnedMemoryRecall): string {
-  const heading = `Mooncite learned-memory recall: ${bundle.outcome}; interpretations, never source evidence.`;
-  const warnings = bundle.warnings.length === 0 ? "" : `\nWarnings: ${bundle.warnings.join(" ")}`;
-  if (bundle.candidates.length === 0) return `${heading}${warnings}`;
-  const candidates = bundle.candidates.map((candidate, index) => {
-    const anchors = candidate.anchors.length === 0
-      ? "none"
-      : candidate.anchors.map((anchor) => `${anchor.evidenceUri} (${anchor.state})`).join(", ");
-    const related = candidate.related.length === 0
-      ? "none"
-      : candidate.related.map((item) =>
-        `${item.direction} ${item.relation} ${item.memoryId}@${item.revision}; `
-        + `reason=${item.reason}; provenance=${item.provenanceKind}/${item.provenanceState}; `
-        + `lifecycle=${item.lifecycle.state}; excerpt=${item.interpretationExcerpt}`).join("\n      ");
-    return `Memory ${index + 1}\n`
-      + `Interpretation: ${candidate.interpretation}\n`
-      + `Identity: ${candidate.memoryId}@${candidate.revision}\n`
-      + `Scope: ${candidate.scope.kind === "global" ? "global" : `project=${candidate.scope.project}`}\n`
-      + `Provenance: ${renderMemoryProvenance(candidate.provenance)}; state=${candidate.provenanceState}; `
-      + `quarantined=${candidate.quarantined}\n`
-      + `Lifecycle: ${candidate.lifecycle.state}; metadata_version=${candidate.lifecycle.metadataVersion}; `
-      + `salience=${candidate.lifecycle.salience}; reinforcements=${candidate.lifecycle.reinforcementCount}\n`
-      + `Own source evidence: ${anchors}\n`
-      + `Relevance: ${candidate.relevance.band}; ${candidate.relevance.kind}; `
-      + `matched_terms=${candidate.relevance.matchedTerms.join(", ") || "none"}\n`
-      + `Related revisions (one hop): ${related}`;
-  }).join("\n\n");
-  return `${candidates}\n\n${heading}${warnings}`;
-}
-
-function renderMemoryInspection(inspection: LearnedMemoryInspection): string {
-  if (inspection.kind === "skill_candidate") {
-    return `Skill candidate ${inspection.candidateId}: review=${inspection.review.state}; installed=false.\n`
-      + `Sources: ${inspection.sources.map((source) => `${source.memoryId}@${source.revision}`).join(", ")}\n`
-      + `Name: ${inspection.artifact.name}\nDescription: ${inspection.artifact.description}\n`
-      + `Candidate instructions:\n${inspection.artifact.instructions}\n`
-      + "This is a reviewed candidate artifact only; Mooncite never installs it automatically.";
-  }
-  const sources = inspection.anchors.length === 0
-    ? "none"
-    : inspection.anchors.map((anchor) =>
-      `${anchor.position + 1}. ${anchor.evidenceUri}: ${anchor.state}; `
-      + `physical_inspection=${anchor.inspection.outcome}`).join("\n");
-  const candidates = inspection.skillCandidates.length === 0
-    ? "none"
-    : inspection.skillCandidates.map((candidate) =>
-      `${candidate.candidateId} (${candidate.review.state}; installed=false)`).join(", ");
-  return `Derived memory ${inspection.memoryId}@${inspection.revision}: `
-    + `${inspection.provenanceOutcome} provenance; current_revision=${inspection.currentRevision}; `
-    + `is_current=${inspection.isCurrent}.\n`
-    + `Interpretation (not source evidence): ${inspection.interpretation}\n`
-    + `Provenance: ${renderMemoryProvenance(inspection.provenance)}; state=${inspection.provenanceState}\n`
-    + `Lifecycle: ${inspection.lifecycle.state}; metadata_version=${inspection.lifecycle.metadataVersion}; `
-    + `salience=${inspection.lifecycle.salience}; reinforcements=${inspection.lifecycle.reinforcementCount}\n`
-    + `Own source evidence anchors:\n${sources}\nSkill candidates: ${candidates}`;
-}
-
-function renderMemoryWrite(result: LearnedMemoryWriteResult): string {
-  switch (result.kind) {
-    case "derived_memory_write":
-      return `${result.outcome} derived memory ${result.memoryId}@${result.revision}; `
-        + `provenance=${renderMemoryProvenance(result.provenance)}; `
-        + `${result.evidenceIds.length} physically verified own source anchor(s).\n`
-        + "The interpretation is learned memory, never source evidence.";
-    case "derived_memory_lifecycle":
-      return `${result.outcome} learned memory ${result.memoryId}@${result.revision}; `
-        + `state=${result.lifecycle.state}; metadata_version=${result.lifecycle.metadataVersion}; `
-        + `salience=${result.lifecycle.salience}; reinforcements=${result.lifecycle.reinforcementCount}. `
-        + "No interpretation revision or source evidence was changed.";
-    case "skill_candidate_write":
-      return `${result.outcome} skill candidate ${result.candidate.candidateId}; `
-        + `review=${result.candidate.review.state}; installed=false. `
-        + "The candidate remains an artifact for explicit review and is never installed automatically.";
-  }
-}
-
-function renderMemoryDelete(result: LearnedMemoryDeleteResult): string {
-  if (result.kind === "skill_candidate_delete") {
-    return `Deleted skill candidate ${result.candidateId}. Learned-memory revisions and source evidence were not changed.`;
-  }
-  if (result.outcome === "blocked") {
-    const dependencies = result.dependencies.map((dependency) =>
-      dependency.kind === "relation"
-        ? `relation from ${dependency.memoryId}@${dependency.revision}`
-        : `skill candidate ${dependency.candidateId}`).join(", ");
-    return `Did not delete learned memory ${result.memoryId}: ${result.dependencyCount} surviving dependency item(s). `
-      + `Release them explicitly first. Bounded dependency sample: ${dependencies}.`;
-  }
-  return `Deleted learned memory ${result.memoryId} and ${result.deletedRevisions} immutable revision(s). `
-    + "Source files and the disposable evidence index were not changed.";
-}
-
-type LearnedMemoryOperation = "recall" | "inspection" | "write" | "delete";
-function learnedMemoryError(operation: LearnedMemoryOperation, error?: unknown) {
-  const raw = error instanceof Error ? error.message : "";
-  const message = /^(?:Mooncite (?:learned|evidence|tool|skill)|A new Mooncite|Project-scoped|Mixed-project|Evidence-free)/u.test(raw)
-    ? raw
-    : "The separate learned-memory store is unavailable.";
-  const structuredContent = sanitizePresentation({
-    kind: "derived_memory_error" as const,
-    operation,
-    outcome: error === undefined ? "unavailable" as const : "failed" as const,
-    message,
-  });
-  return {
-    content: [{ type: "text" as const, text: `Mooncite learned-memory ${operation} failed. ${structuredContent.message}` }],
-    structuredContent,
-    isError: true,
-  };
-}
 
 type SourceEvidenceOperation = "recall" | "inspection" | "status";
 function sourceEvidenceError(operation: SourceEvidenceOperation) {
@@ -620,7 +296,6 @@ function sourceEvidenceError(operation: SourceEvidenceOperation) {
 
 export interface MoonciteToolStatus extends MoonciteStatus {
   registrations: RegistrationDiagnostics;
-  learnedMemory?: LearnedMemoryStatus;
 }
 
 export type RegistrationProvider = () => Promise<RegistrationDiagnostics>;
@@ -628,30 +303,20 @@ export type RegistrationProvider = () => Promise<RegistrationDiagnostics>;
 function renderStatus(status: MoonciteToolStatus): string {
   const registrations = status.registrations;
   const sourceCounts = `${status.sourceFilesByOrigin.pi} Pi, ${status.sourceFilesByOrigin.omp} OMP, ${status.sourceFilesByOrigin["claude-code"]} Claude Code, ${status.sourceFilesByOrigin.codex} Codex, ${status.sourceFilesByOrigin.chatgpt} ChatGPT`;
-  const memory = status.learnedMemory === undefined
-    ? ""
-    : ` Learned memory: ${status.learnedMemory.outcome}, ${status.learnedMemory.memories} item(s), `
-      + `${status.learnedMemory.revisions} revision(s), ${status.learnedMemory.active} active, `
-      + `${status.learnedMemory.archived} archived, ${status.learnedMemory.pendingSkillCandidates} pending skill candidate(s)`
-      + `${status.learnedMemory.outcome === "unavailable" ? `, error=${status.learnedMemory.errorCode}` : ""}.`;
   const errors = status.errorGroups.length
     ? ` Error groups: ${status.errorGroups.map((group) => `${group.origin}/${group.reason}=${group.count} (fatal=${group.fatalCount})`).join(", ")}.`
     : "";
   const refresh = status.lastSuccessfulRefreshAt ?? "never";
   return `Mooncite status: ${status.outcome}; ${status.meaning}\n`
     + `Freshness: ${status.freshness}; trust=${status.trustState}; coverage=${status.coverage}; search_usable=${status.searchUsable}; last_successful_refresh=${refresh}; last_refresh=${status.lastRefreshOutcome}; last_rebuild=${status.lastRebuildOutcome}.\n`
-    + `Sources: ${status.evidenceSpans} searchable span(s) from ${status.sourceFiles} session file(s) (${sourceCounts}); derived_state_bytes=${status.stateBytes}; ${status.malformed} malformed, ${status.oversized} oversized, ${status.errors} error(s); registrations: Pi ${registrations.pi}, OMP ${registrations.omp}, Codex ${registrations.codex}, Claude Code ${registrations.claudeCode}.${errors}${memory}\n`
+    + `Sources: ${status.evidenceSpans} searchable span(s) from ${status.sourceFiles} session file(s) (${sourceCounts}); derived_state_bytes=${status.stateBytes}; ${status.malformed} malformed, ${status.oversized} oversized, ${status.errors} error(s); registrations: Pi ${registrations.pi}, OMP ${registrations.omp}, Codex ${registrations.codex}, Claude Code ${registrations.claudeCode}.${errors}\n`
     + `Next: ${renderNext(status.next)}`;
 }
 
-export interface MoonciteLearnedMemoryServerOptions {
-  configPath: string;
-}
 
 export function createMoonciteMcpServer(
   options: EngineOptions,
   registrations: RegistrationProvider = async () => ({ pi: "unavailable", omp: "unavailable", codex: "unavailable", claudeCode: "unavailable" }),
-  learnedMemory?: MoonciteLearnedMemoryServerOptions,
 ): McpServer {
   const engine = new MoonciteEngine(options);
   const unavailableRegistrations: RegistrationDiagnostics = {
@@ -674,23 +339,6 @@ export function createMoonciteMcpServer(
       process.stderr.write(`Mooncite background refresh failed: ${message}\n`);
     }
   });
-  let learnedMemoryEnabled = false;
-  if (learnedMemory) {
-    try {
-      learnedMemoryEnabled = loadLearnedMemoryMode(learnedMemory.configPath).enabled;
-    } catch {
-      // A malformed optional config must not alter or disable the evidence server.
-    }
-  }
-  let learnedStore: LearnedMemoryStore | null = null;
-  let learnedStoreError: unknown;
-  if (learnedMemoryEnabled) {
-    try {
-      learnedStore = new LearnedMemoryStore(engine, { stateDir: options.stateDir });
-    } catch (error) {
-      learnedStoreError = error;
-    }
-  }
   const server = new McpServer(
     { name: MOONCITE_MCP_NAME, version: MOONCITE_VERSION },
     { capabilities: { tools: {}, resources: {} } },
@@ -816,11 +464,7 @@ export function createMoonciteMcpServer(
       recallTimings.clear();
       if (!engineClosed) {
         engineClosed = true;
-        try {
-          learnedStore?.close();
-        } finally {
-          engine.close();
-        }
+        engine.close();
       }
     }
   };
@@ -942,17 +586,6 @@ export function createMoonciteMcpServer(
     async () => {
       try {
         const status: MoonciteToolStatus = { ...engine.status(), registrations: registrationCache };
-        if (learnedMemoryEnabled) {
-          if (!learnedStore) {
-            status.learnedMemory = unavailableLearnedMemoryStatus(learnedStoreError);
-          } else {
-            try {
-              status.learnedMemory = learnedStore.status();
-            } catch (error) {
-              status.learnedMemory = unavailableLearnedMemoryStatus(error);
-            }
-          }
-        }
         const safeStatus = sanitizePresentation(status);
         return toolResult(
           "mooncite_status",
@@ -965,197 +598,6 @@ export function createMoonciteMcpServer(
     },
   );
 
-  if (learnedMemoryEnabled) {
-    server.registerTool(
-      "mooncite_memory_recall",
-      {
-        title: "Recall learned memory",
-        description: "Search agent-authored interpretations. Results are learned memory, not source evidence.",
-        inputSchema: memoryRecallInput,
-        annotations: { readOnlyHint: true, openWorldHint: false },
-      },
-      async ({ query, limit, project, include_invalid, include_archived, related_limit }) => {
-        if (!learnedStore) return learnedMemoryError("recall");
-        try {
-          const result = learnedStore.recall({
-            query,
-            limit: limit ?? 5,
-            project: project ?? null,
-            includeInvalid: include_invalid ?? false,
-            includeArchived: include_archived ?? false,
-            relatedLimit: related_limit ?? 0,
-          });
-          const safeResult = sanitizePresentation(result);
-          return toolResult(
-            "mooncite_memory_recall",
-            renderMemoryRecall(safeResult),
-            safeResult as unknown as Record<string, unknown>,
-          );
-        } catch (error) {
-          return learnedMemoryError("recall", error);
-        }
-      },
-    );
-
-    server.registerTool(
-      "mooncite_memory_inspect",
-      {
-        title: "Inspect learned memory",
-        description: "Inspect one immutable memory revision and verify its own anchors, or inspect one skill candidate.",
-        inputSchema: memoryInspectInput,
-        annotations: { readOnlyHint: true, openWorldHint: false },
-      },
-      async (input) => {
-        if (!learnedStore) return learnedMemoryError("inspection");
-        try {
-          const result = input.kind === "revision"
-            ? learnedStore.inspect({
-              kind: "revision",
-              memoryId: input.memory_id,
-              revision: input.revision ?? null,
-              window: input.window ?? 0,
-            })
-            : learnedStore.inspect({
-              kind: "skill_candidate",
-              candidateId: input.candidate_id,
-            });
-          const safeResult = sanitizePresentation(result);
-          return toolResult(
-            "mooncite_memory_inspect",
-            renderMemoryInspection(safeResult),
-            safeResult as unknown as Record<string, unknown>,
-          );
-        } catch (error) {
-          return learnedMemoryError("inspection", error);
-        }
-      },
-    );
-
-    server.registerTool(
-      "mooncite_memory_write",
-      {
-        title: "Write or manage learned memory",
-        description: "Write immutable learned-memory revisions, manage lifecycle metadata, or propose and review skill candidates. Candidate review never installs a skill.",
-        inputSchema: memoryWriteInput,
-        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-      },
-      async (input) => {
-        if (!learnedStore) return learnedMemoryError("write");
-        try {
-          const result = (() => {
-            switch (input.operation) {
-              case "create":
-                return learnedStore.write({
-                  operation: "create",
-                  interpretation: input.interpretation,
-                  provenance: memoryProvenanceFromWire(input.provenance),
-                  scope: input.scope ?? null,
-                });
-              case "revise":
-                return learnedStore.write({
-                  operation: "revise",
-                  memoryId: input.memory_id,
-                  expectedRevision: input.expected_revision,
-                  interpretation: input.interpretation,
-                  provenance: memoryProvenanceFromWire(input.provenance),
-                  scope: input.scope ?? null,
-                });
-              case "activate":
-                return learnedStore.write({
-                  operation: "activate",
-                  memoryId: input.memory_id,
-                  expectedRevision: input.expected_revision,
-                  expectedMetadataVersion: input.expected_metadata_version,
-                });
-              case "reinforce":
-                return learnedStore.write({
-                  operation: "reinforce",
-                  memoryId: input.memory_id,
-                  expectedRevision: input.expected_revision,
-                  expectedMetadataVersion: input.expected_metadata_version,
-                  salience: input.salience,
-                });
-              case "archive":
-                return learnedStore.write({
-                  operation: "archive",
-                  memoryId: input.memory_id,
-                  expectedRevision: input.expected_revision,
-                  expectedMetadataVersion: input.expected_metadata_version,
-                });
-              case "consolidate":
-                return learnedStore.write({
-                  operation: "consolidate",
-                  interpretation: input.interpretation,
-                  parents: input.parents.map(memoryRelationFromWire),
-                  evidenceIds: input.evidence_ids,
-                  scope: input.scope ?? null,
-                });
-              case "propose_skill_candidate":
-                return learnedStore.write({
-                  operation: "propose_skill_candidate",
-                  sources: input.sources.map((source) => ({
-                    memoryId: source.memory_id,
-                    revision: source.revision,
-                  })),
-                  artifact: input.artifact,
-                });
-              case "review_skill_candidate":
-                return learnedStore.write({
-                  operation: "review_skill_candidate",
-                  candidateId: input.candidate_id,
-                  expectedState: input.expected_state,
-                  decision: input.decision,
-                  reviewNote: input.review_note,
-                });
-            }
-          })();
-          const safeResult = sanitizePresentation(result);
-          return toolResult(
-            "mooncite_memory_write",
-            renderMemoryWrite(safeResult),
-            safeResult as unknown as Record<string, unknown>,
-          );
-        } catch (error) {
-          return learnedMemoryError("write", error);
-        }
-      },
-    );
-
-    server.registerTool(
-      "mooncite_memory_delete",
-      {
-        title: "Delete learned memory",
-        description: "Delete one learned memory or skill candidate. Memory deletion fails while a surviving dependency remains.",
-        inputSchema: memoryDeleteInput,
-        annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-      },
-      async (input) => {
-        if (!learnedStore) return learnedMemoryError("delete");
-        try {
-          const result = input.kind === "memory"
-            ? learnedStore.delete({
-              kind: "memory",
-              memoryId: input.memory_id,
-              expectedRevision: input.expected_revision,
-              expectedMetadataVersion: input.expected_metadata_version,
-            })
-            : learnedStore.delete({
-              kind: "skill_candidate",
-              candidateId: input.candidate_id,
-              expectedState: input.expected_state,
-            });
-          const safeResult = sanitizePresentation(result);
-          return toolResult(
-            "mooncite_memory_delete",
-            renderMemoryDelete(safeResult),
-            safeResult as unknown as Record<string, unknown>,
-          );
-        } catch (error) {
-          return learnedMemoryError("delete", error);
-        }
-      },
-    );
-  }
 
   return server;
 }
