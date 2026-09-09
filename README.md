@@ -10,7 +10,6 @@ flowchart LR
     A[Coding agent<br/>Pi, OMP, Codex, Claude Code] -->|recall and inspect| M
     M -->|reads only| S[Local history<br/>Pi, OMP, Claude Code, Codex, ChatGPT]
     M <--> I[(Search index)]
-    M -.-> L[(Optional learned memory)]
     M -->|cited context| A
 ```
 

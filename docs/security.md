@@ -10,7 +10,6 @@ It reads only supported conversation files from Pi, OMP, Claude Code, Codex, and
 
 The evidence index is owner-private derived state. Mooncite can delete and rebuild it from unchanged sources. A failed refresh keeps a usable last-good index rather than replacing it with known partial coverage.
 
-Learned memory is a separate, default-off database for agent-authored interpretations. It stores provenance metadata and anchor digests, not copied source windows. Learned-store failure does not disable evidence search.
 
 Recall excerpts and inspection windows are bounded. Mooncite escapes unsafe control text. Status reports counts and safe labels, never transcript text or full physical source paths.
 
@@ -24,4 +23,4 @@ Text returned through an MCP call enters the receiving model's context. The mode
 
 Install and removal fail closed when Mooncite cannot prove safe ownership. Mooncite refuses unsafe paths, links, conflicting registrations, unrelated launchers, and unknown state entries. It does not overwrite or delete them.
 
-`disable` and `uninstall` preserve source history, configuration, the evidence index, and learned memory. Confirmed `purge --yes` removes only recognized derived SQLite state. Source history is never a purge target.
+`disable` and `uninstall` preserve source history, configuration, and the evidence index. Confirmed `purge --yes` removes only recognized derived SQLite state. Source history is never a purge target.
