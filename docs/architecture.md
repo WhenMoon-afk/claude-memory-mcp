@@ -14,7 +14,7 @@ Exactly five adapters feed the engine:
 
 For OMP and Claude Code, Mooncite admits only project-level JSONL files. It ignores nested subagent, workflow, and command artifacts because they are not source conversations.
 
-`mooncite serve` runs one local stdio MCP server. Codex and Claude Code register it directly. OMP uses the packaged `.mcp.json`. Pi uses a thin extension that translates native tool calls to MCP and contains no retrieval logic.
+`mooncite serve` runs one local stdio MCP server. It does not exec Pi, OMP, Codex, or Claude Code to probe registrations. Those probes belong to install, status, disable, and uninstall only. Codex and Claude Code register the server directly. OMP uses the packaged `.mcp.json`. Pi uses a thin extension that translates native tool calls to MCP and contains no retrieval logic.
 
 ## Evidence path
 

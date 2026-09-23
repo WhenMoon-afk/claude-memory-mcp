@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createClientRegistrationAdapter } from "./clients.js";
 import { MoonciteEngine, type EngineOptions } from "./engine.js";
@@ -117,12 +117,9 @@ function runSourceCommand(args: string[]): void {
   writeResult(result);
 }
 
-async function runServeCommand({ engineOptions, registrations }: CliContext): Promise<void> {
+export async function runServeCommand({ engineOptions }: CliContext): Promise<void> {
   const handle = serveStdio(
-    () => createMoonciteMcpServer(
-      engineOptions,
-      () => registrations.diagnose(),
-    ),
+    () => createMoonciteMcpServer(engineOptions),
   );
   await new Promise<void>((resolve) => {
     const finish = (): void => resolve();
@@ -187,7 +184,9 @@ async function main(): Promise<void> {
   await handler({ args, engineOptions, installation, registrations });
 }
 
-main().catch((error: unknown) => {
-  process.stderr.write(`mooncite: ${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error: unknown) => {
+    process.stderr.write(`mooncite: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
