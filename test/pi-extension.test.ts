@@ -23,7 +23,7 @@ describe("Mooncite Pi extension seam", () => {
       },
     };
 
-    createMooncitePiExtension(caller, false)(pi);
+    createMooncitePiExtension(caller)(pi);
     expect(registered.map(({ name }) => name)).toEqual([
       "mooncite_recall",
       "mooncite_inspect",
