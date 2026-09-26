@@ -2174,6 +2174,25 @@ function upgradeAdditiveSchema(database: DatabaseSync): void {
     database.exec("ALTER TABLE evidence ADD COLUMN semantic_eligible INTEGER NOT NULL DEFAULT 0");
   }
 }
+
+function backfillSemanticEligibility(database: DatabaseSync): void {
+  const marker = "14-role-text";
+  const stored = database.prepare("SELECT value FROM metadata WHERE key = 'semantic_eligibility_backfill'").get() as { value?: string } | undefined;
+  if (stored?.value === marker) return;
+  const evidence = database.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type = 'table' AND name = 'evidence'").get();
+  const pending = database.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type = 'table' AND name = 'semantic_pending'").get();
+  if (evidence && pending) {
+    const rows = database.prepare("SELECT rowid, role, text FROM evidence WHERE semantic_eligible = 0").all() as Array<{ rowid: number | bigint; role: string; text: string }>;
+    const update = database.prepare("UPDATE evidence SET semantic_eligible = 1 WHERE rowid = ?");
+    const queue = database.prepare("INSERT OR IGNORE INTO semantic_pending(evidence_rowid) VALUES (?)");
+    for (const row of rows) {
+      if (!semanticEligible(row.role as EvidenceRole, row.text)) continue;
+      update.run(row.rowid);
+      queue.run(row.rowid);
+    }
+  }
+  database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('semantic_eligibility_backfill', ?)").run(marker);
+}
 function assertLegacyMoonciteStateDirectory(stateDir: string, databasePath: string): void {
   const allowed = new Set(["index.sqlite", "index.sqlite-journal", "index.sqlite-shm", "index.sqlite-wal"]);
   const entries = readdirSync(stateDir);
@@ -2215,6 +2234,7 @@ function openInitializedDatabase(path: string): InitializedDatabase {
     database = new DatabaseSync(path, { allowExtension: true });
     upgradeAdditiveSchema(database);
     database.exec(DATABASE_SCHEMA);
+    backfillSemanticEligibility(database);
     validateDatabaseSchema(database);
     database.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get();
     let semanticIndexAvailable = false;
@@ -3950,6 +3970,7 @@ export class MoonciteEngine {
     candidates: EvidenceCandidate[],
     echoesSuppressed: number,
     embeddingSearchRan: boolean,
+    embeddingCoverageIncomplete: boolean,
   ): EvidenceBundle {
     const warnings = state.errors === 0
       ? [...scope.warnings]
@@ -3961,13 +3982,13 @@ export class MoonciteEngine {
       warnings.push("Local embeddings are unavailable; this recall used lexical search only.");
     }
     const incompleteMiss = candidates.length === 0
-      && (state.coverage === "partial" || state.retainedLastGood || state.errors > 0);
+      && (embeddingCoverageIncomplete || state.coverage === "partial" || state.retainedLastGood || state.errors > 0);
     const outcome: EvidenceBundle["outcome"] = candidates.length === 0
       ? incompleteMiss ? "inconclusive" : "no_match"
       : candidates.some((candidate) => candidate.match.band === "strong") ? "matches" : "weak_leads";
     const conclusive = outcome === "matches" || outcome === "no_match";
     const semanticOnly = candidates.length > 0 && candidates.every((candidate) => candidate.match.kind === "semantic");
-    const embeddingSearched = embeddingSearchRan && this.#semanticIndexAvailable && this.#semanticUnavailableReason === null;
+    const embeddingSearched = embeddingSearchRan && this.#semanticIndexAvailable && this.#semanticUnavailableReason === null && !embeddingCoverageIncomplete;
     const meaning = outcome === "matches"
       ? semanticOnly
         ? "Mooncite found a local embedding match. Inspect a cited source window before relying on any claim."
@@ -3979,7 +4000,9 @@ export class MoonciteEngine {
           ? "Mooncite found only a weak local embedding lead. Inspect it before using it."
           : "Mooncite found only partial or weak leads. Refine the query or inspect a lead before using it."
         : outcome === "inconclusive"
-          ? "The active index is partial or retained from a last-good generation, so an empty result does not prove the evidence is absent."
+          ? embeddingCoverageIncomplete
+            ? "Lexical search found no match. Local embedding coverage is incomplete, so this does not prove the evidence is absent."
+            : "The active index is partial or retained from a last-good generation, so an empty result does not prove the evidence is absent."
           : embeddingSearched
             ? "Mooncite searched the complete requested scope and found no lexical or embedding match."
             : "Mooncite searched the complete requested scope and found no lexical match.";
@@ -4064,15 +4087,17 @@ export class MoonciteEngine {
     });
     const embeddingSearchRan = !hasStrongLexical && !recallQuery.parsed.phrase && recallQuery.terms.length >= 2
       && this.#semanticIndexAvailable && this.#semanticUnavailableReason === null;
+    let embeddingCoverageIncomplete = false;
     if (embeddingSearchRan) {
       this.#mergeSemanticRecallRows(input, recallQuery, scope, authorizedRoots, sessionResolution.sessionScope, rowsById);
+      embeddingCoverageIncomplete = this.#db.prepare("SELECT 1 AS pending FROM semantic_pending LIMIT 1").get() !== undefined;
     }
     const { candidates, echoesSuppressed } = this.#recallCandidates(rowsById, recallQuery);
-    if (candidates.length === 0 && refreshOnMiss) {
+    if (candidates.length === 0 && refreshOnMiss && !embeddingCoverageIncomplete) {
       this.refresh();
       return this.#recall(input, false);
     }
-    return this.#recallResult(state, recallQuery, scope, candidates, echoesSuppressed, embeddingSearchRan);
+    return this.#recallResult(state, recallQuery, scope, candidates, echoesSuppressed, embeddingSearchRan, embeddingCoverageIncomplete);
   }
   #semanticVector(text: string): Int8Array | null {
     if (!this.#semanticIndexAvailable || this.#semanticUnavailableReason !== null) return null;

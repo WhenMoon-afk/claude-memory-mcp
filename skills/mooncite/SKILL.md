@@ -25,7 +25,7 @@ The six recall outcomes mean:
 - `invalid_scope`: retry without a scope or with an exact copied scope
 - `unavailable`: follow the diagnostic action
 
-A conclusive `no_match` covers only the search that ran. Read `meaning` and `warnings` to see whether that search included local embeddings. Do not mine raw transcripts after a conclusive `no_match`. Mine them only when:
+A conclusive `no_match` covers only the search that ran. Incomplete local embedding coverage is `inconclusive`, not absence. Read `meaning` and `warnings` before treating an empty result as absence. Do not mine raw transcripts after a conclusive `no_match`. Mine them only when:
 
 - Mooncite remains inconclusive or unavailable after its requested actions.
 - Status has no coverage for the needed work.

@@ -8,7 +8,7 @@
 
 **Evidence citation.** A deterministic source-qualified ID and URI for one bounded normalized span. Its identity covers the source authorization, relative path, session, entry, and span. The citation stays stable while those values stay unchanged.
 
-**Recall.** A bounded lexical-first search. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit when local embeddings are available. Quoted phrases and shorter queries stay lexical. Its outcomes are `matches`, `weak_leads`, `no_match`, `inconclusive`, `invalid_scope`, and `unavailable`. `matches` is a strong lexical or strong local-embedding result. `no_match` reports absence only for the search that ran, and only when `conclusive` is `true`.
+**Recall.** A bounded lexical-first search. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit when local embeddings are available. Quoted phrases and shorter queries stay lexical. Its outcomes are `matches`, `weak_leads`, `no_match`, `inconclusive`, `invalid_scope`, and `unavailable`. `matches` is a strong lexical or strong local-embedding result. `no_match` reports absence only for the search that ran, and only when `conclusive` is `true`. Incomplete local embedding coverage is `inconclusive`, not absence.
 
 **Inspection.** Resolution of a citation in the active index generation against current physical source bytes. Only `verified` contains a checked source window. A `target` on any other outcome is last-indexed text.
 

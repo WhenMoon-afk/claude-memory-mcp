@@ -1489,7 +1489,8 @@ describe("Mooncite engine public seam", () => {
       });
       expect((reopened.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get() as { value: string }).value).toContain("kept-generation");
       expect((reopened.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value: string }).value).toBe("14");
-      expect(reopened.prepare("SELECT semantic_eligible FROM evidence").get()).toEqual({ semantic_eligible: 0 });
+      expect(reopened.prepare("SELECT semantic_eligible FROM evidence").get()).toEqual({ semantic_eligible: 1 });
+      expect(reopened.prepare("SELECT COUNT(*) AS count FROM semantic_pending").get()).toEqual({ count: 1 });
     } finally {
       reopened.close();
     }

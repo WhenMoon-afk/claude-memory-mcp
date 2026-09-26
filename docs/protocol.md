@@ -18,7 +18,7 @@ The local stdio server exposes exactly three evidence tools:
 
 | Field | Required | Accepted value |
 | --- | --- | --- |
-| `query` | Yes | Lexical query |
+| `query` | Yes | Lexical query. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit |
 | `limit` | No | 1 to 20 |
 | `project` | No | Exact value copied from a candidate |
 | `session_id` | No | Exact source-qualified value copied from a candidate |
@@ -34,7 +34,7 @@ A source-qualified session ID has the form `<origin>:<64-hex-source-root-digest>
 | --- | --- |
 | `matches` | Strong lexical result, or a strong local embedding result after an unquoted multi-word miss |
 | `weak_leads` | Possible result that needs refinement or inspection |
-| `no_match` | Absence result only when `conclusive` is `true` |
+| `no_match` | Absence result only when `conclusive` is `true`. Incomplete embedding coverage is `inconclusive`, not absence |
 | `inconclusive` | Freshness or coverage prevents an absence claim |
 | `invalid_scope` | Retry with no scope or an exact copied scope |
 | `unavailable` | No usable generation could be searched |

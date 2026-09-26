@@ -64,9 +64,11 @@
     "@types/node": "^24.0.0",
     "@typescript-eslint/parser": "8.68.0",
     "eslint": "10.9.1",
-    "sqlite-vec-linux-x64": "0.1.9",
     "typescript": "^5.9.0",
     "vitest": "^4.1.4"
+  },
+  "optionalDependencies": {
+    "sqlite-vec-linux-x64": "0.1.9"
   },
   "engines": {
     "node": ">=24.0.0"

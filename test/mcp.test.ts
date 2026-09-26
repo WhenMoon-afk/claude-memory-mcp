@@ -128,7 +128,7 @@ async function callTool(
 }
 
 describe("Mooncite stdio MCP seam", () => {
-  it("exposes exactly the three Mooncite tools by default without creating learned state", async () => {
+  it("exposes exactly the three Mooncite tools without creating learned state", async () => {
     const sourceFixture = await createFixture();
     fixtures.push(sourceFixture);
     const result = await rpc("tools/list", undefined, sourceFixture);
