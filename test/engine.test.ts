@@ -4,7 +4,7 @@ import { appendFile, chmod, mkdir, readFile, readdir, rename, rm, stat, symlink,
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { MoonciteEngine } from "../src/engine.js";
+import { isMoonciteToolRendering, MoonciteEngine } from "../src/engine.js";
 import { MOONCITE_STATE_MARKER_CONTENT, MOONCITE_STATE_MARKER_NAME } from "../src/identity.js";
 import { addSourceRegistration, loadSourceRegistrations, removeSourceRegistration, resolveSourceRegistrations } from "../src/source-config.js";
 import { createFixture, digest, jsonLine, ompTitleLine, type Fixture } from "./fixture.js";
@@ -1494,6 +1494,13 @@ describe("Mooncite engine public seam", () => {
     } finally {
       reopened.close();
     }
+  });
+
+  it("recognizes a card-first recall rendering as Mooncite output", () => {
+    const card = `${"1. pi user · 2 years ago\n".repeat(200)}Mooncite recall: no_match; conclusive=true; absent`;
+    expect(card.length).toBeGreaterThan(4_096);
+    expect(isMoonciteToolRendering("toolResult", card)).toBe(true);
+    expect(isMoonciteToolRendering("assistant", card)).toBe(false);
   });
 
   it("does not treat an embedding-budget miss as conclusive absence", async () => {

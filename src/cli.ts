@@ -2,7 +2,7 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { createClientRegistrationAdapter } from "./clients.js";
 import { MoonciteEngine, type EngineOptions } from "./engine.js";

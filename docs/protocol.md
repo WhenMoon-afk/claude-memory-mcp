@@ -79,4 +79,3 @@ No input. Status returns `ready`, `degraded`, or `unavailable`. It also reports 
 `count` is the number of grouped failures. `fatalCount` is the subset that prevented source admission or refresh. Repeated status calls recompute transient failures and reuse persisted per-source parse counts, so counts do not accumulate. After reopen, Mooncite reloads the last-good generation and rediscovers any continuing transient failure.
 
 A degraded index may remain searchable, but its empty recall results are inconclusive. A source-limit group means rebuilding alone will repeat the refusal until the authorized source set or supported limit changes.
-

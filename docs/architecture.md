@@ -34,4 +34,3 @@ The evidence index is disposable and rebuildable. Source files are never repaire
 Pi and OMP use their client roots. Mooncite narrowly discovers the supported Claude Code, Codex, and local ChatGPT export roots. Owner-configured roots are additive. A configured origin/root pair suppresses only the automatic entry for that exact pair.
 
 Symlinks are excluded. Mooncite keeps authorized roots and opened files physically contained and identity-checked through Linux file descriptors.
-

@@ -736,6 +736,7 @@ function isMoonciteRenderingText(text: string): boolean {
   return [...offsets].some((offset) => {
     const head = normalized.slice(offset);
     return /^Mooncite (?:recall|inspection|status):/u.test(head)
+      || /^[1-9]\d*\. (?:pi|omp|claude-code|codex|chatgpt) (?:user|assistant|system|developer|tool|toolResult|summary|unknown) · /u.test(head)
       || /^Finding [1-9]\d*\nExcerpt: /u.test(head)
       || /^Finding [1-9]\d*\nSource: (?:pi|omp|claude-code|codex|chatgpt)\n/u.test(head)
       || new RegExp(`^(?:Evidence for|Weak evidence leads for) “[\\s\\S]{0,2200}?”: {0,2}${trust}${tail}`, "u").test(head)
@@ -2382,6 +2383,110 @@ function migrateDatabaseDerivation(database: DatabaseSync): void {
   database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('derivation_version', ?)").run(DERIVATION_VERSION);
 }
 
+function recallRelevanceBand(exact: boolean, termCoverage: number, semanticSimilarity: number | null): RelevanceBand {
+  if (exact || termCoverage >= 0.6) return "strong";
+  if (termCoverage >= 0.25) return "partial";
+  if (semanticSimilarity !== null && semanticSimilarity >= STRONG_SEMANTIC_SIMILARITY) return "strong";
+  if (termCoverage > 0 || (semanticSimilarity !== null && semanticSimilarity >= PARTIAL_SEMANTIC_SIMILARITY)) return "partial";
+  return "weak";
+}
+
+function recallMatchKind(
+  metadataExact: boolean,
+  exact: boolean,
+  phrase: boolean,
+  semanticSimilarity: number | null,
+  termCoverage: number,
+): MatchKind {
+  if (metadataExact) return "metadata_exact";
+  if (exact && phrase) return "phrase_exact";
+  if (exact) return "text_exact";
+  if (semanticSimilarity !== null && termCoverage === 0) return "semantic";
+  return "terms";
+}
+
+function relevanceRecallOrder(left: RankedRecallRow, right: RankedRecallRow): number {
+  return Number(right.directCitation) - Number(left.directCitation)
+    || Number(right.metadataExact) - Number(left.metadataExact)
+    || Number(left.isEcho) - Number(right.isEcho)
+    || conversationalRoleRank(right.row.role) - conversationalRoleRank(left.row.role)
+    || Number(right.exact) - Number(left.exact)
+    || right.termCoverage - left.termCoverage
+    || right.rrf - left.rrf
+    || Number(left.row.score) - Number(right.row.score)
+    || (right.semanticSimilarity ?? -1) - (left.semanticSimilarity ?? -1);
+}
+
+function pendingSemanticRowIsEmbeddable(row: {
+  semantic_eligible: number;
+  text: string | null;
+  project: string | null;
+  session_id: string | null;
+  role: EvidenceRole | null;
+  evidence_id: string | null;
+  record_digest: string | null;
+  source_origin: SourceOrigin | null;
+  source_root_digest: string | null;
+}): boolean {
+  return row.semantic_eligible === 1
+    && row.text !== null
+    && row.project !== null
+    && row.session_id !== null
+    && row.role !== null
+    && row.evidence_id !== null
+    && row.record_digest !== null
+    && row.source_origin !== null
+    && row.source_root_digest !== null;
+}
+
+function appendSemanticScoreFilters(
+  conditions: string[],
+  params: Array<string | number | bigint | Int8Array>,
+  input: RecallInput,
+  sessionScope: { origin: SourceOrigin; rootDigest: string; sessionId: string } | null,
+  after: string | null,
+  before: string | null,
+): void {
+  if (input.project) {
+    conditions.push("project = ?");
+    params.push(input.project);
+  }
+  if (sessionScope) {
+    conditions.push("session_id = ?");
+    params.push(sessionScope.sessionId);
+  }
+  if (input.role) {
+    conditions.push("role = ?");
+    params.push(input.role);
+  }
+  if (after !== null) {
+    conditions.push("has_event_time = ?", "event_time >= ?");
+    params.push(1n, Date.parse(after) / 1_000);
+  }
+  if (before !== null) {
+    conditions.push("has_event_time = ?", "event_time <= ?");
+    params.push(1n, Date.parse(before) / 1_000);
+  }
+}
+
+function recallMeaning(
+  outcome: EvidenceBundle["outcome"],
+  semanticOnly: boolean,
+  hasSemantic: boolean,
+  embeddingCoverageIncomplete: boolean,
+  embeddingSearched: boolean,
+): string {
+  if (outcome === "matches" && semanticOnly) return "Mooncite found a local embedding match. Inspect a cited source window before relying on any claim.";
+  if (outcome === "matches" && hasSemantic) return "Mooncite found lexical and local embedding matches. Inspect a cited source window before relying on any claim.";
+  if (outcome === "matches") return "Mooncite found lexical matches. Inspect a cited source window before relying on any claim.";
+  if (outcome === "weak_leads" && semanticOnly) return "Mooncite found only a weak local embedding lead. Inspect it before using it.";
+  if (outcome === "weak_leads") return "Mooncite found only partial or weak leads. Refine the query or inspect a lead before using it.";
+  if (outcome === "inconclusive" && embeddingCoverageIncomplete) return "Lexical search found no match. Local embedding coverage is incomplete, so this does not prove the evidence is absent.";
+  if (outcome === "inconclusive") return "The active index is partial or retained from a last-good generation, so an empty result does not prove the evidence is absent.";
+  if (embeddingSearched) return "Mooncite searched the complete requested scope and found no lexical or embedding match.";
+  return "Mooncite searched the complete requested scope and found no lexical match.";
+}
+
 export class MoonciteEngine {
   readonly #baseRoots: Array<{ origin: SourceOrigin; root: string; discovery?: "automatic" }>;
   readonly #optionalSourcesProvider: () => SourceRegistration[];
@@ -3817,24 +3922,8 @@ export class MoonciteEngine {
     const isEcho = isMoonciteRenderingText(text);
     const rawSemanticSimilarity = Number(row.semantic_similarity);
     const semanticSimilarity = Number.isFinite(rawSemanticSimilarity) ? rawSemanticSimilarity : null;
-    const band: RelevanceBand = exact || termCoverage >= 0.6
-      ? "strong"
-      : termCoverage >= 0.25
-        ? "partial"
-        : semanticSimilarity !== null && semanticSimilarity >= STRONG_SEMANTIC_SIMILARITY
-          ? "strong"
-          : termCoverage > 0 || (semanticSimilarity !== null && semanticSimilarity >= PARTIAL_SEMANTIC_SIMILARITY)
-            ? "partial"
-            : "weak";
-    const kind: MatchKind = metadataExact
-      ? "metadata_exact"
-      : exact && recallQuery.parsed.phrase
-        ? "phrase_exact"
-        : exact
-          ? "text_exact"
-          : semanticSimilarity !== null && termCoverage === 0
-            ? "semantic"
-            : "terms";
+    const band = recallRelevanceBand(exact, termCoverage, semanticSimilarity);
+    const kind = recallMatchKind(metadataExact, exact, recallQuery.parsed.phrase, semanticSimilarity, termCoverage);
     return {
       row,
       matchedTerms,
@@ -3863,16 +3952,7 @@ export class MoonciteEngine {
       }
       return this.#compareRecallPhysicalRows(a.row, b.row);
     }
-    return Number(b.directCitation) - Number(a.directCitation)
-      || Number(b.metadataExact) - Number(a.metadataExact)
-      || Number(a.isEcho) - Number(b.isEcho)
-      || conversationalRoleRank(b.row.role) - conversationalRoleRank(a.row.role)
-      || Number(b.exact) - Number(a.exact)
-      || b.termCoverage - a.termCoverage
-      || b.rrf - a.rrf
-      || Number(a.row.score) - Number(b.row.score)
-      || (b.semanticSimilarity ?? -1) - (a.semanticSimilarity ?? -1)
-      || this.#compareRecallPhysicalRows(a.row, b.row);
+    return relevanceRecallOrder(a, b) || this.#compareRecallPhysicalRows(a.row, b.row);
   }
 
   #recallCandidates(rowsById: Map<string, RecallRow>, recallQuery: RecallQuery): {
@@ -3989,23 +4069,13 @@ export class MoonciteEngine {
     const conclusive = outcome === "matches" || outcome === "no_match";
     const semanticOnly = candidates.length > 0 && candidates.every((candidate) => candidate.match.kind === "semantic");
     const embeddingSearched = embeddingSearchRan && this.#semanticIndexAvailable && this.#semanticUnavailableReason === null && !embeddingCoverageIncomplete;
-    const meaning = outcome === "matches"
-      ? semanticOnly
-        ? "Mooncite found a local embedding match. Inspect a cited source window before relying on any claim."
-        : candidates.some((candidate) => candidate.match.kind === "semantic")
-          ? "Mooncite found lexical and local embedding matches. Inspect a cited source window before relying on any claim."
-          : "Mooncite found lexical matches. Inspect a cited source window before relying on any claim."
-      : outcome === "weak_leads"
-        ? semanticOnly
-          ? "Mooncite found only a weak local embedding lead. Inspect it before using it."
-          : "Mooncite found only partial or weak leads. Refine the query or inspect a lead before using it."
-        : outcome === "inconclusive"
-          ? embeddingCoverageIncomplete
-            ? "Lexical search found no match. Local embedding coverage is incomplete, so this does not prove the evidence is absent."
-            : "The active index is partial or retained from a last-good generation, so an empty result does not prove the evidence is absent."
-          : embeddingSearched
-            ? "Mooncite searched the complete requested scope and found no lexical or embedding match."
-            : "Mooncite searched the complete requested scope and found no lexical match.";
+    const meaning = recallMeaning(
+      outcome,
+      semanticOnly,
+      candidates.some((candidate) => candidate.match.kind === "semantic"),
+      embeddingCoverageIncomplete,
+      embeddingSearched,
+    );
     const next: MoonciteNextAction | null = candidates.length > 0
       ? {
         action: "call",
@@ -4184,17 +4254,7 @@ export class MoonciteEngine {
           }
           const rowid = BigInt(row.rowid);
           deleteVector.run(rowid);
-          if (
-            row.semantic_eligible === 1
-            && row.text !== null
-            && row.project !== null
-            && row.session_id !== null
-            && row.role !== null
-            && row.evidence_id !== null
-            && row.record_digest !== null
-            && row.source_origin !== null
-            && row.source_root_digest !== null
-          ) {
+          if (pendingSemanticRowIsEmbeddable(row)) {
             const vector = this.#semanticVector(exchangeEmbeddingText(
               row.role,
               row.text,
@@ -4295,26 +4355,7 @@ export class MoonciteEngine {
           ))),
           semanticAuthorizationKey(root.origin, root.rootDigest),
         ];
-        if (input.project) {
-          conditions.push("project = ?");
-          params.push(input.project);
-        }
-        if (sessionScope) {
-          conditions.push("session_id = ?");
-          params.push(sessionScope.sessionId);
-        }
-        if (input.role) {
-          conditions.push("role = ?");
-          params.push(input.role);
-        }
-        if (after !== null) {
-          conditions.push("has_event_time = ?", "event_time >= ?");
-          params.push(1n, Date.parse(after) / 1_000);
-        }
-        if (before !== null) {
-          conditions.push("has_event_time = ?", "event_time <= ?");
-          params.push(1n, Date.parse(before) / 1_000);
-        }
+        appendSemanticScoreFilters(conditions, params, input, sessionScope, after, before);
         const rows = this.#db.prepare(`
           SELECT semantic_vectors.rowid, semantic_vectors.distance,
                  semantic_vectors.evidence_id, semantic_vectors.record_digest
