@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -214,6 +214,37 @@ process.exit(1);
     MOONCITE_SMOKE_NODE: process.execPath,
     MOONCITE_SMOKE_CLI: stableCli,
   };
+  const probeDir = join(receiver, "serve-probes");
+  const probeLog = join(receiver, "serve-probes.log");
+  await mkdir(probeDir);
+  await writeFile(probeLog, "");
+  for (const name of ["pi", "omp", "codex", "claude"]) {
+    const probe = join(probeDir, name);
+    await writeFile(probe, `#!/bin/sh\nprintf '%s %s\n' "$0" "$*" >> ${JSON.stringify(probeLog)}\nexit 0\n`, { mode: 0o700 });
+    await chmod(probe, 0o700);
+  }
+  const serveHome = join(receiver, "serve-home");
+  await mkdir(join(serveHome, ".local", "state"), { recursive: true });
+  const serveProbe = await run(process.execPath, [bootstrapCli, "serve"], {
+    env: {
+      ...env,
+      HOME: serveHome,
+      PATH: `${probeDir}${delimiter}/usr/bin${delimiter}/bin`,
+      XDG_CONFIG_HOME: join(serveHome, ".config"),
+      XDG_DATA_HOME: join(serveHome, ".local", "share"),
+      XDG_STATE_HOME: join(serveHome, ".local", "state"),
+      PI_AGENT_DIR: join(serveHome, ".pi", "agent"),
+      PI_CODING_AGENT_DIR: join(serveHome, ".omp", "agent"),
+    },
+    timeout: 30_000,
+  });
+  if (serveProbe.stdout.trim() !== "" || (await readFile(probeLog, "utf8")).trim() !== "") {
+    throw new Error(`serve spawned a client CLI or wrote stdout: ${await readFile(probeLog, "utf8")}`);
+  }
+  const launcherLink = join(receiver, "mooncite-link");
+  await symlink(bootstrapCli, launcherLink);
+  const linkedHelp = await run(launcherLink, ["--help"], { env });
+  if (!linkedHelp.stdout.includes("Mooncite commands:")) throw new Error("symlinked launcher did not run");
   const initialSources = JSON.parse((await run(process.execPath, [bootstrapCli, "source", "list"], { env })).stdout);
   if (initialSources.configured.length !== 0
     || initialSources.automatic.length !== 4
@@ -373,7 +404,9 @@ process.exit(1);
       }
     }
     const status = await request("tools/call", { name: "mooncite_status", arguments: {} });
-    if (status.structuredContent.outcome !== "ready" || Object.values(status.structuredContent.registrations).some((value) => value !== "exact")) throw new Error("status was not ready and exact");
+    if (status.structuredContent.outcome !== "ready" || Object.values(status.structuredContent.registrations).some((value) => value !== "unavailable")) {
+      throw new Error("serve status probed client registrations or was not ready");
+    }
     if (status.structuredContent.sourceFilesByOrigin?.pi !== 2
       || status.structuredContent.sourceFilesByOrigin?.omp !== 1
       || status.structuredContent.sourceFilesByOrigin?.["claude-code"] !== 1

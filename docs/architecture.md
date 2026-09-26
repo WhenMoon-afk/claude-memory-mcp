@@ -20,7 +20,7 @@ For OMP and Claude Code, Mooncite admits only project-level JSONL files. It igno
 
 1. Mooncite discovers authorized local roots and reads admitted source files through Linux file descriptors.
 2. It publishes searchable evidence to a derived SQLite and FTS5 projection in a transaction.
-3. `mooncite_recall` performs bounded lexical search over that projection.
+3. `mooncite_recall` performs bounded lexical-first search over that projection. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit, and only when local embeddings are available. Quoted phrases and shorter queries stay lexical.
 4. `mooncite_inspect` rereads the physical source bytes for one locator before returning a verified window.
 
 Recall checks the active index first. Only a miss triggers one bounded incremental refresh and retry. `status` always refreshes. `rebuild` performs the explicit full reread.

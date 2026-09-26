@@ -4,11 +4,11 @@ These instructions apply to the whole repository. Preserve the invariants below 
 
 ## Product boundary
 
-Mooncite is a Linux/procfs-only, local, citation-backed retrieval tool for prior conversation history. It helps an agent find and verify bounded evidence; it does **not** decide what evidence means, whether it is current, or what the user should do.
+Mooncite is a Linux/procfs-only, local, citation-backed retrieval tool for prior conversation history. Packaged local embeddings require Linux x64 and are skipped on other architectures. It helps an agent find and verify bounded evidence; it does **not** decide what evidence means, whether it is current, or what the user should do.
 
 - Source history is user-owned and read-only. Never rewrite, repair, normalize in place, move, delete, or claim ownership of it.
 - The SQLite evidence index is owner-private, transactional, derived, disposable, and rebuildable from authorized sources.
-- Recall is bounded lexical retrieval. Inspection must re-read and verify the current physical source bytes before returning a bounded window. Status must not expose transcript text or full physical paths.
+- Recall is lexical-first. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit, and only when local embeddings are available. Quoted phrases and shorter queries stay lexical. Inspection must re-read and verify the current physical source bytes before returning a bounded window. Status must not expose transcript text or full physical paths.
 - Mooncite has no history network transport, telemetry, upload, SSH/remote-copy path, account login, export automation, credential/cookie access, or opaque application-cache scraping. Text returned through MCP enters the receiving model's privacy boundary; do not imply otherwise.
 - Evidence retrieval is not an authority, policy, recommendation, truth-scoring, or durable-agent-memory layer.
 

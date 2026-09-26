@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -141,7 +142,6 @@ async function runStatusCommand({ engineOptions, registrations }: CliContext): P
   }
 }
 
-
 async function runRebuildCommand({ engineOptions }: CliContext): Promise<void> {
   const engine = new MoonciteEngine(engineOptions);
   try {
@@ -184,7 +184,16 @@ async function main(): Promise<void> {
   await handler({ args, engineOptions, installation, registrations });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+export function isDirectCliExecution(entryPath = process.argv[1], moduleUrl = import.meta.url): boolean {
+  if (!entryPath) return false;
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(entryPath);
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectCliExecution()) {
   main().catch((error: unknown) => {
     process.stderr.write(`mooncite: ${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;

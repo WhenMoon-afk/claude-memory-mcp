@@ -2,7 +2,7 @@
 
 ## Install
 
-Mooncite requires Linux with procfs, Node.js 24 or newer, `npm`, and access to GitHub.
+Mooncite requires Linux with procfs, Node.js 24 or newer, `npm`, and access to GitHub. Packaged local embeddings are Linux x64 only. Other Linux architectures still install and search lexically.
 
 Stable v4.0.6:
 
@@ -11,13 +11,13 @@ npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6 install
 ```
 
 
-Current prerelease (not stable):
+Current prerelease branch (not stable, and not a cut tag):
 
 ```bash
-npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.7-preview.1010.0 install
+npx --yes github:WhenMoon-afk/claude-memory-mcp#preview/4.0.7-1010 install
 ```
 
-The stable tag is the documented install. Untagged `main` builds are identified by commit SHA.
+The stable tag is the documented install. The `v4.0.7-preview.1010.0` tag is not cut. Untagged `main` builds are identified by commit SHA.
 
 The installer verifies the package identity and layout. It puts the package under `$XDG_DATA_HOME/mooncite` and the evidence index under `$XDG_STATE_HOME/mooncite`. It creates `~/.local/bin/mooncite` and configures available Pi, OMP, Codex, and Claude Code clients. Reinstalling the same version is idempotent.
 

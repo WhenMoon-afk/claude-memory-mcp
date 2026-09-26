@@ -2118,8 +2118,8 @@ function parseAppend(
   };
 }
 
-function databaseSchemaFingerprint(database: DatabaseSync): string {
-  const rows = database.prepare(`
+function databaseSchemaObjects(database: DatabaseSync): Array<{ type: string; name: string; tbl_name: string; sql: string | null }> {
+  return database.prepare(`
     SELECT type, name, tbl_name, sql
     FROM sqlite_schema
     WHERE name NOT LIKE 'sqlite_stat%'
@@ -2127,7 +2127,24 @@ function databaseSchemaFingerprint(database: DatabaseSync): string {
       AND name NOT LIKE 'semantic_vectors%'
       AND tbl_name NOT LIKE 'semantic_vectors%'
   `).all() as Array<{ type: string; name: string; tbl_name: string; sql: string | null }>;
-  return JSON.stringify(rows);
+}
+
+function logicalSchemaFingerprint(database: DatabaseSync): string {
+  const objects = databaseSchemaObjects(database).map((object) => {
+    if (object.type === "table" && object.name === "evidence") {
+      const columns = database.prepare("PRAGMA table_info(evidence)").all() as Array<{ name: string; type: string; notnull: number; pk: number }>;
+      return {
+        type: object.type,
+        name: object.name,
+        columns: columns
+          .map((column) => ({ name: column.name, type: column.type, notnull: column.notnull, pk: column.pk }))
+          .sort((left, right) => left.name.localeCompare(right.name)),
+      };
+    }
+    return object;
+  });
+  objects.sort((left, right) => left.type.localeCompare(right.type) || left.name.localeCompare(right.name));
+  return JSON.stringify(objects);
 }
 
 let expectedDatabaseSchemaFingerprint: string | null = null;
@@ -2136,7 +2153,7 @@ function canonicalDatabaseSchemaFingerprint(): string {
   const canonical = new DatabaseSync(":memory:");
   try {
     canonical.exec(DATABASE_SCHEMA);
-    expectedDatabaseSchemaFingerprint = databaseSchemaFingerprint(canonical);
+    expectedDatabaseSchemaFingerprint = logicalSchemaFingerprint(canonical);
     return expectedDatabaseSchemaFingerprint;
   } finally {
     canonical.close();
@@ -2144,8 +2161,17 @@ function canonicalDatabaseSchemaFingerprint(): string {
 }
 
 function validateDatabaseSchema(database: DatabaseSync): void {
-  if (databaseSchemaFingerprint(database) !== canonicalDatabaseSchemaFingerprint()) {
+  if (logicalSchemaFingerprint(database) !== canonicalDatabaseSchemaFingerprint()) {
     throw new Error("Mooncite derived schema is corrupt: incompatible canonical schema.");
+  }
+}
+
+function upgradeAdditiveSchema(database: DatabaseSync): void {
+  const evidence = database.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type = 'table' AND name = 'evidence'").get();
+  if (!evidence) return;
+  const columns = database.prepare("PRAGMA table_info(evidence)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "semantic_eligible")) {
+    database.exec("ALTER TABLE evidence ADD COLUMN semantic_eligible INTEGER NOT NULL DEFAULT 0");
   }
 }
 function assertLegacyMoonciteStateDirectory(stateDir: string, databasePath: string): void {
@@ -2187,6 +2213,7 @@ function openInitializedDatabase(path: string): InitializedDatabase {
   let database: DatabaseSync | null = null;
   try {
     database = new DatabaseSync(path, { allowExtension: true });
+    upgradeAdditiveSchema(database);
     database.exec(DATABASE_SCHEMA);
     validateDatabaseSchema(database);
     database.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get();
@@ -2329,19 +2356,10 @@ function openRecoverableDatabase(
 function migrateDatabaseDerivation(database: DatabaseSync): void {
   const derivation = database.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value?: string } | undefined;
   if (derivation?.value === DERIVATION_VERSION) return;
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    const current = database.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value?: string } | undefined;
-    if (current?.value !== DERIVATION_VERSION) {
-      try { database.exec("DELETE FROM semantic_vectors;"); } catch { /* Semantic table is absent until vec0 loads. */ }
-      database.exec("DELETE FROM evidence; DELETE FROM source_records; DELETE FROM source_files; DELETE FROM semantic_pending; DELETE FROM metadata WHERE key = 'last_good';");
-      database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('derivation_version', ?)").run(DERIVATION_VERSION);
-    }
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
+  if (logicalSchemaFingerprint(database) !== canonicalDatabaseSchemaFingerprint()) {
+    throw new Error("Mooncite derived schema is corrupt: incompatible canonical schema.");
   }
+  database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('derivation_version', ?)").run(DERIVATION_VERSION);
 }
 
 export class MoonciteEngine {
@@ -3931,6 +3949,7 @@ export class MoonciteEngine {
     scope: RecallScope,
     candidates: EvidenceCandidate[],
     echoesSuppressed: number,
+    embeddingSearchRan: boolean,
   ): EvidenceBundle {
     const warnings = state.errors === 0
       ? [...scope.warnings]
@@ -3948,6 +3967,7 @@ export class MoonciteEngine {
       : candidates.some((candidate) => candidate.match.band === "strong") ? "matches" : "weak_leads";
     const conclusive = outcome === "matches" || outcome === "no_match";
     const semanticOnly = candidates.length > 0 && candidates.every((candidate) => candidate.match.kind === "semantic");
+    const embeddingSearched = embeddingSearchRan && this.#semanticIndexAvailable && this.#semanticUnavailableReason === null;
     const meaning = outcome === "matches"
       ? semanticOnly
         ? "Mooncite found a local embedding match. Inspect a cited source window before relying on any claim."
@@ -3960,7 +3980,9 @@ export class MoonciteEngine {
           : "Mooncite found only partial or weak leads. Refine the query or inspect a lead before using it."
         : outcome === "inconclusive"
           ? "The active index is partial or retained from a last-good generation, so an empty result does not prove the evidence is absent."
-          : "Mooncite searched the complete requested scope and found no lexical or embedding match.";
+          : embeddingSearched
+            ? "Mooncite searched the complete requested scope and found no lexical or embedding match."
+            : "Mooncite searched the complete requested scope and found no lexical match.";
     const next: MoonciteNextAction | null = candidates.length > 0
       ? {
         action: "call",
@@ -4040,7 +4062,9 @@ export class MoonciteEngine {
       const ranked = this.#rankRecallRow(row, recallQuery);
       return ranked.exact || ranked.metadataExact || ranked.termCoverage >= 0.6;
     });
-    if (!hasStrongLexical && !recallQuery.parsed.phrase && recallQuery.terms.length >= 2) {
+    const embeddingSearchRan = !hasStrongLexical && !recallQuery.parsed.phrase && recallQuery.terms.length >= 2
+      && this.#semanticIndexAvailable && this.#semanticUnavailableReason === null;
+    if (embeddingSearchRan) {
       this.#mergeSemanticRecallRows(input, recallQuery, scope, authorizedRoots, sessionResolution.sessionScope, rowsById);
     }
     const { candidates, echoesSuppressed } = this.#recallCandidates(rowsById, recallQuery);
@@ -4048,7 +4072,7 @@ export class MoonciteEngine {
       this.refresh();
       return this.#recall(input, false);
     }
-    return this.#recallResult(state, recallQuery, scope, candidates, echoesSuppressed);
+    return this.#recallResult(state, recallQuery, scope, candidates, echoesSuppressed, embeddingSearchRan);
   }
   #semanticVector(text: string): Int8Array | null {
     if (!this.#semanticIndexAvailable || this.#semanticUnavailableReason !== null) return null;
@@ -4215,40 +4239,6 @@ export class MoonciteEngine {
       ) {
         rowsById.set(score.evidenceId, { ...row, semantic_similarity: score.similarity });
       }
-    }
-    for (const row of [...rowsById.values()]) {
-      if (typeof row.semantic_similarity !== "number" || row.semantic_similarity < STRONG_SEMANTIC_SIMILARITY) continue;
-      const lower = String(row.text).toLowerCase();
-      const termCoverage = recallQuery.terms.length === 0
-        ? 0
-        : recallQuery.terms.filter((term) => lower.includes(term)).length / recallQuery.terms.length;
-      if (termCoverage >= 0.6 || recallQuery.parsed.phrase) continue;
-      const role = String(row.role);
-      if (role !== "user" && role !== "assistant") continue;
-      const opposite = role === "user" ? "assistant" : "user";
-      const later = role === "user";
-      const pair = this.#db.prepare(`
-        SELECT e.rowid AS rowid, e.*, 0.0 AS score
-        FROM evidence e
-        WHERE e.source_path = ? AND e.session_id = ? AND e.role = ?
-          AND (e.line ${later ? ">" : "<"} ? OR (e.line = ? AND e.byte_start ${later ? ">" : "<"} ?))
-          AND ${scope.authorizationSql}${scope.evidenceSql}
-        ORDER BY e.line ${later ? "ASC" : "DESC"}, e.byte_start ${later ? "ASC" : "DESC"}
-        LIMIT 1
-      `).get(
-        String(row.source_path),
-        String(row.session_id),
-        opposite,
-        Number(row.line),
-        Number(row.line),
-        Number(row.byte_start),
-        ...scope.authorizationParams,
-        ...scope.evidenceParams,
-      ) as RecallRow | undefined;
-      if (!pair) continue;
-      const id = String(pair.evidence_id);
-      if (rowsById.has(id)) continue;
-      rowsById.set(id, { ...pair, semantic_similarity: row.semantic_similarity });
     }
   }
   #semanticScores(

@@ -5,7 +5,8 @@ import { fileURLToPath } from "node:url";
 
 const requireDependency = createRequire(import.meta.url);
 if (process.platform !== "linux" || process.arch !== "x64") {
-  throw new Error(`Mooncite packaging does not support ${process.platform} ${process.arch}.`);
+  process.stderr.write(`Mooncite local embeddings are not packaged for ${process.platform} ${process.arch}; lexical search still builds.\n`);
+  process.exit(0);
 }
 
 const extensionBinary = requireDependency.resolve("sqlite-vec-linux-x64/vec0.so");

@@ -1,4 +1,9 @@
+import { mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { isDirectCliExecution } from "../src/cli.js";
 import { createFixture, type Fixture } from "./fixture.js";
 
 const diagnose = vi.fn(async () => ({
@@ -20,6 +25,18 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
   while (fixtures.length) await fixtures.pop()!.cleanup();
+});
+
+describe("CLI entry", () => {
+  it("treats a symlink to the CLI file as direct execution", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "mooncite-cli-link-"));
+    const target = join(directory, "cli.js");
+    const link = join(directory, "mooncite");
+    await writeFile(target, "#!/usr/bin/env node\n", { mode: 0o600 });
+    await symlink(target, link);
+    expect(isDirectCliExecution(link, pathToFileURL(target).href)).toBe(true);
+    expect(isDirectCliExecution(join(directory, "missing.js"), pathToFileURL(target).href)).toBe(false);
+  });
 });
 
 describe("mooncite serve", () => {

@@ -1,6 +1,6 @@
 # MCP protocol
 
-The local stdio server exposes exactly three evidence tools by default:
+The local stdio server exposes exactly three evidence tools:
 
 - `mooncite_recall`
 - `mooncite_inspect`
@@ -32,7 +32,7 @@ A source-qualified session ID has the form `<origin>:<64-hex-source-root-digest>
 
 | Outcome | Meaning |
 | --- | --- |
-| `matches` | Strong lexical result |
+| `matches` | Strong lexical result, or a strong local embedding result after an unquoted multi-word miss |
 | `weak_leads` | Possible result that needs refinement or inspection |
 | `no_match` | Absence result only when `conclusive` is `true` |
 | `inconclusive` | Freshness or coverage prevents an absence claim |

@@ -15,7 +15,7 @@ flowchart LR
 
 ## Install
 
-Mooncite requires Linux with procfs, Node.js 24 or newer, `npm`, and access to GitHub.
+Mooncite requires Linux with procfs, Node.js 24 or newer, `npm`, and access to GitHub. Packaged local embeddings are Linux x64 only. Other Linux architectures still install and search lexically.
 
 ```bash
 npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6 install
