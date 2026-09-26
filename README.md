@@ -21,7 +21,7 @@ Mooncite requires Linux with procfs, Node.js 24 or newer, `npm`, and access to G
 npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.7 install
 ```
 
-This cut is Mooncite 4.0.7. Use the `#v4.0.7` tag after it is cut on merge. After installation, check the launcher. Then fully restart or reload each client whose registration is `exact`:
+Tagged v4.0.7 is the current stable release. After installation, check the launcher. Then fully restart or reload each client whose registration is `exact`:
 
 ```bash
 "$HOME/.local/bin/mooncite" status
@@ -37,7 +37,7 @@ Recall runs inside a configured client. It is not a shell command. Give the agen
 
 Mooncite exposes exactly three tools:
 
-- `mooncite_recall` searches bounded local evidence.
+- `mooncite_recall` searches bounded local evidence. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit.
 - `mooncite_inspect` checks a locator against current source bytes.
 - `mooncite_status` reports coverage and health without transcript text.
 
