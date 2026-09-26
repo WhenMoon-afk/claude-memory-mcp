@@ -23,7 +23,7 @@ For OMP and Claude Code, Mooncite admits only project-level JSONL files. It igno
 3. `mooncite_recall` performs bounded lexical-first search over that projection. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit, and only when local embeddings are available. Quoted phrases and shorter queries stay lexical.
 4. `mooncite_inspect` rereads the physical source bytes for one locator before returning a verified window.
 
-Recall checks the active index first. Only a miss triggers one bounded incremental refresh and retry. `status` always refreshes. `rebuild` performs the explicit full reread.
+Recall checks the active index first. A lexical miss triggers one bounded incremental refresh and retry. An unquoted miss with incomplete local embedding coverage does not. `status` always refreshes. `rebuild` performs the explicit full reread.
 
 Pi same-inode growth may append a coherently read suffix as `append_trusted`. OMP same-inode growth may do the same after Mooncite physically verifies the last indexed evidence record at the append boundary. Other OMP changes and changes from Claude Code, Codex, and ChatGPT replace that source's projection in a transaction. A shrink, detectable rewrite, identity change, or failed replacement keeps the usable last-good generation. Mooncite does not publish known partial coverage over it.
 

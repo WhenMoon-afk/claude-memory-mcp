@@ -1495,4 +1495,25 @@ describe("Mooncite engine public seam", () => {
       reopened.close();
     }
   });
+
+  it("does not treat an embedding-budget miss as conclusive absence", async () => {
+    const f = await fixture();
+    const seeded = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, ompSessionsRoot: f.ompSessionsRoot, stateDir: f.stateDir });
+    seeded.recall({ query: "silver-cedar-17" });
+    seeded.close();
+    const database = new DatabaseSync(join(f.stateDir, "index.sqlite"));
+    const insert = database.prepare("INSERT OR IGNORE INTO semantic_pending(evidence_rowid) VALUES (?)");
+    for (let rowid = 1_000_000; rowid < 1_000_257; rowid += 1) insert.run(rowid);
+    database.close();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, ompSessionsRoot: f.ompSessionsRoot, stateDir: f.stateDir });
+    try {
+      expect(engine.recall({ query: "neon narwhal waltz" })).toMatchObject({
+        outcome: "inconclusive",
+        conclusive: false,
+        meaning: expect.stringContaining("embedding coverage is incomplete"),
+      });
+    } finally {
+      engine.close();
+    }
+  });
 });
