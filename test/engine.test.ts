@@ -2,8 +2,10 @@ import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { appendFile, chmod, mkdir, readFile, readdir, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { MoonciteEngine } from "../src/engine.js";
+import { isMoonciteToolRendering, MoonciteEngine } from "../src/engine.js";
+import { MOONCITE_STATE_MARKER_CONTENT, MOONCITE_STATE_MARKER_NAME } from "../src/identity.js";
 import { addSourceRegistration, loadSourceRegistrations, removeSourceRegistration, resolveSourceRegistrations } from "../src/source-config.js";
 import { createFixture, digest, jsonLine, ompTitleLine, type Fixture } from "./fixture.js";
 
@@ -1364,6 +1366,161 @@ describe("Mooncite engine public seam", () => {
       expect(await digest(f.source)).toBe(f.sourceDigest);
     } finally {
       recovered.close();
+    }
+  });
+
+  it("uses embeddings only after an unquoted multi-word lexical miss", async () => {
+    const f = await fixture();
+    await appendFile(f.source, jsonLine({
+      type: "message",
+      id: "semantic-question",
+      parentId: "entry-b",
+      timestamp: "2030-01-01T00:00:02.500Z",
+      message: {
+        role: "user",
+        content: "What should we do when a vendor request keeps failing?",
+      },
+    }) + jsonLine({
+      type: "message",
+      id: "semantic-target",
+      parentId: "semantic-question",
+      timestamp: "2030-01-01T00:00:03.000Z",
+      message: {
+        role: "assistant",
+        content: "We decided to retry provider failures with exponential backoff and jitter.",
+      },
+    }));
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, stateDir: f.stateDir });
+    try {
+      expect(engine.status().semanticAvailable).toBe(true);
+      const paraphrase = engine.recall({
+        query: "What is the recovery policy for broken vendor requests?",
+        limit: 20,
+      });
+      expect(paraphrase.outcome).toBe("matches");
+      const semanticCandidate = paraphrase.candidates.find((candidate) => candidate.entryId === "semantic-target")!;
+      expect(semanticCandidate.match.kind).toBe("semantic");
+      expect(engine.inspect({ evidenceId: semanticCandidate.evidenceId, window: 0 })).toMatchObject({
+        outcome: "verified",
+        target: { text: expect.stringContaining("exponential backoff and jitter") },
+      });
+      const exact = engine.recall({ query: "retry provider failures with exponential backoff and jitter" });
+      expect(exact.candidates[0]).toMatchObject({ entryId: "semantic-target", match: { kind: "text_exact" } });
+      expect(exact.candidates[0]!.match.semanticSimilarity).toBeUndefined();
+      const jitter = engine.recall({ query: "jitter" });
+      expect(jitter.candidates[0]).toMatchObject({ entryId: "semantic-target", match: { kind: "text_exact" } });
+      expect(jitter.candidates[0]!.match.semanticSimilarity).toBeUndefined();
+      const quoted = engine.recall({ query: "\"exponential backoff\"" });
+      expect(quoted.candidates[0]).toMatchObject({ entryId: "semantic-target", match: { kind: "phrase_exact" } });
+      expect(quoted.candidates[0]!.match.semanticSimilarity).toBeUndefined();
+      const missed = engine.recall({ query: "neon narwhal waltz" });
+      expect(missed.outcome).toBe("no_match");
+      expect(missed.meaning).toContain("no lexical or embedding match");
+      const quotedMiss = engine.recall({ query: "\"neon narwhal waltz\"" });
+      expect(quotedMiss.outcome).toBe("no_match");
+      expect(quotedMiss.meaning).toBe("Mooncite searched the complete requested scope and found no lexical match.");
+      expect(engine.status()).toMatchObject({
+        semanticAvailable: true,
+        semanticPending: 0,
+      });
+    } finally {
+      engine.close();
+    }
+  });
+
+  it("keeps a derivation-13 last-good index when opening the current schema", async () => {
+    const f = await fixture();
+    await mkdir(f.stateDir, { recursive: true, mode: 0o700 });
+    await chmod(f.stateDir, 0o700);
+    await writeFile(join(f.stateDir, MOONCITE_STATE_MARKER_NAME), MOONCITE_STATE_MARKER_CONTENT, { mode: 0o600 });
+    const databasePath = join(f.stateDir, "index.sqlite");
+    const database = new DatabaseSync(databasePath);
+    database.exec(await readFile(fileURLToPath(new URL("./derivation-13-schema.sql", import.meta.url)), "utf8"));
+    database.prepare("INSERT INTO evidence(evidence_id, evidence_uri, text, project, session_id, entry_id, role, source_origin, source_kind, event_timestamp, source_path, line, byte_start, byte_end, record_digest, prefix_digest, parent_id, branch_state, compaction_state) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(
+      "mooncite:pi:kept:kept:kept:0",
+      "mooncite://pi/kept/kept/kept/0",
+      "kept-last-good-span",
+      "moon-project",
+      "session-moon",
+      "kept-entry",
+      "user",
+      "pi",
+      "session",
+      null,
+      f.source,
+      1,
+      0,
+      4,
+      "a".repeat(64),
+      "b".repeat(64),
+      null,
+      "current",
+      "none",
+    );
+    database.prepare("INSERT INTO metadata(key, value) VALUES ('derivation_version', '13')").run();
+    database.prepare("INSERT INTO metadata(key, value) VALUES ('last_good', ?)").run(JSON.stringify({
+      sourceFiles: 1,
+      records: 1,
+      eligibleRecords: 1,
+      skipped: 0,
+      malformed: 0,
+      oversized: 0,
+      errors: 0,
+      fatalErrors: 0,
+      generation: "kept-generation",
+      trustState: "full_verified",
+      coverage: "complete",
+      retainedLastGood: true,
+      evidenceSpans: 1,
+      errorGroups: [],
+    }));
+    database.close();
+    await chmod(databasePath, 0o600);
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, ompSessionsRoot: f.ompSessionsRoot, stateDir: f.stateDir });
+    try {
+      expect(engine.status()).toMatchObject({ freshness: "last_good", generation: "kept-generation" });
+    } finally {
+      engine.close();
+    }
+    const reopened = new DatabaseSync(databasePath, { readOnly: true });
+    try {
+      expect(reopened.prepare("SELECT evidence_id FROM evidence WHERE evidence_id = ?").get("mooncite:pi:kept:kept:kept:0")).toEqual({
+        evidence_id: "mooncite:pi:kept:kept:kept:0",
+      });
+      expect((reopened.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get() as { value: string }).value).toContain("kept-generation");
+      expect((reopened.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value: string }).value).toBe("14");
+      expect(reopened.prepare("SELECT semantic_eligible FROM evidence").get()).toEqual({ semantic_eligible: 1 });
+      expect(reopened.prepare("SELECT COUNT(*) AS count FROM semantic_pending").get()).toEqual({ count: 1 });
+    } finally {
+      reopened.close();
+    }
+  });
+
+  it("recognizes a card-first recall rendering as Mooncite output", () => {
+    const card = `${"1. pi user · 2 years ago\n".repeat(200)}Mooncite recall: no_match; conclusive=true; absent`;
+    expect(card.length).toBeGreaterThan(4_096);
+    expect(isMoonciteToolRendering("toolResult", card)).toBe(true);
+    expect(isMoonciteToolRendering("assistant", card)).toBe(false);
+  });
+
+  it("does not treat an embedding-budget miss as conclusive absence", async () => {
+    const f = await fixture();
+    const seeded = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, ompSessionsRoot: f.ompSessionsRoot, stateDir: f.stateDir });
+    seeded.recall({ query: "silver-cedar-17" });
+    seeded.close();
+    const database = new DatabaseSync(join(f.stateDir, "index.sqlite"));
+    const insert = database.prepare("INSERT OR IGNORE INTO semantic_pending(evidence_rowid) VALUES (?)");
+    for (let rowid = 1_000_000; rowid < 1_000_257; rowid += 1) insert.run(rowid);
+    database.close();
+    const engine = new MoonciteEngine({ sessionsRoot: f.sessionsRoot, ompSessionsRoot: f.ompSessionsRoot, stateDir: f.stateDir });
+    try {
+      expect(engine.recall({ query: "neon narwhal waltz" })).toMatchObject({
+        outcome: "inconclusive",
+        conclusive: false,
+        meaning: expect.stringContaining("embedding coverage is incomplete"),
+      });
+    } finally {
+      engine.close();
     }
   });
 });

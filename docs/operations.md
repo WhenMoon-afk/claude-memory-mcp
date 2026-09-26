@@ -2,7 +2,7 @@
 
 ## Install
 
-Mooncite requires Linux with procfs, Node.js 24 or newer, `npm`, and access to GitHub.
+Mooncite requires Linux with procfs, Node.js 24 or newer, `npm`, and access to GitHub. Packaged local embeddings are Linux x64 only. Other Linux architectures still install and search lexically.
 
 Stable v4.0.6:
 
@@ -10,7 +10,14 @@ Stable v4.0.6:
 npx --yes github:WhenMoon-afk/claude-memory-mcp#v4.0.6 install
 ```
 
-The stable tag is the documented install. Untagged `main` builds are identified by commit SHA.
+
+Current prerelease branch (not stable, and not a cut tag):
+
+```bash
+npx --yes github:WhenMoon-afk/claude-memory-mcp#preview/4.0.7-1010 install
+```
+
+The stable tag is the documented install. The `v4.0.7-preview.1010.0` tag is not cut. Untagged `main` builds are identified by commit SHA.
 
 The installer verifies the package identity and layout. It puts the package under `$XDG_DATA_HOME/mooncite` and the evidence index under `$XDG_STATE_HOME/mooncite`. It creates `~/.local/bin/mooncite` and configures available Pi, OMP, Codex, and Claude Code clients. Reinstalling the same version is idempotent.
 
@@ -72,29 +79,13 @@ For `source_limit_exceeded`, reduce the authorized source set or wait for a rele
 
 Recall and inspection are MCP tools, not shell commands. See the [agent workflow](../skills/mooncite/SKILL.md) and [protocol](protocol.md).
 
-## Optional learned memory
-
-Learned memory is off by default. Manage the owner-private opt-in with:
-
-```bash
-mooncite memory enable
-mooncite memory status
-mooncite memory disable
-```
-
-Restart or reload every client after enable or disable. The first enabled use creates `$XDG_STATE_HOME/mooncite/learned-memory.sqlite`. Disabling learned memory hides its tools but keeps that database.
-
-Learned memory stores explicit agent-authored interpretations separately from source evidence. It performs no background extraction, model call, embedding, activation, reinforcement, or decay. See the [protocol](protocol.md) for provenance and mutation rules.
-
-`unsupported_schema` means that the learned-memory database does not match the schema supported by the running Mooncite process. An older client can report this error after a newer version migrates the database. Install or restore a Mooncite version that supports the existing database, fully restart every client, and run `mooncite memory status` again. Keep `learned-memory.sqlite` intact. Mooncite does not downgrade an unknown schema, and purge removes learned data rather than repairing it.
-
 ## Disable, uninstall, and purge
 
 | Command | Removes | Keeps |
 | --- | --- | --- |
 | `mooncite disable` | Owned client registrations | Package, launcher, derived state, configuration, source history |
 | `mooncite uninstall` | Owned registrations, recognized package, exact launcher | Derived state, configuration, source history |
-| `mooncite purge --yes` | Recognized evidence and learned-memory SQLite state | Package, launcher, configuration, source history |
+| `mooncite purge --yes` | Recognized derived SQLite state | Package, launcher, configuration, source history |
 
 All three operations fail closed when ownership or safe deletion cannot be verified. Purge refuses unknown entries, directories, links, unsafe ownership, overlapping source/state roots, and a running engine. Uninstall leaves the package in place when it cannot verify removal of an owned registration.
 

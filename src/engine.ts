@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import {
   chmodSync,
   closeSync,
@@ -19,6 +20,7 @@ import {
   type Stats,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { TextDecoder } from "node:util";
 import type { SourceRegistration } from "./source-config.js";
@@ -44,7 +46,17 @@ const MAX_SOURCE_IDENTIFIER_BYTES = 256;
 const MAX_SOURCE_KIND_BYTES = 64;
 const PRESENTATION_CONTROL_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028-\u202e\u2066-\u2069]/u;
 const PRESENTATION_CONTROL_REPLACEMENT_PATTERN = new RegExp(PRESENTATION_CONTROL_PATTERN.source, "gu");
-const DERIVATION_VERSION = "13";
+const DERIVATION_VERSION = "14";
+const SEMANTIC_DERIVATION_VERSION = "ternlight-mini-0.1.1-int8-cosine-v3";
+const SEMANTIC_DIMENSIONS = 384;
+const MIN_SEMANTIC_SIMILARITY = 0.18;
+const PARTIAL_SEMANTIC_SIMILARITY = 0.3;
+const STRONG_SEMANTIC_SIMILARITY = 0.38;
+const MAX_SEMANTIC_SYNC_SPANS = 256;
+const MAX_SEMANTIC_SYNC_BYTES = 4 * 1024 * 1024;
+const MAX_SEMANTIC_SYNC_QUERY_ROWS = 32;
+const MAX_SEMANTIC_RESULTS_PER_ROOT = 80;
+const requireDependency = createRequire(import.meta.url);
 
 export type SourceOrigin = "pi" | "omp" | SourceRegistration["origin"];
 const SOURCE_ORIGINS: SourceOrigin[] = ["pi", "omp", "claude-code", "codex", "chatgpt"];
@@ -107,6 +119,7 @@ const DATABASE_SCHEMA = `
     evidence_id TEXT PRIMARY KEY,
     evidence_uri TEXT NOT NULL,
     text TEXT NOT NULL,
+    semantic_eligible INTEGER NOT NULL,
     project TEXT NOT NULL,
     session_id TEXT NOT NULL,
     entry_id TEXT NOT NULL,
@@ -141,6 +154,16 @@ const DATABASE_SCHEMA = `
   END;
   CREATE TRIGGER IF NOT EXISTS evidence_fts_delete AFTER DELETE ON evidence BEGIN
     INSERT INTO evidence_fts(evidence_fts, rowid, text) VALUES ('delete', old.rowid, old.text);
+  END;
+  CREATE TABLE IF NOT EXISTS semantic_pending (
+    evidence_rowid INTEGER PRIMARY KEY
+  );
+  CREATE TRIGGER IF NOT EXISTS evidence_semantic_insert AFTER INSERT ON evidence
+  WHEN new.semantic_eligible = 1 BEGIN
+    INSERT OR REPLACE INTO semantic_pending(evidence_rowid) VALUES (new.rowid);
+  END;
+  CREATE TRIGGER IF NOT EXISTS evidence_semantic_delete AFTER DELETE ON evidence BEGIN
+    INSERT OR REPLACE INTO semantic_pending(evidence_rowid) VALUES (old.rowid);
   END;
   CREATE TABLE IF NOT EXISTS metadata (
     key TEXT PRIMARY KEY,
@@ -183,6 +206,19 @@ const DATABASE_SCHEMA = `
   );
   CREATE INDEX IF NOT EXISTS source_records_parent ON source_records(source_path, parent_id);
 `;
+const SEMANTIC_SCHEMA = `
+  CREATE VIRTUAL TABLE IF NOT EXISTS semantic_vectors USING vec0(
+    embedding int8[384] distance_metric=cosine,
+    authorization_key TEXT PARTITION KEY,
+    project TEXT,
+    session_id TEXT,
+    role TEXT,
+    evidence_id TEXT,
+    record_digest TEXT,
+    has_event_time BOOLEAN,
+    event_time FLOAT
+  );
+`;
 const STOP_WORDS = new Set([
   "a", "an", "and", "are", "as", "at", "be", "by", "did", "do", "does", "for", "from", "how", "i", "in",
   "is", "it", "of", "on", "or", "should", "the", "to", "was", "we", "what", "when", "where", "which", "with",
@@ -198,7 +234,7 @@ export interface EngineOptions {
 }
 
 export type RelevanceBand = "strong" | "partial" | "weak";
-export type MatchKind = "metadata_exact" | "phrase_exact" | "text_exact" | "terms";
+export type MatchKind = "metadata_exact" | "phrase_exact" | "text_exact" | "terms" | "semantic";
 export type TrustState = "full_verified" | "append_trusted";
 export type CoverageState = "complete" | "partial";
 export type RecallOrder = "relevance" | "newest" | "oldest";
@@ -223,6 +259,7 @@ export interface EvidenceMatch {
   matchedTerms: string[];
   missingTerms: string[];
   termCoverage: number;
+  semanticSimilarity?: number;
 }
 
 export interface EvidenceCandidate {
@@ -301,6 +338,8 @@ interface RankedRecallRow {
   isEcho: boolean;
   band: RelevanceBand;
   kind: MatchKind;
+  semanticSimilarity: number | null;
+  rrf: number;
 }
 
 export type RefreshOutcome = "not_run" | "published" | "unchanged" | "retained_last_good" | "unavailable";
@@ -345,6 +384,8 @@ export interface MoonciteStatus {
   lastRefreshOutcome: RefreshOutcome;
   lastRebuildOutcome: RefreshOutcome;
   searchUsable: boolean;
+  semanticAvailable: boolean;
+  semanticPending: number;
 }
 
 export type InspectionOutcome = "verified" | "stale" | "missing" | "excluded" | "corrupt" | "unavailable";
@@ -695,6 +736,7 @@ function isMoonciteRenderingText(text: string): boolean {
   return [...offsets].some((offset) => {
     const head = normalized.slice(offset);
     return /^Mooncite (?:recall|inspection|status):/u.test(head)
+      || /^[1-9]\d*\. (?:pi|omp|claude-code|codex|chatgpt) (?:user|assistant|system|developer|tool|toolResult|summary|unknown) · /u.test(head)
       || /^Finding [1-9]\d*\nExcerpt: /u.test(head)
       || /^Finding [1-9]\d*\nSource: (?:pi|omp|claude-code|codex|chatgpt)\n/u.test(head)
       || new RegExp(`^(?:Evidence for|Weak evidence leads for) “[\\s\\S]{0,2200}?”: {0,2}${trust}${tail}`, "u").test(head)
@@ -711,6 +753,57 @@ function isMoonciteRenderingText(text: string): boolean {
 
 export function isMoonciteToolRendering(role: string, text: string): boolean {
   return (role === "toolResult" || role === "tool") && isMoonciteRenderingText(text);
+}
+
+const SEMANTIC_ROLES = new Set<EvidenceRole>(["user", "assistant", "system", "developer", "summary"]);
+
+function semanticEligible(role: EvidenceRole, text: string): boolean {
+  return SEMANTIC_ROLES.has(role)
+    && text.trim().length >= 4
+    && Buffer.byteLength(text) < MAX_EVIDENCE_TEXT_BYTES
+    && !isMoonciteRenderingText(text);
+}
+function exchangeEmbeddingText(
+  role: EvidenceRole,
+  text: string,
+  precedingUser: string | null,
+  followingAssistant: string | null,
+): string {
+  if (role === "user" && followingAssistant) return `User: ${text}\n\nAssistant: ${followingAssistant}`;
+  if (role === "assistant" && precedingUser) return `User: ${precedingUser}\n\nAssistant: ${text}`;
+  return text;
+}
+interface SemanticEmbedder {
+  embed(text: string): Float32Array;
+  engineInfo(): string;
+}
+interface SemanticScore {
+  similarity: number;
+  evidenceId: string;
+  recordDigest: string;
+}
+function loadSemanticEmbedder(): SemanticEmbedder {
+  const candidate = requireDependency("@ternlight/mini") as Partial<SemanticEmbedder>;
+  if (typeof candidate.embed !== "function" || typeof candidate.engineInfo !== "function") {
+    throw new Error("Mooncite semantic embedder is invalid.");
+  }
+  const info = candidate.engineInfo();
+  if (!info.includes(`output_dim=${SEMANTIC_DIMENSIONS}`)) {
+    throw new Error("Mooncite semantic embedder has an incompatible output shape.");
+  }
+  return candidate as SemanticEmbedder;
+}
+function quantizeSemanticEmbedding(embedding: Float32Array): Int8Array {
+  if (embedding.length !== SEMANTIC_DIMENSIONS) {
+    throw new Error("Mooncite semantic embedder returned an incompatible vector.");
+  }
+  return Int8Array.from(embedding, (value) => {
+    if (!Number.isFinite(value)) throw new Error("Mooncite semantic embedder returned a non-finite vector.");
+    return Math.max(-127, Math.min(127, Math.round(value * 127)));
+  });
+}
+function semanticAuthorizationKey(origin: SourceOrigin, rootDigest: string): string {
+  return `${origin}:${rootDigest}`;
 }
 
 function conversationalRoleRank(role: unknown): number {
@@ -2026,14 +2119,33 @@ function parseAppend(
   };
 }
 
-function databaseSchemaFingerprint(database: DatabaseSync): string {
-  const rows = database.prepare(`
+function databaseSchemaObjects(database: DatabaseSync): Array<{ type: string; name: string; tbl_name: string; sql: string | null }> {
+  return database.prepare(`
     SELECT type, name, tbl_name, sql
     FROM sqlite_schema
     WHERE name NOT LIKE 'sqlite_stat%'
-    ORDER BY type, name, tbl_name
+      AND name <> 'sqlite_sequence'
+      AND name NOT LIKE 'semantic_vectors%'
+      AND tbl_name NOT LIKE 'semantic_vectors%'
   `).all() as Array<{ type: string; name: string; tbl_name: string; sql: string | null }>;
-  return JSON.stringify(rows);
+}
+
+function logicalSchemaFingerprint(database: DatabaseSync): string {
+  const objects = databaseSchemaObjects(database).map((object) => {
+    if (object.type === "table" && object.name === "evidence") {
+      const columns = database.prepare("PRAGMA table_info(evidence)").all() as Array<{ name: string; type: string; notnull: number; pk: number }>;
+      return {
+        type: object.type,
+        name: object.name,
+        columns: columns
+          .map((column) => ({ name: column.name, type: column.type, notnull: column.notnull, pk: column.pk }))
+          .sort((left, right) => left.name.localeCompare(right.name)),
+      };
+    }
+    return object;
+  });
+  objects.sort((left, right) => left.type.localeCompare(right.type) || left.name.localeCompare(right.name));
+  return JSON.stringify(objects);
 }
 
 let expectedDatabaseSchemaFingerprint: string | null = null;
@@ -2042,7 +2154,7 @@ function canonicalDatabaseSchemaFingerprint(): string {
   const canonical = new DatabaseSync(":memory:");
   try {
     canonical.exec(DATABASE_SCHEMA);
-    expectedDatabaseSchemaFingerprint = databaseSchemaFingerprint(canonical);
+    expectedDatabaseSchemaFingerprint = logicalSchemaFingerprint(canonical);
     return expectedDatabaseSchemaFingerprint;
   } finally {
     canonical.close();
@@ -2050,9 +2162,37 @@ function canonicalDatabaseSchemaFingerprint(): string {
 }
 
 function validateDatabaseSchema(database: DatabaseSync): void {
-  if (databaseSchemaFingerprint(database) !== canonicalDatabaseSchemaFingerprint()) {
+  if (logicalSchemaFingerprint(database) !== canonicalDatabaseSchemaFingerprint()) {
     throw new Error("Mooncite derived schema is corrupt: incompatible canonical schema.");
   }
+}
+
+function upgradeAdditiveSchema(database: DatabaseSync): void {
+  const evidence = database.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type = 'table' AND name = 'evidence'").get();
+  if (!evidence) return;
+  const columns = database.prepare("PRAGMA table_info(evidence)").all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === "semantic_eligible")) {
+    database.exec("ALTER TABLE evidence ADD COLUMN semantic_eligible INTEGER NOT NULL DEFAULT 0");
+  }
+}
+
+function backfillSemanticEligibility(database: DatabaseSync): void {
+  const marker = "14-role-text";
+  const stored = database.prepare("SELECT value FROM metadata WHERE key = 'semantic_eligibility_backfill'").get() as { value?: string } | undefined;
+  if (stored?.value === marker) return;
+  const evidence = database.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type = 'table' AND name = 'evidence'").get();
+  const pending = database.prepare("SELECT 1 AS found FROM sqlite_schema WHERE type = 'table' AND name = 'semantic_pending'").get();
+  if (evidence && pending) {
+    const rows = database.prepare("SELECT rowid, role, text FROM evidence WHERE semantic_eligible = 0").all() as Array<{ rowid: number | bigint; role: string; text: string }>;
+    const update = database.prepare("UPDATE evidence SET semantic_eligible = 1 WHERE rowid = ?");
+    const queue = database.prepare("INSERT OR IGNORE INTO semantic_pending(evidence_rowid) VALUES (?)");
+    for (const row of rows) {
+      if (!semanticEligible(row.role as EvidenceRole, row.text)) continue;
+      update.run(row.rowid);
+      queue.run(row.rowid);
+    }
+  }
+  database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('semantic_eligibility_backfill', ?)").run(marker);
 }
 function assertLegacyMoonciteStateDirectory(stateDir: string, databasePath: string): void {
   const allowed = new Set(["index.sqlite", "index.sqlite-journal", "index.sqlite-shm", "index.sqlite-wal"]);
@@ -2078,14 +2218,57 @@ function assertLegacyMoonciteStateDirectory(stateDir: string, databasePath: stri
   }
 }
 
-function openInitializedDatabase(path: string): DatabaseSync {
+interface InitializedDatabase {
+  database: DatabaseSync;
+  semanticIndexAvailable: boolean;
+}
+function semanticVectorExtensionPath(): string {
+  if (process.platform !== "linux" || process.arch !== "x64") {
+    throw new Error(`Mooncite semantic search does not support ${process.platform} ${process.arch}.`);
+  }
+  const packaged = fileURLToPath(new URL("./vendor/sqlite-vec/vec0.so", import.meta.url));
+  return existsSync(packaged) ? packaged : requireDependency.resolve("sqlite-vec-linux-x64/vec0.so");
+}
+function openInitializedDatabase(path: string): InitializedDatabase {
   let database: DatabaseSync | null = null;
   try {
-    database = new DatabaseSync(path);
+    database = new DatabaseSync(path, { allowExtension: true });
+    upgradeAdditiveSchema(database);
     database.exec(DATABASE_SCHEMA);
+    backfillSemanticEligibility(database);
     validateDatabaseSchema(database);
     database.prepare("SELECT value FROM metadata WHERE key = 'last_good'").get();
-    return database;
+    let semanticIndexAvailable = false;
+    try {
+      database.loadExtension(semanticVectorExtensionPath());
+      database.exec("BEGIN IMMEDIATE");
+      try {
+        const storedVersion = database.prepare("SELECT value FROM metadata WHERE key = 'semantic_derivation_version'").get() as { value?: string } | undefined;
+        const hadSemanticVectors = database.prepare(
+          "SELECT 1 AS found FROM sqlite_schema WHERE type = 'table' AND name = 'semantic_vectors'",
+        ).get() !== undefined;
+        const rebuildSemanticIndex = storedVersion?.value !== SEMANTIC_DERIVATION_VERSION || !hadSemanticVectors;
+        if (rebuildSemanticIndex) database.exec("DROP TABLE IF EXISTS semantic_vectors;");
+        database.exec(SEMANTIC_SCHEMA);
+        if (rebuildSemanticIndex) {
+          database.exec(`
+            INSERT OR IGNORE INTO semantic_pending(evidence_rowid)
+            SELECT rowid FROM evidence WHERE semantic_eligible = 1
+          `);
+        }
+        database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('semantic_derivation_version', ?)").run(SEMANTIC_DERIVATION_VERSION);
+        database.exec("COMMIT");
+        semanticIndexAvailable = true;
+      } catch (error) {
+        try { database.exec("ROLLBACK"); } catch { /* Preserve the semantic initialization failure. */ }
+        throw error;
+      }
+    } catch {
+      semanticIndexAvailable = false;
+    } finally {
+      database.enableLoadExtension(false);
+    }
+    return { database, semanticIndexAvailable };
   } catch (error) {
     try { database?.close(); } catch { /* The failed derived database is disposable. */ }
     throw error;
@@ -2170,7 +2353,7 @@ function openRecoverableDatabase(
   stateDir: string,
   databasePath: string,
   stateIdentity: OwnedDirectoryIdentity,
-): DatabaseSync {
+): InitializedDatabase {
   try {
     assertOwnedStateDirectory(stateDir, stateIdentity);
     return openInitializedDatabase(databasePath);
@@ -2194,18 +2377,114 @@ function openRecoverableDatabase(
 function migrateDatabaseDerivation(database: DatabaseSync): void {
   const derivation = database.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value?: string } | undefined;
   if (derivation?.value === DERIVATION_VERSION) return;
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    const current = database.prepare("SELECT value FROM metadata WHERE key = 'derivation_version'").get() as { value?: string } | undefined;
-    if (current?.value !== DERIVATION_VERSION) {
-      database.exec("DELETE FROM evidence; DELETE FROM source_records; DELETE FROM source_files; DELETE FROM metadata WHERE key = 'last_good';");
-      database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('derivation_version', ?)").run(DERIVATION_VERSION);
-    }
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
+  if (logicalSchemaFingerprint(database) !== canonicalDatabaseSchemaFingerprint()) {
+    throw new Error("Mooncite derived schema is corrupt: incompatible canonical schema.");
   }
+  database.prepare("INSERT OR REPLACE INTO metadata(key, value) VALUES ('derivation_version', ?)").run(DERIVATION_VERSION);
+}
+
+function recallRelevanceBand(exact: boolean, termCoverage: number, semanticSimilarity: number | null): RelevanceBand {
+  if (exact || termCoverage >= 0.6) return "strong";
+  if (termCoverage >= 0.25) return "partial";
+  if (semanticSimilarity !== null && semanticSimilarity >= STRONG_SEMANTIC_SIMILARITY) return "strong";
+  if (termCoverage > 0 || (semanticSimilarity !== null && semanticSimilarity >= PARTIAL_SEMANTIC_SIMILARITY)) return "partial";
+  return "weak";
+}
+
+function recallMatchKind(
+  metadataExact: boolean,
+  exact: boolean,
+  phrase: boolean,
+  semanticSimilarity: number | null,
+  termCoverage: number,
+): MatchKind {
+  if (metadataExact) return "metadata_exact";
+  if (exact && phrase) return "phrase_exact";
+  if (exact) return "text_exact";
+  if (semanticSimilarity !== null && termCoverage === 0) return "semantic";
+  return "terms";
+}
+
+function relevanceRecallOrder(left: RankedRecallRow, right: RankedRecallRow): number {
+  return Number(right.directCitation) - Number(left.directCitation)
+    || Number(right.metadataExact) - Number(left.metadataExact)
+    || Number(left.isEcho) - Number(right.isEcho)
+    || conversationalRoleRank(right.row.role) - conversationalRoleRank(left.row.role)
+    || Number(right.exact) - Number(left.exact)
+    || right.termCoverage - left.termCoverage
+    || right.rrf - left.rrf
+    || Number(left.row.score) - Number(right.row.score)
+    || (right.semanticSimilarity ?? -1) - (left.semanticSimilarity ?? -1);
+}
+
+function pendingSemanticRowIsEmbeddable(row: {
+  semantic_eligible: number;
+  text: string | null;
+  project: string | null;
+  session_id: string | null;
+  role: EvidenceRole | null;
+  evidence_id: string | null;
+  record_digest: string | null;
+  source_origin: SourceOrigin | null;
+  source_root_digest: string | null;
+}): boolean {
+  return row.semantic_eligible === 1
+    && row.text !== null
+    && row.project !== null
+    && row.session_id !== null
+    && row.role !== null
+    && row.evidence_id !== null
+    && row.record_digest !== null
+    && row.source_origin !== null
+    && row.source_root_digest !== null;
+}
+
+function appendSemanticScoreFilters(
+  conditions: string[],
+  params: Array<string | number | bigint | Int8Array>,
+  input: RecallInput,
+  sessionScope: { origin: SourceOrigin; rootDigest: string; sessionId: string } | null,
+  after: string | null,
+  before: string | null,
+): void {
+  if (input.project) {
+    conditions.push("project = ?");
+    params.push(input.project);
+  }
+  if (sessionScope) {
+    conditions.push("session_id = ?");
+    params.push(sessionScope.sessionId);
+  }
+  if (input.role) {
+    conditions.push("role = ?");
+    params.push(input.role);
+  }
+  if (after !== null) {
+    conditions.push("has_event_time = ?", "event_time >= ?");
+    params.push(1n, Date.parse(after) / 1_000);
+  }
+  if (before !== null) {
+    conditions.push("has_event_time = ?", "event_time <= ?");
+    params.push(1n, Date.parse(before) / 1_000);
+  }
+}
+
+function recallMeaning(
+  outcome: EvidenceBundle["outcome"],
+  semanticOnly: boolean,
+  hasSemantic: boolean,
+  embeddingCoverageIncomplete: boolean,
+  embeddingSearched: boolean,
+): string {
+  if (outcome === "matches" && semanticOnly) return "Mooncite found a local embedding match. Inspect a cited source window before relying on any claim.";
+  if (outcome === "matches" && hasSemantic) return "Mooncite found lexical and local embedding matches. Inspect a cited source window before relying on any claim.";
+  if (outcome === "matches") return "Mooncite found lexical matches. Inspect a cited source window before relying on any claim.";
+  if (outcome === "weak_leads" && semanticOnly) return "Mooncite found only a weak local embedding lead. Inspect it before using it.";
+  if (outcome === "weak_leads") return "Mooncite found only partial or weak leads. Refine the query or inspect a lead before using it.";
+  if (outcome === "inconclusive" && embeddingCoverageIncomplete) return "Lexical search found no match. Local embedding coverage is incomplete, so this does not prove the evidence is absent.";
+  if (outcome === "inconclusive") return "The active index is partial or retained from a last-good generation, so an empty result does not prove the evidence is absent.";
+  if (embeddingSearched) return "Mooncite searched the complete requested scope and found no lexical or embedding match.";
+  return "Mooncite searched the complete requested scope and found no lexical match.";
 }
 
 export class MoonciteEngine {
@@ -2227,6 +2506,10 @@ export class MoonciteEngine {
   #appendBatchEvidenceSpans = 0;
   #lastRebuildOutcome: RefreshOutcome = "not_run";
   #lastSuccessfulRefreshAt: string | null = null;
+  #semanticIndexAvailable = false;
+  #semanticUnavailableReason: string | null = null;
+  #semanticEmbedder: SemanticEmbedder | null = null;
+  #semanticEmbeddingCache = new Map<string, Int8Array>();
   #closed = false;
 
   constructor(options: EngineOptions) {
@@ -2243,23 +2526,24 @@ export class MoonciteEngine {
     this.#databasePath = join(this.#stateDir, "index.sqlite");
     const stateIdentity = initializeStateDirectory(this.#stateDir, this.#databasePath);
     const engineLockPath = join(this.#stateDir, `.engine-${process.pid}-${randomUUID()}.lock`);
-    let database: DatabaseSync | null = null;
+    let initialized: InitializedDatabase | null = null;
     try {
       acquireEngineLock(this.#stateDir, engineLockPath);
       this.#engineLockPath = engineLockPath;
       ensureDatabaseFile(this.#databasePath);
-      database = openRecoverableDatabase(this.#stateDir, this.#databasePath, stateIdentity);
+      initialized = openRecoverableDatabase(this.#stateDir, this.#databasePath, stateIdentity);
       assertOwnedStateDirectory(this.#stateDir, stateIdentity);
       assertOwnedStateFile(this.#databasePath);
-      if (database === null) throw new Error("Mooncite index initialization failed.");
-      this.#db = database;
+      if (initialized === null) throw new Error("Mooncite index initialization failed.");
+      this.#db = initialized.database;
+      this.#semanticIndexAvailable = initialized.semanticIndexAvailable;
       chmodSync(this.#databasePath, 0o600);
       migrateDatabaseDerivation(this.#db);
       this.#restoreLastGoodState();
       this.#restoreLastRebuildOutcome();
       this.#restoreLastSuccessfulRefreshAt();
     } catch (error) {
-      try { database?.close(); } catch { /* Preserve the constructor failure. */ }
+      try { initialized?.database.close(); } catch { /* Preserve the constructor failure. */ }
       rmSync(engineLockPath, { force: true });
       throw error;
     }
@@ -2546,10 +2830,11 @@ export class MoonciteEngine {
   }
 
   #insertEvidence(items: IndexedEvidence[]): void {
-    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     for (const item of items) {
       insertEvidence.run(
-        item.evidenceId, item.evidenceUri, item.text, item.project, item.sessionId, item.entryId, item.role,
+        item.evidenceId, item.evidenceUri, item.text, semanticEligible(item.role, item.text) ? 1 : 0,
+        item.project, item.sessionId, item.entryId, item.role,
         item.sourceOrigin, item.sourceKind, item.eventTimestamp, item.sourcePath, item.line, item.byteStart,
         item.byteEnd, item.recordDigest, item.prefixDigest, item.parentId, item.branchState, item.compactionState,
       );
@@ -2584,7 +2869,7 @@ export class MoonciteEngine {
     this.#consumeIngestion(metadata.size, 0, 0);
     const captureSize = metadata.size;
     const insertRecord = this.#db.prepare("INSERT INTO source_records(source_path, entry_id, parent_id, line, source_kind) VALUES (?, ?, ?, ?, ?)");
-    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const findEvidence = this.#db.prepare("SELECT 1 AS found FROM evidence WHERE evidence_id = ?");
     const seenEntryIds = new Set<string>();
     let conversationCount = 0;
@@ -2646,6 +2931,7 @@ export class MoonciteEngine {
             identifier,
             evidenceUri("chatgpt", sourceNamespace, sessionId, entryId, ordinal),
             span.text,
+            semanticEligible(span.role, span.text) ? 1 : 0,
             project,
             sessionId,
             entryId,
@@ -2742,7 +3028,7 @@ export class MoonciteEngine {
     let latestCompactionLine: number | null = null;
     const seenEntryIds = new Set<string>();
     const insertRecord = this.#db.prepare("INSERT INTO source_records(source_path, entry_id, parent_id, line, source_kind) VALUES (?, ?, ?, ?, ?)");
-    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    const insertEvidence = this.#db.prepare(`INSERT INTO evidence VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
     const findEvidence = this.#db.prepare("SELECT 1 AS found FROM evidence WHERE evidence_id = ?");
 
     const processLine = (line: FullSourceLine): void => {
@@ -2807,6 +3093,7 @@ export class MoonciteEngine {
           identifier,
           evidenceUri(location.origin, sourceNamespace, sessionId, entryId, ordinal),
           span.text,
+          semanticEligible(span.role, span.text) ? 1 : 0,
           project,
           sessionId,
           entryId,
@@ -3024,6 +3311,7 @@ export class MoonciteEngine {
       const outcome: RefreshOutcome = changed ? "published" : "unchanged";
       this.#persistLastGood(state, operation, outcome);
       this.#db.exec("COMMIT");
+      this.#synchronizeSemanticIndex();
       this.#last = state;
       this.#lastEvidenceCount = this.#storedSources().reduce((sum, source) => sum + source.evidence_spans, 0);
       this.#setOperationOutcome(operation, outcome);
@@ -3095,6 +3383,7 @@ export class MoonciteEngine {
       const state = this.#stateFromSourceFiles();
       this.#persistLastGood(state, operation, "published");
       this.#db.exec("COMMIT");
+      this.#synchronizeSemanticIndex();
       this.#last = state;
       this.#lastEvidenceCount = this.#storedSources().reduce((sum, source) => sum + source.evidence_spans, 0);
       this.#setOperationOutcome(operation, "published");
@@ -3318,6 +3607,7 @@ export class MoonciteEngine {
       }
       this.#persistLastGood(state, operation, "published");
       this.#db.exec("COMMIT");
+      this.#synchronizeSemanticIndex();
       this.#last = state;
       this.#lastEvidenceCount = this.#storedSources().reduce((sum, source) => sum + source.evidence_spans, 0);
       this.#setOperationOutcome(operation, "published");
@@ -3630,14 +3920,10 @@ export class MoonciteEngine {
     const termCoverage = metadataExact ? 1 : recallQuery.terms.length === 0 ? 0 : matchedTerms.length / recallQuery.terms.length;
     const exact = metadataExact || (lowerQuery.length > 0 && lower.includes(lowerQuery));
     const isEcho = isMoonciteRenderingText(text);
-    const band: RelevanceBand = exact || termCoverage >= 0.6 ? "strong" : termCoverage >= 0.25 ? "partial" : "weak";
-    const kind: MatchKind = metadataExact
-      ? "metadata_exact"
-      : exact && recallQuery.parsed.phrase
-        ? "phrase_exact"
-        : exact
-          ? "text_exact"
-          : "terms";
+    const rawSemanticSimilarity = Number(row.semantic_similarity);
+    const semanticSimilarity = Number.isFinite(rawSemanticSimilarity) ? rawSemanticSimilarity : null;
+    const band = recallRelevanceBand(exact, termCoverage, semanticSimilarity);
+    const kind = recallMatchKind(metadataExact, exact, recallQuery.parsed.phrase, semanticSimilarity, termCoverage);
     return {
       row,
       matchedTerms,
@@ -3649,6 +3935,8 @@ export class MoonciteEngine {
       isEcho,
       band,
       kind,
+      semanticSimilarity,
+      rrf: 0,
     };
   }
 
@@ -3664,14 +3952,7 @@ export class MoonciteEngine {
       }
       return this.#compareRecallPhysicalRows(a.row, b.row);
     }
-    return Number(b.directCitation) - Number(a.directCitation)
-      || Number(b.metadataExact) - Number(a.metadataExact)
-      || Number(a.isEcho) - Number(b.isEcho)
-      || conversationalRoleRank(b.row.role) - conversationalRoleRank(a.row.role)
-      || Number(b.exact) - Number(a.exact)
-      || b.termCoverage - a.termCoverage
-      || Number(a.row.score) - Number(b.row.score)
-      || this.#compareRecallPhysicalRows(a.row, b.row);
+    return relevanceRecallOrder(a, b) || this.#compareRecallPhysicalRows(a.row, b.row);
   }
 
   #recallCandidates(rowsById: Map<string, RecallRow>, recallQuery: RecallQuery): {
@@ -3679,8 +3960,22 @@ export class MoonciteEngine {
     echoesSuppressed: number;
   } {
     const rankedWithEchoes = [...rowsById.values()]
-      .map((row) => this.#rankRecallRow(row, recallQuery))
-      .sort((a, b) => this.#compareRankedRecallRows(a, b, recallQuery.order));
+      .map((row) => this.#rankRecallRow(row, recallQuery));
+    const lexicalOrder = rankedWithEchoes
+      .filter((item) => Number(item.row.score) !== -1_000_000 && Number.isFinite(Number(item.row.score)))
+      .sort((a, b) => Number(a.row.score) - Number(b.row.score) || this.#compareRecallPhysicalRows(a.row, b.row));
+    const semanticOrder = rankedWithEchoes
+      .filter((item) => item.semanticSimilarity !== null)
+      .sort((a, b) => (b.semanticSimilarity ?? -1) - (a.semanticSimilarity ?? -1) || this.#compareRecallPhysicalRows(a.row, b.row));
+    const lexicalRank = new Map(lexicalOrder.map((item, index) => [String(item.row.evidence_id), index + 1]));
+    const semanticRank = new Map(semanticOrder.map((item, index) => [String(item.row.evidence_id), index + 1]));
+    for (const item of rankedWithEchoes) {
+      const id = String(item.row.evidence_id);
+      const lexical = lexicalRank.get(id);
+      const semantic = semanticRank.get(id);
+      item.rrf = (lexical === undefined ? 0 : 1 / (60 + lexical)) + (semantic === undefined ? 0 : 1 / (60 + semantic));
+    }
+    rankedWithEchoes.sort((a, b) => this.#compareRankedRecallRows(a, b, recallQuery.order));
     const echoesSuppressed = rankedWithEchoes.filter((candidate) => candidate.isEcho && !candidate.directCitation).length;
     const ranked = rankedWithEchoes.filter((candidate) => !candidate.isEcho || candidate.directCitation);
     const duplicateBuckets = new Map<string, Map<string, RankedRecallRow & { duplicateSpanCount: number }>>();
@@ -3737,7 +4032,14 @@ export class MoonciteEngine {
       compactionState: parseCompactionState(row.compaction_state),
       ...(duplicateSpanCount > 1 ? { duplicateSpanCount } : {}),
       isEcho,
-      match: { kind, band, matchedTerms, missingTerms, termCoverage },
+      match: {
+        kind,
+        band,
+        matchedTerms,
+        missingTerms,
+        termCoverage,
+        ...(candidate.semanticSimilarity !== null ? { semanticSimilarity: candidate.semanticSimilarity } : {}),
+      },
     };
   }
 
@@ -3747,6 +4049,8 @@ export class MoonciteEngine {
     scope: RecallScope,
     candidates: EvidenceCandidate[],
     echoesSuppressed: number,
+    embeddingSearchRan: boolean,
+    embeddingCoverageIncomplete: boolean,
   ): EvidenceBundle {
     const warnings = state.errors === 0
       ? [...scope.warnings]
@@ -3754,19 +4058,24 @@ export class MoonciteEngine {
         ? `${state.errors} source error(s); last good generation retained`
         : `${state.errors} source error(s)`, ...scope.warnings];
     if (echoesSuppressed > 0) warnings.push(`${echoesSuppressed} recursive Mooncite echo(es) suppressed.`);
+    if (!this.#semanticIndexAvailable || this.#semanticUnavailableReason !== null) {
+      warnings.push("Local embeddings are unavailable; this recall used lexical search only.");
+    }
     const incompleteMiss = candidates.length === 0
-      && (state.coverage === "partial" || state.retainedLastGood || state.errors > 0);
+      && (embeddingCoverageIncomplete || state.coverage === "partial" || state.retainedLastGood || state.errors > 0);
     const outcome: EvidenceBundle["outcome"] = candidates.length === 0
       ? incompleteMiss ? "inconclusive" : "no_match"
       : candidates.some((candidate) => candidate.match.band === "strong") ? "matches" : "weak_leads";
     const conclusive = outcome === "matches" || outcome === "no_match";
-    const meaning = outcome === "matches"
-      ? "Mooncite found lexical matches. Inspect a cited source window before relying on any claim."
-      : outcome === "weak_leads"
-        ? "Mooncite found only partial or weak lexical leads. Refine the query or inspect a lead before using it."
-        : outcome === "inconclusive"
-          ? "The active index is partial or retained from a last-good generation, so an empty result does not prove the evidence is absent."
-          : "Mooncite searched the complete requested scope and found no lexical match.";
+    const semanticOnly = candidates.length > 0 && candidates.every((candidate) => candidate.match.kind === "semantic");
+    const embeddingSearched = embeddingSearchRan && this.#semanticIndexAvailable && this.#semanticUnavailableReason === null && !embeddingCoverageIncomplete;
+    const meaning = recallMeaning(
+      outcome,
+      semanticOnly,
+      candidates.some((candidate) => candidate.match.kind === "semantic"),
+      embeddingCoverageIncomplete,
+      embeddingSearched,
+    );
     const next: MoonciteNextAction | null = candidates.length > 0
       ? {
         action: "call",
@@ -3842,12 +4151,251 @@ export class MoonciteEngine {
       };
     }
     const rowsById = this.#queryRecallRows(recallQuery, scope, authorizedRootKeys);
+    const hasStrongLexical = [...rowsById.values()].some((row) => {
+      const ranked = this.#rankRecallRow(row, recallQuery);
+      return ranked.exact || ranked.metadataExact || ranked.termCoverage >= 0.6;
+    });
+    const embeddingSearchRan = !hasStrongLexical && !recallQuery.parsed.phrase && recallQuery.terms.length >= 2
+      && this.#semanticIndexAvailable && this.#semanticUnavailableReason === null;
+    let embeddingCoverageIncomplete = false;
+    if (embeddingSearchRan) {
+      this.#mergeSemanticRecallRows(input, recallQuery, scope, authorizedRoots, sessionResolution.sessionScope, rowsById);
+      embeddingCoverageIncomplete = this.#db.prepare("SELECT 1 AS pending FROM semantic_pending LIMIT 1").get() !== undefined;
+    }
     const { candidates, echoesSuppressed } = this.#recallCandidates(rowsById, recallQuery);
-    if (candidates.length === 0 && refreshOnMiss) {
+    if (candidates.length === 0 && refreshOnMiss && !embeddingCoverageIncomplete) {
       this.refresh();
       return this.#recall(input, false);
     }
-    return this.#recallResult(state, recallQuery, scope, candidates, echoesSuppressed);
+    return this.#recallResult(state, recallQuery, scope, candidates, echoesSuppressed, embeddingSearchRan, embeddingCoverageIncomplete);
+  }
+  #semanticVector(text: string): Int8Array | null {
+    if (!this.#semanticIndexAvailable || this.#semanticUnavailableReason !== null) return null;
+    const cacheKey = sha256(text);
+    const cached = this.#semanticEmbeddingCache.get(cacheKey);
+    if (cached) return cached;
+    try {
+      this.#semanticEmbedder ??= loadSemanticEmbedder();
+      const vector = quantizeSemanticEmbedding(this.#semanticEmbedder.embed(text));
+      if (this.#semanticEmbeddingCache.size >= 256) {
+        const oldest = this.#semanticEmbeddingCache.keys().next().value as string | undefined;
+        if (oldest !== undefined) this.#semanticEmbeddingCache.delete(oldest);
+      }
+      this.#semanticEmbeddingCache.set(cacheKey, vector);
+      return vector;
+    } catch (error) {
+      this.#semanticUnavailableReason = error instanceof Error ? error.message : "Mooncite semantic search is unavailable.";
+      return null;
+    }
+  }
+  #synchronizeSemanticIndex(): void {
+    if (!this.#semanticIndexAvailable || this.#semanticUnavailableReason !== null) return;
+    try {
+      this.#db.exec("BEGIN IMMEDIATE");
+      const selectPending = this.#db.prepare(`
+        SELECT p.evidence_rowid AS rowid, e.text,
+               CASE WHEN e.rowid IS NULL OR sf.source_root_digest IS NULL THEN 0 ELSE e.semantic_eligible END AS semantic_eligible,
+               e.project, e.session_id, e.role, e.evidence_id, e.record_digest, e.event_timestamp,
+               e.source_origin, e.source_path, sf.source_root_digest, COALESCE(length(CAST(e.text AS BLOB)), 0) AS text_bytes,
+               CASE WHEN e.role = 'user' THEN (
+                 SELECT n.text FROM evidence n
+                 WHERE n.source_path = e.source_path AND n.session_id = e.session_id AND n.role = 'assistant'
+                   AND (n.line > e.line OR (n.line = e.line AND n.byte_start > e.byte_start))
+                 ORDER BY n.line ASC, n.byte_start ASC LIMIT 1
+               ) END AS following_assistant,
+               CASE WHEN e.role = 'assistant' THEN (
+                 SELECT n.text FROM evidence n
+                 WHERE n.source_path = e.source_path AND n.session_id = e.session_id AND n.role = 'user'
+                   AND (n.line < e.line OR (n.line = e.line AND n.byte_start < e.byte_start))
+                 ORDER BY n.line DESC, n.byte_start DESC LIMIT 1
+               ) END AS preceding_user
+        FROM semantic_pending p
+        LEFT JOIN evidence e ON e.rowid = p.evidence_rowid
+        LEFT JOIN source_files sf ON sf.source_path = e.source_path
+        ORDER BY p.evidence_rowid
+        LIMIT ?
+      `);
+      type PendingSemanticRow = {
+        rowid: number | bigint;
+        text: string | null;
+        semantic_eligible: number;
+        project: string | null;
+        session_id: string | null;
+        role: EvidenceRole | null;
+        evidence_id: string | null;
+        record_digest: string | null;
+        event_timestamp: string | null;
+        source_origin: SourceOrigin | null;
+        source_path: string | null;
+        source_root_digest: string | null;
+        text_bytes: number;
+        following_assistant: string | null;
+        preceding_user: string | null;
+      };
+      const deleteVector = this.#db.prepare("DELETE FROM semantic_vectors WHERE rowid = ?");
+      const insertVector = this.#db.prepare(`
+        INSERT INTO semantic_vectors(
+          rowid, embedding, authorization_key, project, session_id, role, evidence_id, record_digest,
+          has_event_time, event_time
+        ) VALUES (?, vec_int8(?), ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      const markComplete = this.#db.prepare("DELETE FROM semantic_pending WHERE evidence_rowid = ?");
+      let synchronizedSpans = 0;
+      let synchronizedBytes = 0;
+      let budgetExhausted = false;
+      while (synchronizedSpans < MAX_SEMANTIC_SYNC_SPANS && !budgetExhausted) {
+        const queryRows = Math.min(MAX_SEMANTIC_SYNC_QUERY_ROWS, MAX_SEMANTIC_SYNC_SPANS - synchronizedSpans);
+        const pending = selectPending.all(queryRows) as PendingSemanticRow[];
+        if (pending.length === 0) break;
+        for (const row of pending) {
+          if (synchronizedBytes + row.text_bytes > MAX_SEMANTIC_SYNC_BYTES) {
+            budgetExhausted = true;
+            break;
+          }
+          const rowid = BigInt(row.rowid);
+          deleteVector.run(rowid);
+          if (pendingSemanticRowIsEmbeddable(row)) {
+            const vector = this.#semanticVector(exchangeEmbeddingText(
+              row.role,
+              row.text,
+              row.preceding_user,
+              row.following_assistant,
+            ));
+            if (vector === null) throw new Error(this.#semanticUnavailableReason ?? "Mooncite semantic search is unavailable.");
+            const parsedTimestamp = row.event_timestamp === null ? Number.NaN : Date.parse(row.event_timestamp) / 1_000;
+            insertVector.run(
+              rowid,
+              vector,
+              semanticAuthorizationKey(row.source_origin, row.source_root_digest),
+              row.project,
+              row.session_id,
+              row.role,
+              row.evidence_id,
+              row.record_digest,
+              Number.isFinite(parsedTimestamp) ? 1n : 0n,
+              Number.isFinite(parsedTimestamp) ? parsedTimestamp : 0,
+            );
+          }
+          markComplete.run(rowid);
+          synchronizedSpans += 1;
+          synchronizedBytes += row.text_bytes;
+        }
+      }
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      try { this.#db.exec("ROLLBACK"); } catch { /* Preserve the semantic sync failure. */ }
+      this.#semanticUnavailableReason = error instanceof Error ? error.message : "Mooncite semantic search is unavailable.";
+    } finally {
+      this.#semanticEmbeddingCache.clear();
+    }
+  }
+  #mergeSemanticRecallRows(
+    input: RecallInput,
+    recallQuery: RecallQuery,
+    scope: RecallScope,
+    authorizedRoots: Array<{ origin: SourceOrigin; rootDigest: string }>,
+    sessionScope: { origin: SourceOrigin; rootDigest: string; sessionId: string } | null,
+    rowsById: Map<string, RecallRow>,
+  ): void {
+    if (recallQuery.exactText.length === 0 || scope.scope.evidenceSpans === 0) return;
+    const scores = this.#semanticScores(recallQuery.exactText, authorizedRoots, input, sessionScope, recallQuery.after, recallQuery.before, recallQuery.limit);
+    if (scores.size === 0) return;
+    const semanticRowids = [...scores.keys()].map((rowid) => BigInt(rowid));
+    const semanticRows = this.#db.prepare(`
+      SELECT e.rowid AS rowid, e.*, 0.0 AS score
+      FROM evidence e
+      WHERE e.rowid IN (${semanticRowids.map(() => "?").join(", ")})
+        AND ${scope.authorizationSql}${scope.evidenceSql}
+    `).all(
+      ...semanticRowids,
+      ...scope.authorizationParams,
+      ...scope.evidenceParams,
+    ) as RecallRow[];
+    for (const row of semanticRows) {
+      const score = scores.get(String(row.rowid));
+      if (score === undefined) continue;
+      if (String(row.evidence_id) !== score.evidenceId || String(row.record_digest) !== score.recordDigest) continue;
+      const existing = rowsById.get(score.evidenceId);
+      if (existing) existing.semantic_similarity = score.similarity;
+      else if (
+        score.similarity >= STRONG_SEMANTIC_SIMILARITY
+        && recallQuery.exactText.trim().split(/\s+/u).length >= 2
+        && !recallQuery.parsed.phrase
+      ) {
+        rowsById.set(score.evidenceId, { ...row, semantic_similarity: score.similarity });
+      }
+    }
+  }
+  #semanticScores(
+    query: string,
+    authorizedRoots: Array<{ origin: SourceOrigin; rootDigest: string }>,
+    input: RecallInput,
+    sessionScope: { origin: SourceOrigin; rootDigest: string; sessionId: string } | null,
+    after: string | null,
+    before: string | null,
+    limit: number,
+  ): Map<string, SemanticScore> {
+    if (!this.#semanticIndexAvailable || this.#semanticUnavailableReason !== null) return new Map();
+    if (this.#db.prepare("SELECT 1 AS pending FROM semantic_pending LIMIT 1").get() !== undefined) this.#synchronizeSemanticIndex();
+    if (!this.#semanticIndexAvailable || this.#semanticUnavailableReason !== null) return new Map();
+    const queryVector = this.#semanticVector(query);
+    if (queryVector === null) return new Map();
+    try {
+      const roots = authorizedRoots.filter((root) =>
+        (input.sourceOrigin === undefined || root.origin === input.sourceOrigin)
+        && (sessionScope === null || (root.origin === sessionScope.origin && root.rootDigest === sessionScope.rootDigest)));
+      const hits: Array<{ rowid: number | bigint } & SemanticScore> = [];
+      for (const root of roots) {
+        const conditions = ["embedding MATCH vec_int8(?)", "k = ?", "authorization_key = ?"];
+        const params: Array<string | number | bigint | Int8Array> = [
+          queryVector,
+          BigInt(Math.min(MAX_SEMANTIC_RESULTS_PER_ROOT, Math.max(
+            after !== null || before !== null ? 80 : 20,
+            (after !== null || before !== null ? limit * 16 : limit * 8),
+          ))),
+          semanticAuthorizationKey(root.origin, root.rootDigest),
+        ];
+        appendSemanticScoreFilters(conditions, params, input, sessionScope, after, before);
+        const rows = this.#db.prepare(`
+          SELECT semantic_vectors.rowid, semantic_vectors.distance,
+                 semantic_vectors.evidence_id, semantic_vectors.record_digest
+          FROM semantic_vectors
+          WHERE ${conditions.join(" AND ")}
+            AND NOT EXISTS (
+              SELECT 1 FROM semantic_pending p
+              WHERE p.evidence_rowid = semantic_vectors.rowid
+            )
+          ORDER BY semantic_vectors.distance
+        `).all(...params) as Array<{
+          rowid: number | bigint;
+          distance: number;
+          evidence_id: string;
+          record_digest: string;
+        }>;
+        for (const row of rows) {
+          const similarity = 1 - Number(row.distance);
+          if (Number.isFinite(similarity) && similarity >= MIN_SEMANTIC_SIMILARITY) {
+            hits.push({
+              rowid: row.rowid,
+              similarity,
+              evidenceId: row.evidence_id,
+              recordDigest: row.record_digest,
+            });
+          }
+        }
+      }
+      hits.sort((a, b) => b.similarity - a.similarity || String(a.rowid).localeCompare(String(b.rowid)));
+      return new Map(hits.slice(0, MAX_RECALL_RANKING_ROWS).map((hit) => [String(hit.rowid), {
+        similarity: hit.similarity,
+        evidenceId: hit.evidenceId,
+        recordDigest: hit.recordDigest,
+      }]));
+    } catch (error) {
+      this.#semanticUnavailableReason = error instanceof Error ? error.message : "Mooncite semantic search is unavailable.";
+      return new Map();
+    } finally {
+      this.#semanticEmbeddingCache.clear();
+    }
   }
   resolveEvidenceAnchors(requests: readonly EvidenceAnchorRequest[]): EvidenceAnchorResolution[] {
     if (!Array.isArray(requests) || requests.length > 256) {
@@ -4229,6 +4777,10 @@ export class MoonciteEngine {
       lastRefreshOutcome: this.#lastRefreshOutcome,
       lastRebuildOutcome: this.#lastRebuildOutcome,
       searchUsable,
+      semanticAvailable: this.#semanticIndexAvailable && this.#semanticUnavailableReason === null,
+      semanticPending: this.#semanticIndexAvailable
+        ? Number((this.#db.prepare("SELECT COUNT(*) AS count FROM semantic_pending").get() as { count?: number } | undefined)?.count ?? 0)
+        : 0,
     };
   }
 

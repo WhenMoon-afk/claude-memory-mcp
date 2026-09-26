@@ -1,12 +1,11 @@
 # MCP protocol
 
-The local stdio server exposes exactly three evidence tools by default:
+The local stdio server exposes exactly three evidence tools:
 
 - `mooncite_recall`
 - `mooncite_inspect`
 - `mooncite_status`
 
-A valid learned-memory opt-in adds four `mooncite_memory_*` tools. It does not change the evidence tools.
 
 ## Normal flow
 
@@ -19,7 +18,7 @@ A valid learned-memory opt-in adds four `mooncite_memory_*` tools. It does not c
 
 | Field | Required | Accepted value |
 | --- | --- | --- |
-| `query` | Yes | Lexical query |
+| `query` | Yes | Lexical query. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit |
 | `limit` | No | 1 to 20 |
 | `project` | No | Exact value copied from a candidate |
 | `session_id` | No | Exact source-qualified value copied from a candidate |
@@ -33,9 +32,9 @@ A source-qualified session ID has the form `<origin>:<64-hex-source-root-digest>
 
 | Outcome | Meaning |
 | --- | --- |
-| `matches` | Strong lexical result |
+| `matches` | Strong lexical result, or a strong local embedding result after an unquoted multi-word miss |
 | `weak_leads` | Possible result that needs refinement or inspection |
-| `no_match` | Absence result only when `conclusive` is `true` |
+| `no_match` | Absence result only when `conclusive` is `true`. Incomplete embedding coverage is `inconclusive`, not absence |
 | `inconclusive` | Freshness or coverage prevents an absence claim |
 | `invalid_scope` | Retry with no scope or an exact copied scope |
 | `unavailable` | No usable generation could be searched |
@@ -79,51 +78,4 @@ No input. Status returns `ready`, `degraded`, or `unavailable`. It also reports 
 
 `count` is the number of grouped failures. `fatalCount` is the subset that prevented source admission or refresh. Repeated status calls recompute transient failures and reuse persisted per-source parse counts, so counts do not accumulate. After reopen, Mooncite reloads the last-good generation and rediscovers any continuing transient failure.
 
-A degraded index may remain searchable, but its empty recall results are inconclusive. A source-limit group means rebuilding alone will repeat the refusal until the authorized source set or supported limit changes. Learned-store failure appears separately and does not disable evidence recall or inspection.
-
-## Optional learned-memory tools
-
-Learned results use `kind: derived_memory` to keep agent-authored interpretation separate from source evidence. `provenanceOutcome: verified` means every anchor owned by that revision passed physical inspection. It does not verify the interpretation. A revision with no own anchors reports `not_evidence_backed`.
-
-### `mooncite_memory_recall`
-
-`query` is required. Optional inputs are `limit`, exact encoded `project`, `include_invalid`, `include_archived`, and `related_limit`. `limit` accepts 1 to 20. `related_limit` accepts 0 to 8. The query may be lexical text or an exact `mooncite-memory:<uuid>` ID.
-
-Normal recall returns active, nonquarantined memories. `include_invalid` includes revisions quarantined by their own anchors. `include_archived` includes archived identities. `related_limit` returns direct incoming and outgoing links only. It never traverses beyond one hop.
-
-### `mooncite_memory_inspect`
-
-- `{kind:"revision",memory_id,...}` inspects the current or named immutable revision and every anchor it owns. `window` accepts 0 to 2.
-- `{kind:"skill_candidate",candidate_id}` returns the review artifact, source revisions, review state, and `installed:false`.
-
-### `mooncite_memory_write`
-
-| Operation | Required content |
-| --- | --- |
-| `create` | `interpretation`, `provenance`, optional `scope` |
-| `revise` | Exact `memory_id`, `expected_revision`, replacement content |
-| `consolidate` | New interpretation, 2 to 8 exact parent revisions, and required `evidence_ids` with 0 to 8 locators |
-| `activate`, `archive` | Exact revision and lifecycle metadata guards |
-| `reinforce` | Same guards plus `salience` from 0 to 100 |
-| `propose_skill_candidate` | 1 to 8 exact source revisions and artifact fields |
-| `review_skill_candidate` | Exact pending candidate, decision, and review note |
-
-Create and revise require exactly one provenance kind:
-
-| Kind | Requirement |
-| --- | --- |
-| `verified` | 1 to 8 unique evidence locators |
-| `derived` | 1 to 8 exact parents with `supports`, `contradicts`, `refines`, or `supersedes`, plus up to 8 own locators |
-| `current_context` | Bounded context note and up to 8 own locators |
-| `unanchored` | Bounded basis with no locators or parents |
-
-Mooncite physically verifies and canonicalizes supplied evidence before commit. It rejects recursive Mooncite output and duplicate canonical spans. Revisions append and never overwrite history. Lifecycle operations change metadata only. Candidate approval records review and never installs a skill.
-
-Scope is exactly `{kind:"global"}` or `{kind:"project",project:"<exact encoded project>"}`. Mooncite infers an omitted scope only when all dependencies belong to one project.
-
-### `mooncite_memory_delete`
-
-- `{kind:"memory",memory_id,expected_revision,expected_metadata_version}` deletes one logical memory and its revisions. It returns `blocked` while a surviving relation or skill candidate depends on that memory.
-- `{kind:"skill_candidate",candidate_id,expected_state}` deletes one candidate and releases that dependency.
-
-Learned writes and deletes change only `learned-memory.sqlite`. They never modify source files, authorization, or the evidence index.
+A degraded index may remain searchable, but its empty recall results are inconclusive. A source-limit group means rebuilding alone will repeat the refusal until the authorized source set or supported limit changes.

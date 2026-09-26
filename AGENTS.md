@@ -4,30 +4,29 @@ These instructions apply to the whole repository. Preserve the invariants below 
 
 ## Product boundary
 
-Mooncite is a Linux/procfs-only, local, citation-backed retrieval tool for prior conversation history. It helps an agent find and verify bounded evidence; it does **not** decide what evidence means, whether it is current, or what the user should do.
+Mooncite is a Linux/procfs-only, local, citation-backed retrieval tool for prior conversation history. Packaged local embeddings require Linux x64 and are skipped on other architectures. It helps an agent find and verify bounded evidence; it does **not** decide what evidence means, whether it is current, or what the user should do.
 
 - Source history is user-owned and read-only. Never rewrite, repair, normalize in place, move, delete, or claim ownership of it.
 - The SQLite evidence index is owner-private, transactional, derived, disposable, and rebuildable from authorized sources.
-- Recall is bounded lexical retrieval. Inspection must re-read and verify the current physical source bytes before returning a bounded window. Status must not expose transcript text or full physical paths.
+- Recall is lexical-first. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit, and only when local embeddings are available. Quoted phrases and shorter queries stay lexical. Inspection must re-read and verify the current physical source bytes before returning a bounded window. Status must not expose transcript text or full physical paths.
 - Mooncite has no history network transport, telemetry, upload, SSH/remote-copy path, account login, export automation, credential/cookie access, or opaque application-cache scraping. Text returned through MCP enters the receiving model's privacy boundary; do not imply otherwise.
-- Evidence retrieval is not an authority, policy, recommendation, truth-scoring, or durable-agent-memory layer. The owner-approved learned-memory mode is a separate, explicit, default-off layer for agent-authored interpretations with verified, derived, current-context, or unanchored provenance; it must never relabel an interpretation as source evidence.
+- Evidence retrieval is not an authority, policy, recommendation, truth-scoring, or durable-agent-memory layer.
 
 ## Fixed architecture
 
-Treat these counts and seams as closed contracts except for the owner-approved optional learned-memory mode:
+Treat these counts and seams as closed contracts:
 
 - Exactly five source origins: Pi, OMP, Claude Code, Codex, and ChatGPT.
-- Default mode exposes exactly three MCP tools: `mooncite_recall`, `mooncite_inspect`, and `mooncite_status`. A valid explicit learned-memory enablement may additionally expose only `mooncite_memory_recall`, `mooncite_memory_inspect`, `mooncite_memory_write`, and `mooncite_memory_delete`.
+- Exactly three MCP tools: `mooncite_recall`, `mooncite_inspect`, and `mooncite_status`.
 - Exactly four client integrations: Pi, OMP, Codex, and Claude Code. They connect to one local stdio MCP server. ChatGPT is a source origin, not a client integration.
-- `MoonciteEngine` owns ingestion, source adapters, coherent reads, citation identity, SQLite/FTS, refresh/rebuild, inspection, last-good behavior, and the bounded canonical-anchor resolver. `LearnedMemoryStore` owns the separate durable `learned-memory.sqlite`; learned-store failure must not disable evidence retrieval.
+- `MoonciteEngine` owns ingestion, source adapters, coherent reads, citation identity, SQLite/FTS, refresh/rebuild, inspection, last-good behavior, and the bounded canonical-anchor resolver.
 - The Pi extension is a thin native-to-MCP adapter. `.mcp.json`, Codex, and Claude Code registrations point to the same packaged server. Do not duplicate retrieval behavior in an integration.
 - Pi and OMP use their standard roots. Only the narrow supported Claude Code, Codex, and local ChatGPT-export roots may be automatically discovered. Owner configuration adds optional roots. A configured origin/root pair suppresses only the automatic registration with that exact pair. Automatic sibling roots remain active. Authorization grants local reads only.
 - Symlinks are excluded from source admission. Authorized roots and opened files remain physically contained and identity-checked through Linux file descriptors.
 - Incremental publication is transactional. Pi same-inode size growth may be admitted as `append_trusted` after a coherent suffix read. OMP same-inode size growth may use the same bounded path after physically verifying the last indexed evidence record; a failed boundary check replaces that source projection. These paths do not reread the already indexed prefix. Detectable Pi shrinkage, same-size rewrites, or identity changes retain the last-good generation. Other detected OMP changes and every detected change from supported mutable Claude Code, Codex, and ChatGPT producers replace that source projection transactionally. Never publish knowingly partial coverage over a usable generation.
 
-- Learned revisions are immutable and carry one explicit provenance form: verified revisions own 1–8 physically verified canonical evidence anchors; derived revisions link 1–8 exact parent revisions and may own 0–8 anchors; current-context revisions carry an explicit note and may own 0–8 anchors; unanchored revisions carry an explicit basis and own no anchors or parent links. Only a revision's own anchors can quarantine it. Relations are exact and one-hop only. Lifecycle metadata is explicit/manual and never mutates revisions or source evidence. Skill promotion produces a reviewed candidate artifact only and never installs it. Disable and uninstall retain learned state; hard deletion fails closed on surviving relation or candidate dependencies; confirmed purge recognizes the separate learned database and its SQLite sidecars.
 
-Do not add, rename, alias, or silently generalize an origin, evidence tool, learned-memory tool, client, locator form, lifecycle operation, or transport as incidental work.
+Do not add, rename, alias, or silently generalize an origin, evidence tool, client, locator form, lifecycle operation, or transport as incidental work.
 
 ## Sources of truth
 
@@ -36,8 +35,7 @@ Edit the existing owner of a behavior; do not create a second path around it.
 - `CONTEXT.md`: canonical domain terms and lifecycle meanings.
 - `src/engine.ts`: engine contract, adapters, citations, indexing, refresh, rebuild, physical inspection, and bounded canonical anchor resolution.
 - `src/source-config.ts`: source authorization, discovery, and effective-root precedence.
-- `src/learned-memory.ts`: strict learned-memory opt-in, separate durable schema and v1 migration, immutable provenance/relation invariants, lexical and one-hop retrieval, own-anchor quarantine, explicit lifecycle metadata, reviewed skill candidates, and learned-only mutation.
-- `src/mcp.ts`: the default three evidence schemas plus the four conditional learned-memory schemas and stdio surface.
+- `src/mcp.ts`: the three evidence schemas and stdio surface.
 - `src/clients.ts`: supported-client discovery and exact registration ownership/mutation.
 - `src/lifecycle.ts`: install journal, staging, install/disable/uninstall/purge safety, and filesystem ownership.
 - `src/cli.ts`: public CLI routing and process behavior.
@@ -83,8 +81,8 @@ Exercise lifecycle scenarios only in disposable fixture homes. Never run install
 
 ## Versions and publication
 
-Tagged v4.0.6 is the documented stable install. The owner decides when a stable tag is ready. After this cut, new work uses a later preview identity. Untagged work is never published merely because files contain a candidate version. A version change must synchronize `src/identity.ts`, package manifests/lockfile, lifecycle expectations, and tests.
+Tagged v4.0.6 is the documented stable install. The owner decides when a stable tag is ready. Current development identity is `4.0.7-preview.1010.0`. Untagged work is never published merely because files contain a candidate version. A version change must synchronize `src/identity.ts`, package manifests/lockfile, lifecycle expectations, and tests.
 
-Before a release is eligible, the full verification suite and packaged-artifact smoke must pass on the supported Linux/procfs and Node baseline; the candidate must also prove clean isolated install, all four client paths, the exact default three-tool surface, the conditional learned-memory tools when enabled, source preservation, conflict refusal, disable/uninstall ownership, and confirmed purge boundaries. Review the actual shipped file set and public docs, not only the working tree.
+Before a release is eligible, the full verification suite and packaged-artifact smoke must pass on the supported Linux/procfs and Node baseline; the candidate must also prove clean isolated install, all four client paths, the exact three-tool surface, source preservation, conflict refusal, disable/uninstall ownership, and confirmed purge boundaries. Review the actual shipped file set and public docs, not only the working tree.
 
 Committing, tagging, pushing, publishing, or touching a live installation are separate, explicit owner-authorized gates. Mooncite is distributed from the tagged GitHub repository, not npm, unless the owner deliberately changes that public contract.

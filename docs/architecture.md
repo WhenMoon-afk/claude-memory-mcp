@@ -14,16 +14,16 @@ Exactly five adapters feed the engine:
 
 For OMP and Claude Code, Mooncite admits only project-level JSONL files. It ignores nested subagent, workflow, and command artifacts because they are not source conversations.
 
-`mooncite serve` runs one local stdio MCP server. Codex and Claude Code register it directly. OMP uses the packaged `.mcp.json`. Pi uses a thin extension that translates native tool calls to MCP and contains no retrieval logic.
+`mooncite serve` runs one local stdio MCP server. It does not exec Pi, OMP, Codex, or Claude Code to probe registrations. Those probes belong to install, status, disable, and uninstall only. Codex and Claude Code register the server directly. OMP uses the packaged `.mcp.json`. Pi uses a thin extension that translates native tool calls to MCP and contains no retrieval logic.
 
 ## Evidence path
 
 1. Mooncite discovers authorized local roots and reads admitted source files through Linux file descriptors.
 2. It publishes searchable evidence to a derived SQLite and FTS5 projection in a transaction.
-3. `mooncite_recall` performs bounded lexical search over that projection.
+3. `mooncite_recall` performs bounded lexical-first search over that projection. An unquoted query of at least two terms may add local embedding matches after no strong lexical hit, and only when local embeddings are available. Quoted phrases and shorter queries stay lexical.
 4. `mooncite_inspect` rereads the physical source bytes for one locator before returning a verified window.
 
-Recall checks the active index first. Only a miss triggers one bounded incremental refresh and retry. `status` always refreshes. `rebuild` performs the explicit full reread.
+Recall checks the active index first. A lexical miss triggers one bounded incremental refresh and retry. An unquoted miss with incomplete local embedding coverage does not. `status` always refreshes. `rebuild` performs the explicit full reread.
 
 Pi same-inode growth may append a coherently read suffix as `append_trusted`. OMP same-inode growth may do the same after Mooncite physically verifies the last indexed evidence record at the append boundary. Other OMP changes and changes from Claude Code, Codex, and ChatGPT replace that source's projection in a transaction. A shrink, detectable rewrite, identity change, or failed replacement keeps the usable last-good generation. Mooncite does not publish known partial coverage over it.
 
@@ -34,11 +34,3 @@ The evidence index is disposable and rebuildable. Source files are never repaire
 Pi and OMP use their client roots. Mooncite narrowly discovers the supported Claude Code, Codex, and local ChatGPT export roots. Owner-configured roots are additive. A configured origin/root pair suppresses only the automatic entry for that exact pair.
 
 Symlinks are excluded. Mooncite keeps authorized roots and opened files physically contained and identity-checked through Linux file descriptors.
-
-## Optional learned memory
-
-Learned memory is off by default. When enabled, `LearnedMemoryStore` opens a separate owner-private `learned-memory.sqlite`. A learned-store failure does not disable evidence recall or inspection. Learned memory depends on a running evidence engine for anchor checks.
-
-Learned revisions are immutable and declare one provenance kind: `verified`, `derived`, `current_context`, or `unanchored`. A revision's own anchors determine its quarantine state. Parent health never propagates to a derived child, and related recall stops after one hop.
-
-Lifecycle metadata changes only through explicit activate, reinforce, and archive operations. Skill promotion creates a review candidate but never installs it. Hard deletion fails while a surviving relation or candidate still depends on the memory.

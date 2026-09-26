@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, copyFile, lstat, mkdir, mkdtemp, open, readFile, readdir, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -214,6 +214,37 @@ process.exit(1);
     MOONCITE_SMOKE_NODE: process.execPath,
     MOONCITE_SMOKE_CLI: stableCli,
   };
+  const probeDir = join(receiver, "serve-probes");
+  const probeLog = join(receiver, "serve-probes.log");
+  await mkdir(probeDir);
+  await writeFile(probeLog, "");
+  for (const name of ["pi", "omp", "codex", "claude"]) {
+    const probe = join(probeDir, name);
+    await writeFile(probe, `#!/bin/sh\nprintf '%s %s\n' "$0" "$*" >> ${JSON.stringify(probeLog)}\nexit 0\n`, { mode: 0o700 });
+    await chmod(probe, 0o700);
+  }
+  const serveHome = join(receiver, "serve-home");
+  await mkdir(join(serveHome, ".local", "state"), { recursive: true });
+  const serveProbe = await run(process.execPath, [bootstrapCli, "serve"], {
+    env: {
+      ...env,
+      HOME: serveHome,
+      PATH: `${probeDir}${delimiter}/usr/bin${delimiter}/bin`,
+      XDG_CONFIG_HOME: join(serveHome, ".config"),
+      XDG_DATA_HOME: join(serveHome, ".local", "share"),
+      XDG_STATE_HOME: join(serveHome, ".local", "state"),
+      PI_AGENT_DIR: join(serveHome, ".pi", "agent"),
+      PI_CODING_AGENT_DIR: join(serveHome, ".omp", "agent"),
+    },
+    timeout: 30_000,
+  });
+  if (serveProbe.stdout.trim() !== "" || (await readFile(probeLog, "utf8")).trim() !== "") {
+    throw new Error(`serve spawned a client CLI or wrote stdout: ${await readFile(probeLog, "utf8")}`);
+  }
+  const launcherLink = join(receiver, "mooncite-link");
+  await symlink(bootstrapCli, launcherLink);
+  const linkedHelp = await run(launcherLink, ["--help"], { env });
+  if (!linkedHelp.stdout.includes("Mooncite commands:")) throw new Error("symlinked launcher did not run");
   const initialSources = JSON.parse((await run(process.execPath, [bootstrapCli, "source", "list"], { env })).stdout);
   if (initialSources.configured.length !== 0
     || initialSources.automatic.length !== 4
@@ -285,22 +316,11 @@ process.exit(1);
     cwd: resolve(pluginPackageRoot, declaredServer.cwd),
   };
 
-  const expectedToolNames = {
-    default: [
-      "mooncite_inspect",
-      "mooncite_recall",
-      "mooncite_status",
-    ],
-    enabled: [
-      "mooncite_inspect",
-      "mooncite_memory_delete",
-      "mooncite_memory_inspect",
-      "mooncite_memory_recall",
-      "mooncite_memory_write",
-      "mooncite_recall",
-      "mooncite_status",
-    ],
-  };
+  const expectedToolNames = [
+    "mooncite_inspect",
+    "mooncite_recall",
+    "mooncite_status",
+  ];
   const largeSource = join(sessions, "large-source.jsonl");
   const largeSourceSize = 591_791_976;
   const largeHeader = Buffer.from(line({ type: "session", version: 3, id: "packed-large-session", cwd: "/receiver/project" }));
@@ -358,7 +378,7 @@ process.exit(1);
     }
   };
 
-  const names = await withMcpServer(expectedToolNames.default, async (request) => {
+  const names = await withMcpServer(expectedToolNames, async (request) => {
     const recallQueries = [
       ["violet-orbit-41", "pi"],
       ["cobalt-comet-63", "omp"],
@@ -384,7 +404,9 @@ process.exit(1);
       }
     }
     const status = await request("tools/call", { name: "mooncite_status", arguments: {} });
-    if (status.structuredContent.outcome !== "ready" || Object.values(status.structuredContent.registrations).some((value) => value !== "exact")) throw new Error("status was not ready and exact");
+    if (status.structuredContent.outcome !== "ready" || Object.values(status.structuredContent.registrations).some((value) => value !== "unavailable")) {
+      throw new Error("serve status probed client registrations or was not ready");
+    }
     if (status.structuredContent.sourceFilesByOrigin?.pi !== 2
       || status.structuredContent.sourceFilesByOrigin?.omp !== 1
       || status.structuredContent.sourceFilesByOrigin?.["claude-code"] !== 1
@@ -396,122 +418,6 @@ process.exit(1);
     throw new Error("packed MCP server left an engine lock after shutdown");
   }
 
-  const enabledMemory = JSON.parse((await run(stableLauncher, ["memory", "enable"], { env })).stdout);
-  if (enabledMemory.kind !== "derived_memory_config"
-    || enabledMemory.version !== 1
-    || enabledMemory.enabled !== true
-    || enabledMemory.configured !== true
-    || enabledMemory.reloadRequired !== true) {
-    throw new Error(`installed Mooncite launcher did not enable learned memory: ${JSON.stringify(enabledMemory)}`);
-  }
-  const learnedConfig = JSON.parse(await readFile(join(configHome, "mooncite", "learned-memory.json"), "utf8"));
-  if (JSON.stringify(learnedConfig) !== JSON.stringify({ version: 1, enabled: true })) {
-    throw new Error("learned-memory configuration did not use the isolated XDG config home");
-  }
-
-  const interpretation = "Packed learned-memory marker silver-cairn-86.";
-  const basisNote = "Created without source evidence by the isolated packaged smoke.";
-  const learnedNames = await withMcpServer(expectedToolNames.enabled, async (request) => {
-    const created = (await request("tools/call", {
-      name: "mooncite_memory_write",
-      arguments: {
-        operation: "create",
-        interpretation,
-        provenance: { kind: "unanchored", basis_note: basisNote },
-        scope: { kind: "global" },
-      },
-    })).structuredContent;
-    if (created?.kind !== "derived_memory_write"
-      || !created.memoryId?.startsWith("mooncite-memory:")
-      || created.outcome !== "created"
-      || created.revision !== 1
-      || created.interpretation !== interpretation
-      || created.scope?.kind !== "global"
-      || created.provenance?.kind !== "unanchored"
-      || created.provenance?.basisNote !== basisNote
-      || created.provenanceOutcome !== "not_evidence_backed"
-      || !Array.isArray(created.evidenceIds)
-      || created.evidenceIds.length !== 0
-      || !Array.isArray(created.evidenceUris)
-      || created.evidenceUris.length !== 0) {
-      throw new Error("packaged learned-memory write did not create one unanchored global revision");
-    }
-
-    const recalled = (await request("tools/call", {
-      name: "mooncite_memory_recall",
-      arguments: { query: created.memoryId },
-    })).structuredContent;
-    const candidate = recalled?.candidates?.[0];
-    if (recalled?.kind !== "derived_memory_recall"
-      || recalled.outcome !== "matches"
-      || recalled.query !== created.memoryId
-      || recalled.candidates?.length !== 1
-      || candidate?.kind !== "derived_memory"
-      || candidate.memoryId !== created.memoryId
-      || candidate.revision !== created.revision
-      || candidate.interpretation !== interpretation
-      || candidate.scope?.kind !== "global"
-      || candidate.provenance?.kind !== "unanchored"
-      || candidate.provenance?.basisNote !== basisNote
-      || candidate.provenanceState !== "not_evidence_backed"
-      || candidate.relevance?.kind !== "exact_id"
-      || !Array.isArray(candidate.anchors)
-      || candidate.anchors.length !== 0
-      || candidate.lifecycle?.state !== "active"
-      || candidate.lifecycle?.metadataVersion !== 1) {
-      throw new Error("packaged learned-memory exact-ID recall did not return the created revision");
-    }
-
-    const inspected = (await request("tools/call", {
-      name: "mooncite_memory_inspect",
-      arguments: {
-        kind: "revision",
-        memory_id: created.memoryId,
-        revision: created.revision,
-        window: 0,
-      },
-    })).structuredContent;
-    if (inspected?.kind !== "derived_memory"
-      || inspected.memoryId !== created.memoryId
-      || inspected.revision !== created.revision
-      || inspected.currentRevision !== created.revision
-      || inspected.isCurrent !== true
-      || inspected.interpretation !== interpretation
-      || inspected.scope?.kind !== "global"
-      || inspected.provenance?.kind !== "unanchored"
-      || inspected.provenance?.basisNote !== basisNote
-      || inspected.provenanceOutcome !== "not_evidence_backed"
-      || inspected.provenanceState !== "not_evidence_backed"
-      || inspected.evidenceProjection !== null
-      || !Array.isArray(inspected.anchors)
-      || inspected.anchors.length !== 0
-      || inspected.lifecycle?.state !== "active"
-      || inspected.lifecycle?.metadataVersion !== 1) {
-      throw new Error("packaged learned-memory inspection did not preserve the current unanchored revision");
-    }
-
-    const deleted = (await request("tools/call", {
-      name: "mooncite_memory_delete",
-      arguments: {
-        kind: "memory",
-        memory_id: created.memoryId,
-        expected_revision: inspected.revision,
-        expected_metadata_version: inspected.lifecycle.metadataVersion,
-      },
-    })).structuredContent;
-    if (deleted?.kind !== "derived_memory_delete"
-      || deleted.outcome !== "deleted"
-      || deleted.memoryId !== created.memoryId
-      || deleted.deletedRevisions !== 1) {
-      throw new Error("packaged learned-memory delete did not return the exact one-revision result");
-    }
-  });
-  if (!(await stat(join(stateHome, "mooncite", "learned-memory.sqlite"))).isFile()) {
-    throw new Error("learned-memory database did not use the isolated XDG state home");
-  }
-  if ((await readdir(join(stateHome, "mooncite"))).some((name) => name.startsWith(".engine-"))) {
-    throw new Error("packed learned-memory MCP server left an engine lock after shutdown");
-  }
   await run(process.execPath, [bootstrapCli, "source", "remove", "claude-code", claudeRoot], { env });
   await run(process.execPath, [bootstrapCli, "source", "remove", "codex", codexRoot], { env });
   await run(process.execPath, [bootstrapCli, "source", "remove", "chatgpt", chatGptRoot], { env });
@@ -559,7 +465,6 @@ process.exit(1);
     ompMcpManifest: ".mcp.json",
     resolvedMcpCommand: [resolvedServer.command, ...resolvedServer.args],
     tools: names,
-    learnedMemoryTools: learnedNames,
     sourceUnchanged: true,
   }));
 } finally {

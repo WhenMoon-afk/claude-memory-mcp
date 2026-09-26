@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,14 +14,6 @@ import {
   uninstallMooncite,
   type InstallationOptions,
 } from "./lifecycle.js";
-import {
-  LearnedMemoryStore,
-  learnedMemoryDatabaseRetained,
-  loadLearnedMemoryMode,
-  resolveLearnedMemoryConfigPath,
-  setLearnedMemoryEnabled,
-  unavailableLearnedMemoryStatus,
-} from "./learned-memory.js";
 import { createMoonciteMcpServer } from "./mcp.js";
 import {
   addSourceRegistration,
@@ -87,7 +80,7 @@ export function resolveInstallationOptions(env: NodeJS.ProcessEnv = process.env)
 function writeResult(value: unknown): void {
   process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
-const HELP_TEXT = "Mooncite commands: install, status, rebuild, source list, source add, source remove, memory enable, memory disable, memory status, disable, uninstall, purge, serve\n";
+const HELP_TEXT = "Mooncite commands: install, status, rebuild, source list, source add, source remove, disable, uninstall, purge, serve\n";
 
 type CliRegistrations = ReturnType<typeof createClientRegistrationAdapter>;
 
@@ -125,13 +118,9 @@ function runSourceCommand(args: string[]): void {
   writeResult(result);
 }
 
-async function runServeCommand({ engineOptions, registrations }: CliContext): Promise<void> {
+export async function runServeCommand({ engineOptions }: CliContext): Promise<void> {
   const handle = serveStdio(
-    () => createMoonciteMcpServer(
-      engineOptions,
-      () => registrations.diagnose(),
-      { configPath: resolveLearnedMemoryConfigPath() },
-    ),
+    () => createMoonciteMcpServer(engineOptions),
   );
   await new Promise<void>((resolve) => {
     const finish = (): void => resolve();
@@ -143,75 +132,13 @@ async function runServeCommand({ engineOptions, registrations }: CliContext): Pr
   await handle.close();
 }
 
-async function runMemoryCommand({ args, engineOptions }: CliContext): Promise<void> {
-  if (args.length !== 2 || !["enable", "disable", "status"].includes(args[1]!)) {
-    throw new Error("Usage: mooncite memory <enable|disable|status>");
-  }
-  const action = args[1]!;
-  const configPath = resolveLearnedMemoryConfigPath();
-  if (action === "enable" || action === "disable") {
-    const databaseRetained = learnedMemoryDatabaseRetained(engineOptions.stateDir);
-    const mode = setLearnedMemoryEnabled(configPath, action === "enable");
-    writeResult({
-      kind: "derived_memory_config",
-      ...mode,
-      databaseRetained,
-      reloadRequired: true,
-    });
-    return;
-  }
-  const mode = loadLearnedMemoryMode(configPath);
-  if (!mode.enabled) {
-    writeResult({
-      kind: "derived_memory_config",
-      ...mode,
-      databaseRetained: learnedMemoryDatabaseRetained(engineOptions.stateDir),
-      reloadRequired: false,
-    });
-    return;
-  }
-  const engine = new MoonciteEngine(engineOptions);
-  let store: LearnedMemoryStore | null = null;
-  try {
-    try {
-      store = new LearnedMemoryStore(engine, { stateDir: engineOptions.stateDir });
-      writeResult({ ...mode, ...store.status(), reloadRequired: false });
-    } catch (error) {
-      writeResult({ ...mode, ...unavailableLearnedMemoryStatus(error), reloadRequired: false });
-    }
-  } finally {
-    try {
-      store?.close();
-    } finally {
-      engine.close();
-    }
-  }
-}
 
 async function runStatusCommand({ engineOptions, registrations }: CliContext): Promise<void> {
   const engine = new MoonciteEngine(engineOptions);
-  let store: LearnedMemoryStore | null = null;
   try {
-    const status: Record<string, unknown> = { ...engine.status(), registrations: await registrations.diagnose() };
-    try {
-      if (loadLearnedMemoryMode(resolveLearnedMemoryConfigPath()).enabled) {
-        try {
-          store = new LearnedMemoryStore(engine, { stateDir: engineOptions.stateDir });
-          status.learnedMemory = store.status();
-        } catch (error) {
-          status.learnedMemory = unavailableLearnedMemoryStatus(error);
-        }
-      }
-    } catch {
-      // Optional learned-memory configuration failures do not alter evidence status.
-    }
-    writeResult(status);
+    writeResult({ ...engine.status(), registrations: await registrations.diagnose() });
   } finally {
-    try {
-      store?.close();
-    } finally {
-      engine.close();
-    }
+    engine.close();
   }
 }
 
@@ -226,7 +153,6 @@ async function runRebuildCommand({ engineOptions }: CliContext): Promise<void> {
 
 const COMMAND_HANDLERS: Readonly<Partial<Record<string, CliCommandHandler>>> = {
   serve: runServeCommand,
-  memory: runMemoryCommand,
   install: async ({ installation }) => writeResult(await installMooncite(installation)),
   disable: async ({ installation }) => writeResult(await disableMooncite(installation)),
   uninstall: async ({ installation }) => writeResult(await uninstallMooncite(installation)),
@@ -258,7 +184,18 @@ async function main(): Promise<void> {
   await handler({ args, engineOptions, installation, registrations });
 }
 
-main().catch((error: unknown) => {
-  process.stderr.write(`mooncite: ${error instanceof Error ? error.message : String(error)}\n`);
-  process.exitCode = 1;
-});
+export function isDirectCliExecution(entryPath = process.argv[1], moduleUrl = import.meta.url): boolean {
+  if (!entryPath) return false;
+  try {
+    return realpathSync(fileURLToPath(moduleUrl)) === realpathSync(entryPath);
+  } catch {
+    return false;
+  }
+}
+
+if (isDirectCliExecution()) {
+  main().catch((error: unknown) => {
+    process.stderr.write(`mooncite: ${error instanceof Error ? error.message : String(error)}\n`);
+    process.exitCode = 1;
+  });
+}
