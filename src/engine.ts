@@ -2417,7 +2417,7 @@ function relevanceRecallOrder(left: RankedRecallRow, right: RankedRecallRow): nu
     || (right.semanticSimilarity ?? -1) - (left.semanticSimilarity ?? -1);
 }
 
-function pendingSemanticRowIsEmbeddable(row: {
+function pendingSemanticRowIsEmbeddable<T extends {
   semantic_eligible: number;
   text: string | null;
   project: string | null;
@@ -2427,7 +2427,16 @@ function pendingSemanticRowIsEmbeddable(row: {
   record_digest: string | null;
   source_origin: SourceOrigin | null;
   source_root_digest: string | null;
-}): boolean {
+}>(row: T): row is T & {
+  text: string;
+  project: string;
+  session_id: string;
+  role: EvidenceRole;
+  evidence_id: string;
+  record_digest: string;
+  source_origin: SourceOrigin;
+  source_root_digest: string;
+} {
   return row.semantic_eligible === 1
     && row.text !== null
     && row.project !== null
